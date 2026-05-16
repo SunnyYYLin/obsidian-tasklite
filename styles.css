@@ -1,8 +1,29 @@
-/*
+.taskslite-task {
+	--taskslite-muted: var(--text-muted);
+}
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+.taskslite-task[data-task-status-type="DONE"] .taskslite-description,
+.taskslite-task[data-task-status-type="CANCELLED"] .taskslite-description {
+	color: var(--text-muted);
+	text-decoration: line-through;
+}
 
-If your plugin does not need CSS, delete this file.
+.taskslite-task[data-task-status-type="IN_PROGRESS"] .taskslite-description {
+	color: var(--text-accent);
+}
 
-*/
+.taskslite-metadata {
+	color: var(--taskslite-muted);
+	font-size: 0.9em;
+}
+
+.taskslite-suggest-item {
+	display: flex;
+	gap: 0.5rem;
+	align-items: center;
+}
+
+.taskslite-suggest-token {
+	min-width: 2.5rem;
+	color: var(--text-accent);
+}

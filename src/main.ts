@@ -1,99 +1,78 @@
-import {App, Editor, MarkdownView, Modal, Notice, Plugin} from 'obsidian';
-import {DEFAULT_SETTINGS, MyPluginSettings, SampleSettingTab} from "./settings";
+import { MarkdownView, Notice, Plugin, type Editor } from "obsidian";
+import { StatusRegistry } from "./model/status";
+import { toggleEditorTask } from "./editor/apply";
+import { InlineTaskRenderer } from "./rendering/inlineRenderer";
+import { createLivePreviewExtension } from "./rendering/livePreview";
+import { TasksLiteEmojiSuggest } from "./suggest/emojiSuggest";
+import {
+	DEFAULT_SETTINGS,
+	TasksLiteSettingTab,
+	importTasksStatusSettings,
+	mergeSettings,
+	type TasksLiteSettings,
+} from "./settings";
 
-// Remember to rename these classes and interfaces!
+export default class TasksLitePlugin extends Plugin {
+	settings: TasksLiteSettings = DEFAULT_SETTINGS;
+	readonly statusRegistry = new StatusRegistry(DEFAULT_SETTINGS.statusSettings);
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
-
-	async onload() {
+	async onload(): Promise<void> {
 		await this.loadSettings();
+		this.statusRegistry.set(this.settings.statusSettings);
 
-		// This creates an icon in the left ribbon.
-		this.addRibbonIcon('dice', 'Sample', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status bar text');
-
-		// This adds a simple command that can be triggered anywhere
 		this.addCommand({
-			id: 'open-modal-simple',
-			name: 'Open modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
+			id: "toggle-taskslite-task",
+			name: "Toggle TasksLite task / 切换 TasksLite 任务",
+			editorCheckCallback: (checking: boolean, editor: Editor, view) => {
+				if (!(view instanceof MarkdownView)) return false;
+				if (checking) return true;
+				const path = view.file?.path;
+				if (!path) return false;
+				return toggleEditorTask({
+					editor,
+					app: this.app,
+					path,
+					registry: this.statusRegistry,
+					settings: this.settings,
+				});
+			},
 		});
-		// This adds an editor command that can perform some operation on the current editor instance
+
 		this.addCommand({
-			id: 'replace-selected',
-			name: 'Replace selected content',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				editor.replaceSelection('Sample editor command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-modal-complex',
-			name: 'Open modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-				return false;
-			}
+			id: "import-tasks-status-settings",
+			name: "Import status settings from Tasks / 从 Tasks 导入状态",
+			callback: async () => {
+				const imported = await this.importTasksStatusSettings();
+				new Notice(imported ? "TasksLite: imported Tasks status settings." : "TasksLite: no Tasks status settings found.");
+			},
 		});
 
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			new Notice("Click");
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-
+		new InlineTaskRenderer(this, this.app, this.statusRegistry, () => this.settings).register();
+		this.registerEditorExtension(createLivePreviewExtension(this.app, this.statusRegistry, () => this.settings));
+		this.registerEditorSuggest(new TasksLiteEmojiSuggest(this));
+		this.addSettingTab(new TasksLiteSettingTab(this.app, this));
 	}
 
-	onunload() {
+	async loadSettings(): Promise<void> {
+		this.settings = mergeSettings((await this.loadData()) as Partial<TasksLiteSettings> | null);
 	}
 
-	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<MyPluginSettings>);
-	}
-
-	async saveSettings() {
+	async saveSettings(): Promise<void> {
+		this.statusRegistry.set(this.settings.statusSettings);
 		await this.saveData(this.settings);
 	}
-}
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
-
-	onOpen() {
-		let {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
+	async importTasksStatusSettings(): Promise<boolean> {
+		try {
+			const imported = await importTasksStatusSettings(this.app);
+			if (!imported) return false;
+			this.settings.statusSettings = imported;
+			this.statusRegistry.set(imported);
+			await this.saveSettings();
+			return true;
+		} catch (error) {
+			console.warn("TasksLite failed to import Tasks settings", error);
+			return false;
+		}
 	}
 }
