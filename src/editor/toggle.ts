@@ -97,7 +97,8 @@ function makeNextOccurrence(
 	shift: Parameters<typeof shiftTaskDates>[1],
 ): TaskLine {
 	const metadata = copyTaskMetadata(original.metadata);
-	metadata.dates = shiftTaskDates(metadata.dates, shift);
+	const completedOn = completed.metadata.dates.done ?? todayString();
+	metadata.dates = shiftTaskDates(metadata.dates, shift, completedOn);
 	metadata.dates.done = null;
 	metadata.dates.cancelled = null;
 	metadata.blockLink = null;

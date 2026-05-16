@@ -7,7 +7,6 @@ import type { TasksLiteSettings } from "../src/settings";
 interface FakeMoment {
 	format(format: "YYYY-MM-DD"): string;
 	isValid(): boolean;
-	add(amount: number, unit: "day" | "week" | "month" | "year"): FakeMoment;
 }
 
 type FakeMomentFactory = (value?: string, format?: string, strict?: boolean) => FakeMoment;
@@ -17,13 +16,6 @@ const fakeMoment: FakeMomentFactory = (value?: string) => {
 	return {
 		format: () => formatDate(date),
 		isValid: () => !Number.isNaN(date.getTime()),
-		add: (amount, unit) => {
-			if (unit === "day") date.setUTCDate(date.getUTCDate() + amount);
-			if (unit === "week") date.setUTCDate(date.getUTCDate() + amount * 7);
-			if (unit === "month") date.setUTCMonth(date.getUTCMonth() + amount);
-			if (unit === "year") date.setUTCFullYear(date.getUTCFullYear() + amount);
-			return fakeMoment(formatDate(date));
-		},
 	};
 };
 
@@ -94,6 +86,69 @@ describe("TasksLite core", () => {
 			expect.stringContaining("  - [x] Child done"),
 			"  - plain note",
 		]);
+	});
+
+	test("bases when done recurrence on the completion date", () => {
+		const registry = new StatusRegistry();
+		const result = toggleTaskAtLine({
+			lines: [
+				`- [ ] Parent ${TASK_SYMBOLS.due} 2026-05-10 ${TASK_SYMBOLS.recurrence} every day when done`,
+			],
+			lineNumber: 0,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.replacement[0]).toContain(`${TASK_SYMBOLS.due} 2026-05-17`);
+		expect(result?.replacement[1]).toContain(`${TASK_SYMBOLS.due} 2026-05-10`);
+	});
+
+	test("keeps start and scheduled dates relative to the due date", () => {
+		const registry = new StatusRegistry();
+		const result = toggleTaskAtLine({
+			lines: [
+				`- [ ] Parent ${TASK_SYMBOLS.start} 2026-05-01 ${TASK_SYMBOLS.scheduled} 2026-05-03 ${TASK_SYMBOLS.due} 2026-05-10 ${TASK_SYMBOLS.recurrence} every week`,
+			],
+			lineNumber: 0,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.replacement[0]).toContain(`${TASK_SYMBOLS.start} 2026-05-08`);
+		expect(result?.replacement[0]).toContain(`${TASK_SYMBOLS.scheduled} 2026-05-10`);
+		expect(result?.replacement[0]).toContain(`${TASK_SYMBOLS.due} 2026-05-17`);
+	});
+
+	test("clamps monthly recurrence at the end of shorter months", () => {
+		const registry = new StatusRegistry();
+		const result = toggleTaskAtLine({
+			lines: [
+				`- [ ] Parent ${TASK_SYMBOLS.due} 2026-01-31 ${TASK_SYMBOLS.recurrence} every month`,
+			],
+			lineNumber: 0,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.replacement[0]).toContain(`${TASK_SYMBOLS.due} 2026-02-28`);
+	});
+
+	test("clamps yearly recurrence on leap day", () => {
+		const registry = new StatusRegistry();
+		const result = toggleTaskAtLine({
+			lines: [
+				`- [ ] Parent ${TASK_SYMBOLS.due} 2024-02-29 ${TASK_SYMBOLS.recurrence} every 2 years`,
+			],
+			lineNumber: 0,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.replacement[0]).toContain(`${TASK_SYMBOLS.due} 2026-02-28`);
 	});
 });
 
