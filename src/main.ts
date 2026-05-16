@@ -21,8 +21,8 @@ export default class TasksLitePlugin extends Plugin {
 		this.statusRegistry.set(this.settings.statusSettings);
 
 		this.addCommand({
-			id: "toggle-taskslite-task",
-			name: "Toggle TasksLite task / 切换 TasksLite 任务",
+			id: "toggle-task",
+			name: "Toggle task",
 			editorCheckCallback: (checking: boolean, editor: Editor, view) => {
 				if (!(view instanceof MarkdownView)) return false;
 				if (checking) return true;
@@ -40,10 +40,10 @@ export default class TasksLitePlugin extends Plugin {
 
 		this.addCommand({
 			id: "import-tasks-status-settings",
-			name: "Import status settings from Tasks / 从 Tasks 导入状态",
+			name: "Import status settings",
 			callback: async () => {
 				const imported = await this.importTasksStatusSettings();
-				new Notice(imported ? "TasksLite: imported Tasks status settings." : "TasksLite: no Tasks status settings found.");
+				new Notice(imported ? "Imported status settings." : "No status settings found.");
 			},
 		});
 

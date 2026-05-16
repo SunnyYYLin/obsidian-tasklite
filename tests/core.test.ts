@@ -1,11 +1,33 @@
 import { describe, expect, test } from "bun:test";
-import moment from "moment";
 import { parseTaskLine, TASK_SYMBOLS } from "../src/model/format";
 import { StatusRegistry } from "../src/model/status";
 import { toggleTaskAtLine } from "../src/editor/toggle";
 import type { TasksLiteSettings } from "../src/settings";
 
-(globalThis as unknown as {window: {moment: typeof moment}}).window = {moment};
+interface FakeMoment {
+	format(format: "YYYY-MM-DD"): string;
+	isValid(): boolean;
+	add(amount: number, unit: "day" | "week" | "month" | "year"): FakeMoment;
+}
+
+type FakeMomentFactory = (value?: string, format?: string, strict?: boolean) => FakeMoment;
+
+const fakeMoment: FakeMomentFactory = (value?: string) => {
+	const date = value ? parseDate(value) : new Date(Date.UTC(2026, 4, 16));
+	return {
+		format: () => formatDate(date),
+		isValid: () => !Number.isNaN(date.getTime()),
+		add: (amount, unit) => {
+			if (unit === "day") date.setUTCDate(date.getUTCDate() + amount);
+			if (unit === "week") date.setUTCDate(date.getUTCDate() + amount * 7);
+			if (unit === "month") date.setUTCMonth(date.getUTCMonth() + amount);
+			if (unit === "year") date.setUTCFullYear(date.getUTCFullYear() + amount);
+			return fakeMoment(formatDate(date));
+		},
+	};
+};
+
+(globalThis as unknown as {window: {moment: FakeMomentFactory}}).window = {moment: fakeMoment};
 
 const settings: TasksLiteSettings = {
 	setCreatedDate: false,
@@ -45,7 +67,8 @@ describe("TasksLite core", () => {
 			settings,
 		});
 
-		expect(result?.replacement[0]).toContain("- [x] Ship MVP ✅");
+		expect(result?.replacement[0]).toContain("- [x] Ship MVP");
+		expect(result?.replacement[0]).toContain(TASK_SYMBOLS.done);
 	});
 
 	test("creates a recurring parent with copied subtasks", () => {
@@ -53,7 +76,7 @@ describe("TasksLite core", () => {
 		const result = toggleTaskAtLine({
 			lines: [
 				`- [ ] Parent ${TASK_SYMBOLS.due} 2026-05-20 ${TASK_SYMBOLS.recurrence} every week`,
-				"  - [x] Child done ✅ 2026-05-19 🆔 abc",
+				`  - [x] Child done ${TASK_SYMBOLS.done} 2026-05-19 ${TASK_SYMBOLS.id} abc`,
 				"  - plain note",
 				"- [ ] Sibling",
 			],
@@ -73,3 +96,15 @@ describe("TasksLite core", () => {
 		]);
 	});
 });
+
+function parseDate(value: string): Date {
+	const [year, month, day] = value.split("-").map((part) => Number.parseInt(part, 10));
+	return new Date(Date.UTC(year, (month ?? 1) - 1, day ?? 1));
+}
+
+function formatDate(date: Date): string {
+	const year = date.getUTCFullYear().toString().padStart(4, "0");
+	const month = (date.getUTCMonth() + 1).toString().padStart(2, "0");
+	const day = date.getUTCDate().toString().padStart(2, "0");
+	return `${year}-${month}-${day}`;
+}

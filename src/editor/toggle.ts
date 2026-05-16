@@ -1,4 +1,4 @@
-import type { CachedMetadata, Notice } from "obsidian";
+import type { CachedMetadata } from "obsidian";
 import { copyTaskMetadata, serializeTaskBody, serializeTaskLine, type TaskLine } from "../model/format";
 import { parseRecurrenceRule, shiftTaskDates, todayString } from "../model/recurrence";
 import { getSubtreeLineRange, getSubtreeNodes, buildTaskTree, type TaskTreeNode } from "../model/tree";

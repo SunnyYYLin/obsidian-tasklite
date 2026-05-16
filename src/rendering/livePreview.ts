@@ -8,7 +8,6 @@ export function createLivePreviewExtension(app: App, registry: StatusRegistry, g
 	return ViewPlugin.fromClass(
 		class TasksLiteLivePreview implements PluginValue {
 			constructor(private readonly view: EditorView) {
-				this.handleClick = this.handleClick.bind(this);
 				this.view.dom.addEventListener("click", this.handleClick);
 			}
 
@@ -16,7 +15,7 @@ export function createLivePreviewExtension(app: App, registry: StatusRegistry, g
 				this.view.dom.removeEventListener("click", this.handleClick);
 			}
 
-			private handleClick(event: MouseEvent): void {
+			private handleClick = (event: MouseEvent): void => {
 				const target = event.target;
 				if (!(target instanceof HTMLInputElement) || target.type !== "checkbox") return;
 				const position = this.view.posAtDOM(target);
@@ -45,7 +44,7 @@ export function createLivePreviewExtension(app: App, registry: StatusRegistry, g
 						insert: result.replacement.join(this.view.state.lineBreak),
 					},
 				});
-			}
+			};
 		},
 	);
 }
