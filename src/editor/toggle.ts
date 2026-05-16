@@ -3,7 +3,7 @@ import { copyTaskMetadata, serializeTaskBody, serializeTaskLine, type TaskLine }
 import { parseRecurrenceRule, shiftTaskDates, todayString } from "../model/recurrence";
 import { getSubtreeLineRange, getSubtreeNodes, buildTaskTree, type TaskTreeNode } from "../model/tree";
 import type { StatusRegistry } from "../model/status";
-import type { TasksLiteSettings } from "../settings";
+import type { TaskLiteSettings } from "../settings";
 
 export interface ToggleResult {
 	fromLine: number;
@@ -23,7 +23,7 @@ export function toggleTaskAtLine({
 	lineNumber: number;
 	metadata: CachedMetadata | null | undefined;
 	registry: StatusRegistry;
-	settings: TasksLiteSettings;
+	settings: TaskLiteSettings;
 }): ToggleResult | null {
 	const tree = buildTaskTree(lines, metadata, registry);
 	const node = tree.byLine.get(lineNumber);
@@ -49,7 +49,7 @@ export function toggleTaskAtLine({
 			fromLine: range.from,
 			toLine: range.to,
 			replacement: originalSubtreeLines,
-			warning: "TasksLite: unsupported recurrence rule; toggled without creating the next copy.",
+			warning: "TaskLite: unsupported recurrence rule; toggled without creating the next copy.",
 		};
 	}
 
@@ -73,7 +73,7 @@ function togglePlainCheckbox(node: TaskTreeNode, registry: StatusRegistry): Togg
 	return {fromLine: node.lineNumber, toLine: node.lineNumber, replacement: [replacement]};
 }
 
-function toggleTask(task: TaskLine, registry: StatusRegistry, settings: TasksLiteSettings): TaskLine {
+function toggleTask(task: TaskLine, registry: StatusRegistry, settings: TaskLiteSettings): TaskLine {
 	const nextStatus = registry.next(task.status);
 	const metadata = copyTaskMetadata(task.metadata);
 	if (nextStatus.type === "DONE") {
@@ -93,7 +93,7 @@ function makeNextOccurrence(
 	original: TaskLine,
 	completed: TaskLine,
 	registry: StatusRegistry,
-	settings: TasksLiteSettings,
+	settings: TaskLiteSettings,
 	shift: Parameters<typeof shiftTaskDates>[1],
 ): TaskLine {
 	const metadata = copyTaskMetadata(original.metadata);

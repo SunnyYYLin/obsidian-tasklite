@@ -1,8 +1,8 @@
 import { Notice, PluginSettingTab, Setting, type App } from "obsidian";
-import type TasksLitePlugin from "./main";
+import type TaskLitePlugin from "./main";
 import { DEFAULT_STATUS_SETTINGS, normalizeStatusSettings, type StatusSettings } from "./model/status";
 
-export interface TasksLiteSettings {
+export interface TaskLiteSettings {
 	setCreatedDate: boolean;
 	setDoneDate: boolean;
 	setCancelledDate: boolean;
@@ -11,7 +11,7 @@ export interface TasksLiteSettings {
 	statusSettings: StatusSettings;
 }
 
-export const DEFAULT_SETTINGS: TasksLiteSettings = {
+export const DEFAULT_SETTINGS: TaskLiteSettings = {
 	setCreatedDate: false,
 	setDoneDate: true,
 	setCancelledDate: true,
@@ -20,8 +20,8 @@ export const DEFAULT_SETTINGS: TasksLiteSettings = {
 	statusSettings: DEFAULT_STATUS_SETTINGS,
 };
 
-export class TasksLiteSettingTab extends PluginSettingTab {
-	constructor(app: App, private readonly plugin: TasksLitePlugin) {
+export class TaskLiteSettingTab extends PluginSettingTab {
+	constructor(app: App, private readonly plugin: TaskLitePlugin) {
 		super(app, plugin);
 	}
 
@@ -102,7 +102,7 @@ export async function importTasksStatusSettings(app: App): Promise<StatusSetting
 	return normalizeStatusSettings(parsed.statusSettings);
 }
 
-export function mergeSettings(loaded: Partial<TasksLiteSettings> | null | undefined): TasksLiteSettings {
+export function mergeSettings(loaded: Partial<TaskLiteSettings> | null | undefined): TaskLiteSettings {
 	const statusSettings = normalizeStatusSettings(loaded?.statusSettings) ?? DEFAULT_STATUS_SETTINGS;
 	return {
 		...DEFAULT_SETTINGS,

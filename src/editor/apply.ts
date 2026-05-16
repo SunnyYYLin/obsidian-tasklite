@@ -1,7 +1,7 @@
 import type { App, CachedMetadata, Editor } from "obsidian";
 import { Notice, TFile } from "obsidian";
 import type { StatusRegistry } from "../model/status";
-import type { TasksLiteSettings } from "../settings";
+import type { TaskLiteSettings } from "../settings";
 import { toggleTaskAtLine } from "./toggle";
 
 export function toggleEditorTask({
@@ -15,7 +15,7 @@ export function toggleEditorTask({
 	app: App;
 	path: string;
 	registry: StatusRegistry;
-	settings: TasksLiteSettings;
+	settings: TaskLiteSettings;
 }): boolean {
 	const cursor = editor.getCursor();
 	const lines = Array.from({length: editor.lineCount()}, (_value, index) => editor.getLine(index));
@@ -43,7 +43,7 @@ export async function toggleFileTask({
 	path: string;
 	lineNumber: number;
 	registry: StatusRegistry;
-	settings: TasksLiteSettings;
+	settings: TaskLiteSettings;
 }): Promise<boolean> {
 	const file = app.vault.getAbstractFileByPath(path);
 	if (!(file instanceof TFile)) return false;

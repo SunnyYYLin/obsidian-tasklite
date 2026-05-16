@@ -3,17 +3,17 @@ import { StatusRegistry } from "./model/status";
 import { toggleEditorTask } from "./editor/apply";
 import { InlineTaskRenderer } from "./rendering/inlineRenderer";
 import { createLivePreviewExtension } from "./rendering/livePreview";
-import { TasksLiteEmojiSuggest } from "./suggest/emojiSuggest";
+import { TaskLiteEmojiSuggest } from "./suggest/emojiSuggest";
 import {
 	DEFAULT_SETTINGS,
-	TasksLiteSettingTab,
+	TaskLiteSettingTab,
 	importTasksStatusSettings,
 	mergeSettings,
-	type TasksLiteSettings,
+	type TaskLiteSettings,
 } from "./settings";
 
-export default class TasksLitePlugin extends Plugin {
-	settings: TasksLiteSettings = DEFAULT_SETTINGS;
+export default class TaskLitePlugin extends Plugin {
+	settings: TaskLiteSettings = DEFAULT_SETTINGS;
 	readonly statusRegistry = new StatusRegistry(DEFAULT_SETTINGS.statusSettings);
 
 	async onload(): Promise<void> {
@@ -49,12 +49,12 @@ export default class TasksLitePlugin extends Plugin {
 
 		new InlineTaskRenderer(this, this.app, this.statusRegistry, () => this.settings).register();
 		this.registerEditorExtension(createLivePreviewExtension(this.app, this.statusRegistry, () => this.settings));
-		this.registerEditorSuggest(new TasksLiteEmojiSuggest(this));
-		this.addSettingTab(new TasksLiteSettingTab(this.app, this));
+		this.registerEditorSuggest(new TaskLiteEmojiSuggest(this));
+		this.addSettingTab(new TaskLiteSettingTab(this.app, this));
 	}
 
 	async loadSettings(): Promise<void> {
-		this.settings = mergeSettings((await this.loadData()) as Partial<TasksLiteSettings> | null);
+		this.settings = mergeSettings((await this.loadData()) as Partial<TaskLiteSettings> | null);
 	}
 
 	async saveSettings(): Promise<void> {
@@ -71,7 +71,7 @@ export default class TasksLitePlugin extends Plugin {
 			await this.saveSettings();
 			return true;
 		} catch (error) {
-			console.warn("TasksLite failed to import Tasks settings", error);
+			console.warn("TaskLite failed to import Tasks settings", error);
 			return false;
 		}
 	}

@@ -2,7 +2,7 @@ import { MarkdownRenderChild, MarkdownRenderer, type App, type MarkdownPostProce
 import type { StatusRegistry } from "../model/status";
 import { buildTaskTree, type TaskTreeNode } from "../model/tree";
 import { serializeTaskBody } from "../model/format";
-import type { TasksLiteSettings } from "../settings";
+import type { TaskLiteSettings } from "../settings";
 import { toggleFileTask } from "../editor/apply";
 
 export class InlineTaskRenderer {
@@ -10,7 +10,7 @@ export class InlineTaskRenderer {
 		private readonly plugin: Plugin,
 		private readonly app: App,
 		private readonly registry: StatusRegistry,
-		private readonly getSettings: () => TasksLiteSettings,
+		private readonly getSettings: () => TaskLiteSettings,
 	) {}
 
 	register(): void {

@@ -1,5 +1,5 @@
 import { EditorSuggest, type Editor, type EditorPosition, type EditorSuggestContext, type EditorSuggestTriggerInfo, type TFile } from "obsidian";
-import type TasksLitePlugin from "../main";
+import type TaskLitePlugin from "../main";
 import { taskLineRegex, TASK_SYMBOLS } from "../model/format";
 
 interface EmojiSuggestion {
@@ -22,8 +22,8 @@ const SUGGESTIONS: EmojiSuggestion[] = [
 	{label: "Depends on / 依赖", insert: `${TASK_SYMBOLS.dependsOn} `},
 ];
 
-export class TasksLiteEmojiSuggest extends EditorSuggest<EmojiSuggestion> {
-	constructor(private readonly plugin: TasksLitePlugin) {
+export class TaskLiteEmojiSuggest extends EditorSuggest<EmojiSuggestion> {
+	constructor(private readonly plugin: TaskLitePlugin) {
 		super(plugin.app);
 	}
 

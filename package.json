@@ -1,6 +1,6 @@
 {
-	"name": "obsidian-taskslite",
-	"version": "0.1.1",
+	"name": "obsidian-tasklite",
+	"version": "0.1.2",
 	"description": "A lightweight tree-aware task manager for Obsidian.",
 	"main": "main.js",
 	"type": "module",

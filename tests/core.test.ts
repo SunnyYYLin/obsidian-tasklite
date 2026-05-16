@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { parseTaskLine, TASK_SYMBOLS } from "../src/model/format";
 import { StatusRegistry } from "../src/model/status";
 import { toggleTaskAtLine } from "../src/editor/toggle";
-import type { TasksLiteSettings } from "../src/settings";
+import type { TaskLiteSettings } from "../src/settings";
 
 interface FakeMoment {
 	format(format: "YYYY-MM-DD"): string;
@@ -21,7 +21,7 @@ const fakeMoment: FakeMomentFactory = (value?: string) => {
 
 (globalThis as unknown as {window: {moment: FakeMomentFactory}}).window = {moment: fakeMoment};
 
-const settings: TasksLiteSettings = {
+const settings: TaskLiteSettings = {
 	setCreatedDate: false,
 	setDoneDate: true,
 	setCancelledDate: true,
@@ -39,7 +39,7 @@ const settings: TasksLiteSettings = {
 	},
 };
 
-describe("TasksLite core", () => {
+describe("TaskLite core", () => {
 	test("parses Tasks-compatible emoji metadata", () => {
 		const registry = new StatusRegistry();
 		const task = parseTaskLine(`- [ ] Ship MVP ${TASK_SYMBOLS.due} 2026-05-20 ${TASK_SYMBOLS.recurrence} every week`, registry.get(" "));

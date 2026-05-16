@@ -1,6 +1,6 @@
-# TasksLite
+# TaskLite
 
-TasksLite is a lightweight, tree-aware Obsidian task plugin inspired by Tasks.
+TaskLite is a lightweight, tree-aware Obsidian task plugin inspired by Tasks.
 
 It focuses on editing and rendering regular Markdown task lines, not on the Tasks query language.
 
@@ -11,7 +11,7 @@ It focuses on editing and rendering regular Markdown task lines, not on the Task
 - Recurring parent tasks can copy their descendant subtasks into the next occurrence.
 - Automatic done and cancelled dates.
 - Reading View rendering with stable `taskslite-*` classes and `data-task-*` attributes.
-- Live Preview checkbox interception for TasksLite toggling.
+- Live Preview checkbox interception for TaskLite toggling.
 - `@` emoji input suggestions on task lines.
 - Best-effort import of custom status settings from the Tasks plugin.
 
@@ -73,4 +73,4 @@ Notes:
 
 ## Scope
 
-TasksLite v1 intentionally does not implement Tasks query code blocks, modal editing, full recurrence grammar, or dependency semantics. Copied recurring subtasks clear ids, dependencies, block links, done dates, and cancelled dates to avoid unsafe duplicate references.
+TaskLite v1 intentionally does not implement Tasks query code blocks, modal editing, full recurrence grammar, or dependency semantics. Copied recurring subtasks clear ids, dependencies, block links, done dates, and cancelled dates to avoid unsafe duplicate references.

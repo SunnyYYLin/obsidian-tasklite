@@ -1,4 +1,4 @@
-name: Release plugin
+name: Release TaskLite
 
 on:
   push:

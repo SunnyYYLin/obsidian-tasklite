@@ -1,12 +1,12 @@
 import { ViewPlugin, type EditorView, type PluginValue } from "@codemirror/view";
 import type { App } from "obsidian";
 import type { StatusRegistry } from "../model/status";
-import type { TasksLiteSettings } from "../settings";
+import type { TaskLiteSettings } from "../settings";
 import { toggleTaskAtLine } from "../editor/toggle";
 
-export function createLivePreviewExtension(app: App, registry: StatusRegistry, getSettings: () => TasksLiteSettings) {
+export function createLivePreviewExtension(app: App, registry: StatusRegistry, getSettings: () => TaskLiteSettings) {
 	return ViewPlugin.fromClass(
-		class TasksLiteLivePreview implements PluginValue {
+		class TaskLiteLivePreview implements PluginValue {
 			constructor(private readonly view: EditorView) {
 				this.view.dom.addEventListener("click", this.handleClick);
 			}
