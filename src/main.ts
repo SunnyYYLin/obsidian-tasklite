@@ -1,4 +1,5 @@
 import { MarkdownView, Notice, Plugin, type Editor } from "obsidian";
+import { registerTasksApiShim } from "./compat/tasksApi";
 import { StatusRegistry } from "./model/status";
 import { toggleEditorTask } from "./editor/apply";
 import { InlineTaskRenderer } from "./rendering/inlineRenderer";
@@ -15,10 +16,12 @@ import {
 export default class TaskLitePlugin extends Plugin {
 	settings: TaskLiteSettings = DEFAULT_SETTINGS;
 	readonly statusRegistry = new StatusRegistry(DEFAULT_SETTINGS.statusSettings);
+	private unregisterTasksApiShim: (() => void) | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
 		this.statusRegistry.set(this.settings.statusSettings);
+		this.unregisterTasksApiShim = registerTasksApiShim(this);
 
 		this.addCommand({
 			id: "toggle-task",
@@ -51,6 +54,11 @@ export default class TaskLitePlugin extends Plugin {
 		this.registerEditorExtension(createLivePreviewExtension(this.app, this.statusRegistry, () => this.settings));
 		this.registerEditorSuggest(new TaskLiteEmojiSuggest(this));
 		this.addSettingTab(new TaskLiteSettingTab(this.app, this));
+	}
+
+	onunload(): void {
+		this.unregisterTasksApiShim?.();
+		this.unregisterTasksApiShim = null;
 	}
 
 	async loadSettings(): Promise<void> {

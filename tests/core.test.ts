@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { parseTaskLine, TASK_SYMBOLS } from "../src/model/format";
 import { StatusRegistry } from "../src/model/status";
 import { toggleTaskAtLine } from "../src/editor/toggle";
+import { createTasksApiV1 } from "../src/compat/tasksApi";
+import type TaskLitePlugin from "../src/main";
 import type { TaskLiteSettings } from "../src/settings";
 
 interface FakeMoment {
@@ -149,6 +151,23 @@ describe("TaskLite core", () => {
 		});
 
 		expect(result?.replacement[0]).toContain(`${TASK_SYMBOLS.due} 2026-02-28`);
+	});
+
+	test("exposes recurring toggles through the Tasks API shim", () => {
+		const api = createTasksApiV1({
+			settings,
+			statusRegistry: new StatusRegistry(),
+		} as TaskLitePlugin);
+
+		const result = api.executeToggleTaskDoneCommand(
+			`- [ ] Parent ${TASK_SYMBOLS.due} 2026-05-20 ${TASK_SYMBOLS.recurrence} every week`,
+			"tasks.md",
+		);
+
+		expect(result.split("\n")).toEqual([
+			`- [ ] Parent ${TASK_SYMBOLS.due} 2026-05-27 ${TASK_SYMBOLS.recurrence} every week`,
+			expect.stringContaining(`- [x] Parent ${TASK_SYMBOLS.due} 2026-05-20`),
+		]);
 	});
 });
 

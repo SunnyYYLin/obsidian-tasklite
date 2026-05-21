@@ -14,6 +14,7 @@ It focuses on editing and rendering regular Markdown task lines, not on the Task
 - Live Preview checkbox interception for TaskLite toggling.
 - `@` emoji input suggestions on task lines.
 - Best-effort import of custom status settings from the Tasks plugin.
+- Tasks API v1 toggle compatibility for plugins that complete recurring tasks through Tasks.
 
 ## Usage
 
