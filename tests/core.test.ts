@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { parseTaskLine, TASK_SYMBOLS } from "../src/model/format";
 import { StatusRegistry } from "../src/model/status";
+import { fieldsFromTaskLine, taskLineFromFields } from "../src/model/taskLineFields";
 import { toggleTaskAtLine } from "../src/editor/toggle";
 import { createTasksApiV1 } from "../src/compat/tasksApi";
 import type TaskLitePlugin from "../src/main";
@@ -168,6 +169,40 @@ describe("TaskLite core", () => {
 			`- [ ] Parent ${TASK_SYMBOLS.due} 2026-05-27 ${TASK_SYMBOLS.recurrence} every week`,
 			expect.stringContaining(`- [x] Parent ${TASK_SYMBOLS.due} 2026-05-20`),
 		]);
+	});
+
+	test("opens create and edit task modals through the Tasks API shim", async () => {
+		const calls: Array<{title: string; initialLine: string}> = [];
+		const api = createTasksApiV1(
+			{
+				app: {},
+				settings,
+				statusRegistry: new StatusRegistry(),
+			} as TaskLitePlugin,
+			(options) => {
+				calls.push({title: options.title, initialLine: options.initialLine});
+				return Promise.resolve(`${options.title}: ${options.initialLine}`);
+			},
+		);
+
+		await expect(api.createTaskLineModal()).resolves.toBe("Create task: ");
+		await expect(api.editTaskLineModal("- [ ] Existing")).resolves.toBe("Edit task: - [ ] Existing");
+		expect(calls).toEqual([
+			{title: "Create task", initialLine: ""},
+			{title: "Edit task", initialLine: "- [ ] Existing"},
+		]);
+	});
+
+	test("round-trips modal fields through TaskLite Markdown", () => {
+		const registry = new StatusRegistry();
+		const fields = fieldsFromTaskLine(`- [ ] Ship ${TASK_SYMBOLS.due} 2026-05-20 ${TASK_SYMBOLS.recurrence} every week`, registry);
+		fields.statusSymbol = "x";
+		fields.done = "2026-05-16";
+		fields.id = "abc";
+
+		expect(taskLineFromFields(fields, registry)).toBe(
+			`- [x] Ship ${TASK_SYMBOLS.due} 2026-05-20 ${TASK_SYMBOLS.done} 2026-05-16 ${TASK_SYMBOLS.recurrence} every week ${TASK_SYMBOLS.id} abc`,
+		);
 	});
 });
 

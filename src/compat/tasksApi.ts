@@ -21,11 +21,35 @@ interface TasksPluginLike {
 	apiV1?: TasksPluginApiV1;
 }
 
-export function createTasksApiV1(plugin: TaskLitePlugin): TasksPluginApiV1 {
+interface OpenTaskLineModalOptions {
+	app: App;
+	title: string;
+	initialLine: string;
+	registry: TaskLitePlugin["statusRegistry"];
+	settings: TaskLitePlugin["settings"];
+}
+
+type OpenTaskLineModal = (options: OpenTaskLineModalOptions) => Promise<string>;
+
+export function createTasksApiV1(plugin: TaskLitePlugin, openModal: OpenTaskLineModal = defaultOpenTaskLineModal): TasksPluginApiV1 {
 	return {
 		isTasksPluginEnabled: () => true,
-		createTaskLineModal: () => Promise.resolve(""),
-		editTaskLineModal: (taskLine: string) => Promise.resolve(taskLine),
+		createTaskLineModal: () =>
+			openModal({
+				app: plugin.app,
+				title: "Create task",
+				initialLine: "",
+				registry: plugin.statusRegistry,
+				settings: plugin.settings,
+			}),
+		editTaskLineModal: (taskLine: string) =>
+			openModal({
+				app: plugin.app,
+				title: "Edit task",
+				initialLine: taskLine,
+				registry: plugin.statusRegistry,
+				settings: plugin.settings,
+			}),
 		executeToggleTaskDoneCommand: (line: string) => {
 			const result = toggleTaskAtLine({
 				lines: [line],
@@ -37,6 +61,11 @@ export function createTasksApiV1(plugin: TaskLitePlugin): TasksPluginApiV1 {
 			return result?.replacement.join("\n") ?? line;
 		},
 	};
+}
+
+async function defaultOpenTaskLineModal(options: OpenTaskLineModalOptions): Promise<string> {
+	const {openTaskLineModal} = await import("../ui/taskLineModal");
+	return openTaskLineModal(options);
 }
 
 export function registerTasksApiShim(plugin: TaskLitePlugin): () => void {

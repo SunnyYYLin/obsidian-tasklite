@@ -14,11 +14,13 @@ It focuses on editing and rendering regular Markdown task lines, not on the Task
 - Live Preview checkbox interception for TaskLite toggling.
 - `@` emoji input suggestions on task lines.
 - Best-effort import of custom status settings from the Tasks plugin.
-- Tasks API v1 toggle compatibility for plugins that complete recurring tasks through Tasks.
+- Tasks API v1 compatibility for toggling recurring tasks and opening a lightweight task editor.
 
 ## Usage
 
 Run the `Toggle task` command on a task line, or click a task checkbox in Reading View or Live Preview.
+
+Run `Create task`, `Edit task`, or `Create or edit task` from the command palette to open the lightweight TaskLite task editor.
 
 For emoji suggestions, type `@` on a Markdown task line and select a field.
 

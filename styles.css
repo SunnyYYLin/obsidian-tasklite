@@ -27,3 +27,18 @@
 	min-width: 2.5rem;
 	color: var(--text-accent);
 }
+
+.taskslite-modal .setting-item-control {
+	align-items: stretch;
+}
+
+.taskslite-modal input,
+.taskslite-modal textarea,
+.taskslite-modal select {
+	width: min(28rem, 100%);
+}
+
+.taskslite-modal-description {
+	min-height: 5.5rem;
+	resize: vertical;
+}
