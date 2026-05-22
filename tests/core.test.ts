@@ -3,6 +3,7 @@ import { parseTaskLine, TASK_SYMBOLS } from "../src/model/format";
 import { StatusRegistry } from "../src/model/status";
 import { fieldsFromTaskLine, taskLineFromFields } from "../src/model/taskLineFields";
 import { toggleTaskAtLine } from "../src/editor/toggle";
+import { reconcileExternalTaskCompletion } from "../src/editor/externalReconcileCore";
 import { createTasksApiV1 } from "../src/compat/tasksApi";
 import type TaskLitePlugin from "../src/main";
 import type { TaskLiteSettings } from "../src/settings";
@@ -171,6 +172,87 @@ describe("TaskLite core", () => {
 		]);
 	});
 
+	test("normalizes done dates for single-line Tasks API toggles", () => {
+		const api = createTasksApiV1({
+			settings,
+			statusRegistry: new StatusRegistry(),
+		} as TaskLitePlugin);
+
+		const result = api.executeToggleTaskDoneCommand("- [x] Ship", "tasks.md");
+
+		expect(result).toBe(`- [x] Ship ${TASK_SYMBOLS.done} 2026-05-16`);
+	});
+
+	test("copies subtasks for Tasks API toggles when the source file is open", () => {
+		const view = {
+			file: {path: "tasks.md"},
+			editor: {
+				getValue: () =>
+					[
+						`- [ ] Parent ${TASK_SYMBOLS.due} 2026-05-20 ${TASK_SYMBOLS.recurrence} every week`,
+						`  - [x] Child done ${TASK_SYMBOLS.done} 2026-05-19 ${TASK_SYMBOLS.id} abc`,
+						"  - plain note",
+					].join("\n"),
+			},
+		};
+		const api = createTasksApiV1({
+			app: {
+				workspace: {
+					activeEditor: view,
+					getLeavesOfType: () => [],
+				},
+			},
+			settings,
+			statusRegistry: new StatusRegistry(),
+		} as TaskLitePlugin);
+
+		const result = api.executeToggleTaskDoneCommand(
+			`- [ ] Parent ${TASK_SYMBOLS.due} 2026-05-20 ${TASK_SYMBOLS.recurrence} every week`,
+			"tasks.md",
+		);
+
+		expect(result.split("\n")).toEqual([
+			`- [ ] Parent ${TASK_SYMBOLS.due} 2026-05-27 ${TASK_SYMBOLS.recurrence} every week`,
+			"  - [ ] Child done",
+			"  - plain note",
+			expect.stringContaining(`- [x] Parent ${TASK_SYMBOLS.due} 2026-05-20`),
+			expect.stringContaining("  - [x] Child done"),
+			"  - plain note",
+		]);
+	});
+
+	test("uses open file context when Tasks API passes an already-checked child line", () => {
+		const view = {
+			file: {path: "tasks.md"},
+			editor: {
+				getValue: () =>
+					[
+						"- [ ] Parent",
+						"  - [x] First child",
+						"  - [ ] Second child",
+					].join("\n"),
+			},
+		};
+		const api = createTasksApiV1({
+			app: {
+				workspace: {
+					activeEditor: view,
+					getLeavesOfType: () => [],
+				},
+			},
+			settings,
+			statusRegistry: new StatusRegistry(),
+		} as TaskLitePlugin);
+
+		const result = api.executeToggleTaskDoneCommand("- [x] Second child", "tasks.md");
+
+		expect(result.split("\n")).toEqual([
+			expect.stringContaining(`- [x] Parent ${TASK_SYMBOLS.done} 2026-05-16`),
+			"  - [x] First child",
+			expect.stringContaining(`  - [x] Second child ${TASK_SYMBOLS.done} 2026-05-16`),
+		]);
+	});
+
 	test("opens create and edit task modals through the Tasks API shim", async () => {
 		const calls: Array<{title: string; initialLine: string}> = [];
 		const api = createTasksApiV1(
@@ -203,6 +285,110 @@ describe("TaskLite core", () => {
 		expect(taskLineFromFields(fields, registry)).toBe(
 			`- [x] Ship ${TASK_SYMBOLS.due} 2026-05-20 ${TASK_SYMBOLS.done} 2026-05-16 ${TASK_SYMBOLS.recurrence} every week ${TASK_SYMBOLS.id} abc`,
 		);
+	});
+
+	test("removes done date when editing a task to cancelled", () => {
+		const registry = new StatusRegistry();
+		const fields = fieldsFromTaskLine(`- [x] Ship ${TASK_SYMBOLS.done} 2026-05-16`, registry);
+		fields.statusSymbol = "-";
+		fields.cancelled = "2026-05-17";
+
+		expect(taskLineFromFields(fields, registry)).toBe(`- [-] Ship ${TASK_SYMBOLS.cancelled} 2026-05-17`);
+	});
+
+	test("auto-completes parent when all task children are done", () => {
+		const registry = new StatusRegistry();
+		const result = toggleTaskAtLine({
+			lines: [
+				"- [ ] Parent",
+				"  - [x] First child",
+				"  - [ ] Second child",
+			],
+			lineNumber: 2,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.fromLine).toBe(0);
+		expect(result?.toLine).toBe(2);
+		expect(result?.replacement).toEqual([
+			expect.stringContaining(`- [x] Parent ${TASK_SYMBOLS.done} 2026-05-16`),
+			"  - [x] First child",
+			expect.stringContaining(`  - [x] Second child ${TASK_SYMBOLS.done} 2026-05-16`),
+		]);
+	});
+
+	test("creates next occurrence when a recurring ancestor is auto-completed", () => {
+		const registry = new StatusRegistry();
+		const result = toggleTaskAtLine({
+			lines: [
+				`- [ ] Daily workout ${TASK_SYMBOLS.due} 2026-05-22 ${TASK_SYMBOLS.recurrence} every day`,
+				"  - [x] Cardio",
+				"  - [ ] Curl",
+				"    - [x] Curl G.1",
+				"    - [x] Curl G.2",
+				"    - [ ] Curl G.3",
+			],
+			lineNumber: 5,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.fromLine).toBe(0);
+		expect(result?.toLine).toBe(5);
+		expect(result?.replacement).toEqual([
+			`- [ ] Daily workout ${TASK_SYMBOLS.due} 2026-05-23 ${TASK_SYMBOLS.recurrence} every day`,
+			"  - [ ] Cardio",
+			"  - [ ] Curl",
+			"    - [ ] Curl G.1",
+			"    - [ ] Curl G.2",
+			"    - [ ] Curl G.3",
+			expect.stringContaining(`- [x] Daily workout ${TASK_SYMBOLS.due} 2026-05-22 ${TASK_SYMBOLS.done} 2026-05-16`),
+			"  - [x] Cardio",
+			expect.stringContaining(`  - [x] Curl ${TASK_SYMBOLS.done} 2026-05-16`),
+			"    - [x] Curl G.1",
+			"    - [x] Curl G.2",
+			expect.stringContaining(`    - [x] Curl G.3 ${TASK_SYMBOLS.done} 2026-05-16`),
+		]);
+	});
+
+	test("reconciles external checkbox-only completion with parent and recurrence rules", () => {
+		const registry = new StatusRegistry();
+		const before = [
+			`- [ ] Daily workout ${TASK_SYMBOLS.due} 2026-05-22 ${TASK_SYMBOLS.recurrence} every day`,
+			"  - [x] Cardio",
+			"  - [ ] Curl",
+			"    - [x] Curl G.1",
+			"    - [x] Curl G.2",
+			"    - [ ] Curl G.3",
+		];
+		const after = [
+			`- [ ] Daily workout ${TASK_SYMBOLS.due} 2026-05-22 ${TASK_SYMBOLS.recurrence} every day`,
+			"  - [x] Cardio",
+			"  - [ ] Curl",
+			"    - [x] Curl G.1",
+			"    - [x] Curl G.2",
+			"    - [x] Curl G.3",
+		];
+
+		const result = reconcileExternalTaskCompletion({before, after, registry, settings});
+
+		expect(result?.split("\n")).toEqual([
+			`- [ ] Daily workout ${TASK_SYMBOLS.due} 2026-05-23 ${TASK_SYMBOLS.recurrence} every day`,
+			"  - [ ] Cardio",
+			"  - [ ] Curl",
+			"    - [ ] Curl G.1",
+			"    - [ ] Curl G.2",
+			"    - [ ] Curl G.3",
+			expect.stringContaining(`- [x] Daily workout ${TASK_SYMBOLS.due} 2026-05-22 ${TASK_SYMBOLS.done} 2026-05-16`),
+			"  - [x] Cardio",
+			expect.stringContaining(`  - [x] Curl ${TASK_SYMBOLS.done} 2026-05-16`),
+			"    - [x] Curl G.1",
+			"    - [x] Curl G.2",
+			expect.stringContaining(`    - [x] Curl G.3 ${TASK_SYMBOLS.done} 2026-05-16`),
+		]);
 	});
 });
 

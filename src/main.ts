@@ -2,6 +2,7 @@ import { MarkdownView, Notice, Plugin, type Editor } from "obsidian";
 import { registerTasksApiShim } from "./compat/tasksApi";
 import { StatusRegistry } from "./model/status";
 import { toggleEditorTask } from "./editor/apply";
+import { ExternalTaskReconciler } from "./editor/externalReconcile";
 import { InlineTaskRenderer } from "./rendering/inlineRenderer";
 import { createLivePreviewExtension } from "./rendering/livePreview";
 import { TaskLiteEmojiSuggest } from "./suggest/emojiSuggest";
@@ -79,6 +80,7 @@ export default class TaskLitePlugin extends Plugin {
 		});
 
 		new InlineTaskRenderer(this, this.app, this.statusRegistry, () => this.settings).register();
+		new ExternalTaskReconciler(this, this.app, this.statusRegistry, () => this.settings).register();
 		this.registerEditorExtension(createLivePreviewExtension(this.app, this.statusRegistry, () => this.settings));
 		this.registerEditorSuggest(new TaskLiteEmojiSuggest(this));
 		this.addSettingTab(new TaskLiteSettingTab(this.app, this));

@@ -2,6 +2,7 @@ import type { CachedMetadata } from "obsidian";
 import { copyTaskMetadata, serializeTaskBody, serializeTaskLine, type TaskLine } from "../model/format";
 import { parseRecurrenceRule, shiftTaskDates, todayString } from "../model/recurrence";
 import { getSubtreeLineRange, getSubtreeNodes, buildTaskTree, type TaskTreeNode } from "../model/tree";
+import { applyTaskStatus, toggleTaskStatus } from "../model/taskState";
 import type { StatusRegistry } from "../model/status";
 import type { TaskLiteSettings } from "../settings";
 
@@ -33,35 +34,48 @@ export function toggleTaskAtLine({
 		return togglePlainCheckbox(node, registry);
 	}
 
-	const toggledTask = toggleTask(node.task, registry, settings);
+	const toggledTask = toggleTaskStatus(node.task, registry, settings);
 	const subtree = getSubtreeNodes(node);
 	const range = getSubtreeLineRange(node);
-	const originalSubtreeLines = subtree.map((item) => (item.lineNumber === node.lineNumber ? serializeTaskLine(toggledTask) : item.original));
+	const changedTasks = new Map<number, TaskLine>([[node.lineNumber, toggledTask]]);
+	const replacementByLine = new Map<number, string>([[node.lineNumber, serializeTaskLine(toggledTask)]]);
+	completeParentTasks(node, changedTasks, replacementByLine, registry, settings);
+	const recurringNode = findRecurringCompletedNode(node, changedTasks);
+	const recurringRange = recurringNode ? getSubtreeLineRange(recurringNode) : null;
+	const replacementRange = getReplacementRange(recurringRange ?? range, replacementByLine);
+	const originalLines = lines
+		.slice(replacementRange.from, replacementRange.to + 1)
+		.map((line, index) => replacementByLine.get(replacementRange.from + index) ?? line);
 
-	const recurrence = node.task.metadata.recurrence;
+	const completedTask = recurringNode ? changedTasks.get(recurringNode.lineNumber) : toggledTask;
+	const recurrence = recurringNode?.task?.metadata.recurrence ?? node.task.metadata.recurrence;
 	const shift = parseRecurrenceRule(recurrence);
-	const reachedDone = toggledTask.status.type === "DONE" && node.task.status.type !== "DONE";
+	const reachedDone =
+		Boolean(completedTask && recurringNode?.task) &&
+		completedTask!.status.type === "DONE" &&
+		recurringNode!.task!.status.type !== "DONE";
 	if (!reachedDone || !recurrence) {
-		return {fromLine: range.from, toLine: range.to, replacement: originalSubtreeLines};
+		return {fromLine: replacementRange.from, toLine: replacementRange.to, replacement: originalLines};
 	}
 	if (!shift) {
 		return {
-			fromLine: range.from,
-			toLine: range.to,
-			replacement: originalSubtreeLines,
+			fromLine: replacementRange.from,
+			toLine: replacementRange.to,
+			replacement: originalLines,
 			warning: "TaskLite: unsupported recurrence rule; toggled without creating the next copy.",
 		};
 	}
 
-	const nextTask = makeNextOccurrence(node.task, toggledTask, registry, settings, shift);
+	const recurringSubtree = getSubtreeNodes(recurringNode ?? node);
+	const nextTask = makeNextOccurrence((recurringNode ?? node).task!, completedTask!, registry, settings, shift);
 	const nextLines = settings.copySubtasksOnRecurrence
-		? copySubtreeForNextOccurrence(subtree, node, nextTask, registry)
+		? copySubtreeForNextOccurrence(recurringSubtree, recurringNode ?? node, nextTask, registry)
 		: [serializeTaskLine(nextTask)];
 
 	return {
-		fromLine: range.from,
-		toLine: range.to,
-		replacement: [...nextLines, ...originalSubtreeLines],
+		fromLine: replacementRange.from,
+		toLine: replacementRange.to,
+		replacement: [...nextLines, ...originalLines],
 	};
 }
 
@@ -73,20 +87,57 @@ function togglePlainCheckbox(node: TaskTreeNode, registry: StatusRegistry): Togg
 	return {fromLine: node.lineNumber, toLine: node.lineNumber, replacement: [replacement]};
 }
 
-function toggleTask(task: TaskLine, registry: StatusRegistry, settings: TaskLiteSettings): TaskLine {
-	const nextStatus = registry.next(task.status);
-	const metadata = copyTaskMetadata(task.metadata);
-	if (nextStatus.type === "DONE") {
-		if (settings.setDoneDate && task.status.type !== "DONE") metadata.dates.done = todayString();
-	} else {
-		metadata.dates.done = null;
+function completeParentTasks(
+	node: TaskTreeNode,
+	changedTasks: Map<number, TaskLine>,
+	replacementByLine: Map<number, string>,
+	registry: StatusRegistry,
+	settings: TaskLiteSettings,
+): void {
+	let parent = node.parent;
+	while (parent?.task && parent.task.status.type !== "DONE" && areAllTaskChildrenDone(parent, replacementByLine, registry)) {
+		const completedParent = applyTaskStatus(parent.task, registry.get("x"), settings);
+		changedTasks.set(parent.lineNumber, completedParent);
+		replacementByLine.set(parent.lineNumber, serializeTaskLine(completedParent));
+		parent = parent.parent;
 	}
-	if (nextStatus.type === "CANCELLED") {
-		if (settings.setCancelledDate && task.status.type !== "CANCELLED") metadata.dates.cancelled = todayString();
-	} else {
-		metadata.dates.cancelled = null;
+}
+
+function findRecurringCompletedNode(node: TaskTreeNode, changedTasks: Map<number, TaskLine>): TaskTreeNode | null {
+	let current: TaskTreeNode | null = node;
+	while (current) {
+		const changedTask = changedTasks.get(current.lineNumber);
+		if (current.task?.metadata.recurrence && changedTask?.status.type === "DONE" && current.task.status.type !== "DONE") {
+			return current;
+		}
+		current = current.parent;
 	}
-	return {...task, status: nextStatus, metadata};
+	return null;
+}
+
+function areAllTaskChildrenDone(parent: TaskTreeNode, replacementByLine: Map<number, string>, registry: StatusRegistry): boolean {
+	const taskChildren = parent.children.filter((child) => child.task);
+	if (taskChildren.length === 0) return false;
+	return taskChildren.every((child) => {
+		if (!child.task) return false;
+		const replacement = replacementByLine.get(child.lineNumber);
+		if (!replacement) return child.task.status.type === "DONE";
+		const statusSymbol = replacement.match(/\[(.)\]/u)?.[1] ?? child.task.status.symbol;
+		return registry.get(statusSymbol).type === "DONE";
+	});
+}
+
+function getReplacementRange(
+	range: {from: number; to: number},
+	replacementByLine: Map<number, string>,
+): {from: number; to: number} {
+	let from = range.from;
+	let to = range.to;
+	for (const lineNumber of replacementByLine.keys()) {
+		if (lineNumber < from) from = lineNumber;
+		if (lineNumber > to) to = lineNumber;
+	}
+	return {from, to};
 }
 
 function makeNextOccurrence(

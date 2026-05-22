@@ -57,9 +57,11 @@ export class InlineTaskRenderer {
 		const checkbox = li.querySelector<HTMLInputElement>("input.task-list-item-checkbox");
 		if (checkbox) {
 			checkbox.checked = node.task.status.symbol !== " ";
-			checkbox.onclick = (event) => {
+			checkbox.addEventListener("click", (event) => {
 				event.preventDefault();
 				event.stopPropagation();
+				event.stopImmediatePropagation();
+				checkbox.checked = node.task?.status.type !== "DONE";
 				checkbox.disabled = true;
 				void toggleFileTask({
 					app: this.app,
@@ -68,7 +70,7 @@ export class InlineTaskRenderer {
 					registry: this.registry,
 					settings: this.getSettings(),
 				});
-			};
+			}, {capture: true});
 		}
 
 		const textContainer = li.querySelector<HTMLElement>("p") ?? li;

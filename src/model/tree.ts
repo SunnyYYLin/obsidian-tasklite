@@ -5,6 +5,7 @@ import type { StatusRegistry } from "./status";
 export interface TaskTreeNode {
 	lineNumber: number;
 	parentLine: number | null;
+	parent: TaskTreeNode | null;
 	children: TaskTreeNode[];
 	original: string;
 	indentation: string;
@@ -36,6 +37,7 @@ export function buildTaskTree(lines: string[], metadata: CachedMetadata | null |
 		const node: TaskTreeNode = {
 			lineNumber,
 			parentLine: typeof item.parent === "number" && item.parent >= 0 ? item.parent : null,
+			parent: null,
 			children: [],
 			original: line,
 			indentation: match[1] ?? "",
@@ -50,7 +52,10 @@ export function buildTaskTree(lines: string[], metadata: CachedMetadata | null |
 
 	for (const node of nodes) {
 		const parent = node.parentLine === null ? null : byLine.get(node.parentLine);
-		if (parent) parent.children.push(node);
+		if (parent) {
+			node.parent = parent;
+			parent.children.push(node);
+		}
 	}
 
 	return {nodes, byLine};

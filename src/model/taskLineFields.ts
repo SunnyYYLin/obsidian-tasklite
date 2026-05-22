@@ -39,6 +39,7 @@ export function fieldsFromTaskLine(line: string, registry: StatusRegistry): Task
 }
 
 export function taskLineFromFields(fields: TaskLineFields, registry: StatusRegistry): string {
+	const status = registry.get(fields.statusSymbol);
 	const metadata: TaskMetadata = {
 		description: fields.description.trim(),
 		priority: emptyToNull(fields.priority),
@@ -47,8 +48,8 @@ export function taskLineFromFields(fields: TaskLineFields, registry: StatusRegis
 			created: emptyToNull(fields.created),
 			scheduled: emptyToNull(fields.scheduled),
 			due: emptyToNull(fields.due),
-			done: emptyToNull(fields.done),
-			cancelled: emptyToNull(fields.cancelled),
+			done: status.type === "CANCELLED" ? null : emptyToNull(fields.done),
+			cancelled: status.type === "DONE" ? null : emptyToNull(fields.cancelled),
 		},
 		recurrence: emptyToNull(fields.recurrence),
 		onCompletion: emptyToNull(fields.onCompletion),
@@ -60,7 +61,7 @@ export function taskLineFromFields(fields: TaskLineFields, registry: StatusRegis
 	const task: TaskLine = {
 		indentation: "",
 		listMarker: "-",
-		status: registry.get(fields.statusSymbol),
+		status,
 		metadata,
 		original: "",
 	};
