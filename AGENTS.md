@@ -9,7 +9,7 @@
 ## Environment & tooling
 
 - Node.js: use current LTS (Node 18+ recommended).
-- **Package manager: npm** (required for this sample - `package.json` defines npm scripts and dependencies).
+- **Package manager: Bun for local development and agent runs.** Use `bun install`, `bun test`, and `bun run build` for this repository. The package still keeps npm-compatible scripts for release tooling and fallback compatibility.
 - **Bundler: esbuild** (required for this sample - `esbuild.config.mjs` and build scripts depend on it). Alternative bundlers like Rollup or webpack are acceptable for other projects if they bundle all external dependencies into `main.js`.
 - Types: `obsidian` type definitions.
 
@@ -18,19 +18,19 @@
 ### Install
 
 ```bash
-npm install
+bun install
 ```
 
 ### Dev (watch)
 
 ```bash
-npm run dev
+bun run dev
 ```
 
 ### Production build
 
 ```bash
-npm run build
+bun run build
 ```
 
 ## Linting
@@ -97,7 +97,7 @@ npm run build
 
 - Bump `version` in `manifest.json` (SemVer) and update `versions.json` to map plugin version → minimum app version.
 - Use the repository release flow for normal releases:
-  1. Run `npm test` and `npm run build`.
+  1. Run `bun test` and `bun run build`.
   2. Run `npm version patch`, `npm version minor`, or `npm version major` as appropriate. The version script updates `manifest.json` and `versions.json`; npm updates `package.json` and `package-lock.json`.
   3. Commit the release changes and create/push the npm version tag with the branch via `git push --follow-tags`.
 - Tags must exactly match `manifest.json`'s version in `x.y.z` form. Do not use a leading `v`.
@@ -242,7 +242,7 @@ this.registerInterval(window.setInterval(() => { /* ... */ }, 1000));
 ## Troubleshooting
 
 - Plugin doesn't load after build: ensure `main.js` and `manifest.json` are at the top level of the plugin folder under `<Vault>/.obsidian/plugins/<plugin-id>/`. 
-- Build issues: if `main.js` is missing, run `npm run build` or `npm run dev` to compile your TypeScript source code.
+- Build issues: if `main.js` is missing, run `bun run build` or `bun run dev` to compile your TypeScript source code. Use the npm equivalents only as a fallback.
 - Commands not appearing: verify `addCommand` runs after `onload` and IDs are unique.
 - Settings not persisting: ensure `loadData`/`saveData` are awaited and you re-render the UI after changes.
 - Mobile-only issues: confirm you're not using desktop-only APIs; check `isDesktopOnly` and adjust.

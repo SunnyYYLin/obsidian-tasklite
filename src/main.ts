@@ -1,12 +1,15 @@
 import { MarkdownView, Notice, Plugin, type Editor } from "obsidian";
+import { createTaskLiteCoreApi, type TaskLiteCoreApi } from "./api/taskLiteCoreApi";
 import { registerTasksApiShim } from "./compat/tasksApi";
 import { StatusRegistry } from "./model/status";
-import { toggleEditorTask } from "./editor/apply";
+import { cancelEditorTask, toggleEditorTask, toggleEditorTaskCancellation, uncancelEditorTask } from "./editor/apply";
 import { ExternalTaskReconciler } from "./editor/externalReconcile";
 import { InlineTaskRenderer } from "./rendering/inlineRenderer";
 import { createLivePreviewExtension } from "./rendering/livePreview";
 import { TaskLiteEmojiSuggest } from "./suggest/emojiSuggest";
 import { openTaskLineModal } from "./ui/taskLineModal";
+import { TASKLITE_TASK_LIST_VIEW, TaskLiteTaskListView } from "./view/taskListView";
+import { t } from "./i18n";
 import {
 	DEFAULT_SETTINGS,
 	TaskLiteSettingTab,
@@ -18,16 +21,29 @@ import {
 export default class TaskLitePlugin extends Plugin {
 	settings: TaskLiteSettings = DEFAULT_SETTINGS;
 	readonly statusRegistry = new StatusRegistry(DEFAULT_SETTINGS.statusSettings);
+	api!: TaskLiteCoreApi;
 	private unregisterTasksApiShim: (() => void) | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
 		this.statusRegistry.set(this.settings.statusSettings);
+		this.api = createTaskLiteCoreApi({
+			app: this.app,
+			registry: this.statusRegistry,
+			getSettings: () => this.settings,
+		});
 		this.unregisterTasksApiShim = registerTasksApiShim(this);
+		this.registerView(
+			TASKLITE_TASK_LIST_VIEW,
+			(leaf) => new TaskLiteTaskListView(leaf, this.app, this.api, this.statusRegistry, () => this.settings),
+		);
+		this.addRibbonIcon("list-todo", t("command.openTaskLite"), () => {
+			void this.activateTaskListView();
+		});
 
 		this.addCommand({
 			id: "toggle-task",
-			name: "Toggle task",
+			name: t("command.toggleTask"),
 			editorCheckCallback: (checking: boolean, editor: Editor, view) => {
 				if (!(view instanceof MarkdownView)) return false;
 				if (checking) return true;
@@ -44,8 +60,62 @@ export default class TaskLitePlugin extends Plugin {
 		});
 
 		this.addCommand({
+			id: "toggle-task-cancellation",
+			name: t("command.toggleTaskCancellation"),
+			editorCheckCallback: (checking: boolean, editor: Editor, view) => {
+				if (!(view instanceof MarkdownView)) return false;
+				if (checking) return true;
+				const path = view.file?.path;
+				if (!path) return false;
+				return toggleEditorTaskCancellation({
+					editor,
+					app: this.app,
+					path,
+					registry: this.statusRegistry,
+					settings: this.settings,
+				});
+			},
+		});
+
+		this.addCommand({
+			id: "cancel-task",
+			name: t("command.cancelTask"),
+			editorCheckCallback: (checking: boolean, editor: Editor, view) => {
+				if (!(view instanceof MarkdownView)) return false;
+				if (checking) return true;
+				const path = view.file?.path;
+				if (!path) return false;
+				return cancelEditorTask({
+					editor,
+					app: this.app,
+					path,
+					registry: this.statusRegistry,
+					settings: this.settings,
+				});
+			},
+		});
+
+		this.addCommand({
+			id: "uncancel-task",
+			name: t("command.uncancelTask"),
+			editorCheckCallback: (checking: boolean, editor: Editor, view) => {
+				if (!(view instanceof MarkdownView)) return false;
+				if (checking) return true;
+				const path = view.file?.path;
+				if (!path) return false;
+				return uncancelEditorTask({
+					editor,
+					app: this.app,
+					path,
+					registry: this.statusRegistry,
+					settings: this.settings,
+				});
+			},
+		});
+
+		this.addCommand({
 			id: "create-task",
-			name: "Create task",
+			name: t("command.createTask"),
 			editorCallback: (editor: Editor) => {
 				void this.createTaskInEditor(editor);
 			},
@@ -53,7 +123,7 @@ export default class TaskLitePlugin extends Plugin {
 
 		this.addCommand({
 			id: "edit-task",
-			name: "Edit task",
+			name: t("command.editTask"),
 			editorCheckCallback: (checking: boolean, editor: Editor, view) => {
 				if (!(view instanceof MarkdownView)) return false;
 				if (checking) return true;
@@ -64,7 +134,7 @@ export default class TaskLitePlugin extends Plugin {
 
 		this.addCommand({
 			id: "create-or-edit-task",
-			name: "Create or edit task",
+			name: t("command.createOrEditTask"),
 			editorCallback: (editor: Editor) => {
 				void this.createOrEditTaskInEditor(editor);
 			},
@@ -72,10 +142,18 @@ export default class TaskLitePlugin extends Plugin {
 
 		this.addCommand({
 			id: "import-tasks-status-settings",
-			name: "Import status settings",
+			name: t("command.importStatusSettings"),
 			callback: async () => {
 				const imported = await this.importTasksStatusSettings();
-				new Notice(imported ? "Imported status settings." : "No status settings found.");
+				new Notice(imported ? t("notice.importedStatusSettings") : t("notice.noStatusSettings"));
+			},
+		});
+
+		this.addCommand({
+			id: "open-task-list",
+			name: t("command.openTaskList"),
+			callback: () => {
+				void this.activateTaskListView();
 			},
 		});
 
@@ -91,10 +169,17 @@ export default class TaskLitePlugin extends Plugin {
 		this.unregisterTasksApiShim = null;
 	}
 
+	private async activateTaskListView(): Promise<void> {
+		const leaves = this.app.workspace.getLeavesOfType(TASKLITE_TASK_LIST_VIEW);
+		const leaf = leaves[0] ?? this.app.workspace.getLeaf("tab");
+		await leaf.setViewState({type: TASKLITE_TASK_LIST_VIEW, active: true});
+		this.app.workspace.revealLeaf(leaf);
+	}
+
 	private async createTaskInEditor(editor: Editor): Promise<void> {
 		const line = await openTaskLineModal({
 			app: this.app,
-			title: "Create task",
+			title: t("command.createTask"),
 			initialLine: "",
 			registry: this.statusRegistry,
 			settings: this.settings,
@@ -118,7 +203,7 @@ export default class TaskLitePlugin extends Plugin {
 		const currentLine = editor.getLine(cursor.line);
 		const line = await openTaskLineModal({
 			app: this.app,
-			title: "Edit task",
+			title: t("command.editTask"),
 			initialLine: currentLine,
 			registry: this.statusRegistry,
 			settings: this.settings,

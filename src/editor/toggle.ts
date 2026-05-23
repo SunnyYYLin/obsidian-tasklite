@@ -1,10 +1,10 @@
 import type { CachedMetadata } from "obsidian";
-import { copyTaskMetadata, serializeTaskBody, serializeTaskLine, type TaskLine } from "../model/format";
-import { parseRecurrenceRule, shiftTaskDates, todayString } from "../model/recurrence";
+import { serializeTaskLine, type TaskLine } from "../model/format";
 import { getSubtreeLineRange, getSubtreeNodes, buildTaskTree, type TaskTreeNode } from "../model/tree";
-import { applyTaskStatus, toggleTaskStatus } from "../model/taskState";
-import type { StatusRegistry } from "../model/status";
+import { applyTaskStatus } from "../model/taskState";
+import type { StatusConfiguration, StatusRegistry, StatusType } from "../model/status";
 import type { TaskLiteSettings } from "../settings";
+import { buildRecurringTaskOccurrence } from "./recurrenceOccurrence";
 
 export interface ToggleResult {
 	fromLine: number;
@@ -12,6 +12,26 @@ export interface ToggleResult {
 	replacement: string[];
 	warning?: string;
 }
+
+interface TaskMutationContext {
+	lines: string[];
+	node: TaskTreeNode;
+	changedTasks: Map<number, TaskLine>;
+	replacementByLine: Map<number, string>;
+	registry: StatusRegistry;
+	settings: TaskLiteSettings;
+	unsupportedRecurrenceWarning: string;
+}
+
+interface TaskStatusMutationInput {
+	lines: string[];
+	lineNumber: number;
+	metadata: CachedMetadata | null | undefined;
+	registry: StatusRegistry;
+	settings: TaskLiteSettings;
+}
+
+type TaskBehavior = "finish" | "unfinish" | "cancel" | "uncancel";
 
 export function toggleTaskAtLine({
 	lines,
@@ -34,49 +54,168 @@ export function toggleTaskAtLine({
 		return togglePlainCheckbox(node, registry);
 	}
 
-	const toggledTask = toggleTaskStatus(node.task, registry, settings);
-	const subtree = getSubtreeNodes(node);
-	const range = getSubtreeLineRange(node);
-	const changedTasks = new Map<number, TaskLine>([[node.lineNumber, toggledTask]]);
-	const replacementByLine = new Map<number, string>([[node.lineNumber, serializeTaskLine(toggledTask)]]);
-	completeParentTasks(node, changedTasks, replacementByLine, registry, settings);
-	const recurringNode = findRecurringCompletedNode(node, changedTasks);
+	const targetStatus = registry.next(node.task.status);
+	if (targetStatus.type === "DONE") return finishTaskAtLine({lines, lineNumber, metadata, registry, settings});
+	if (targetStatus.type === "CANCELLED") return cancelTaskAtLine({lines, lineNumber, metadata, registry, settings});
+	if (node.task.status.type === "DONE") return unfinishTaskAtLine({lines, lineNumber, metadata, registry, settings});
+	if (node.task.status.type === "CANCELLED") return uncancelTaskAtLine({lines, lineNumber, metadata, registry, settings});
+	return updateSingleTaskStatusAtLine({lines, lineNumber, metadata, registry, settings, status: targetStatus});
+}
+
+export function finishTaskAtLine(input: TaskStatusMutationInput): ToggleResult | null {
+	return applyTaskBehaviorAtLine({...input, behavior: "finish"});
+}
+
+export function unfinishTaskAtLine(input: TaskStatusMutationInput): ToggleResult | null {
+	return applyTaskBehaviorAtLine({...input, behavior: "unfinish"});
+}
+
+export function cancelTaskAtLine(input: TaskStatusMutationInput): ToggleResult | null {
+	return applyTaskBehaviorAtLine({...input, behavior: "cancel"});
+}
+
+export function uncancelTaskAtLine(input: TaskStatusMutationInput): ToggleResult | null {
+	return applyTaskBehaviorAtLine({...input, behavior: "uncancel"});
+}
+
+export function clickTaskCheckboxAtLine(input: TaskStatusMutationInput): ToggleResult | null {
+	const tree = buildTaskTree(input.lines, input.metadata, input.registry);
+	const node = tree.byLine.get(input.lineNumber);
+	if (!node?.task) return node ? togglePlainCheckbox(node, input.registry) : null;
+	if (node.task.status.type === "DONE") return unfinishTaskAtLine(input);
+	if (node.task.status.type === "CANCELLED") return uncancelTaskAtLine(input);
+	return finishTaskAtLine(input);
+}
+
+export function rightClickTaskCheckboxAtLine(input: TaskStatusMutationInput): ToggleResult | null {
+	const tree = buildTaskTree(input.lines, input.metadata, input.registry);
+	const node = tree.byLine.get(input.lineNumber);
+	if (!node?.task) return null;
+	if (node.task.status.type === "CANCELLED") return uncancelTaskAtLine(input);
+	return cancelTaskAtLine(input);
+}
+
+function applyTaskBehaviorAtLine({
+	lines,
+	lineNumber,
+	metadata,
+	registry,
+	settings,
+	behavior,
+}: {
+	lines: string[];
+	lineNumber: number;
+	metadata: CachedMetadata | null | undefined;
+	registry: StatusRegistry;
+	settings: TaskLiteSettings;
+	behavior: TaskBehavior;
+}): ToggleResult | null {
+	const tree = buildTaskTree(lines, metadata, registry);
+	const node = tree.byLine.get(lineNumber);
+	if (!node?.task) return null;
+
+	const changedTasks = new Map<number, TaskLine>();
+	const replacementByLine = new Map<number, string>();
+	applyBehaviorToSubtree(node, behavior, changedTasks, replacementByLine, registry, settings);
+	applyBehaviorToParents(node, behavior, changedTasks, replacementByLine, registry, settings);
+	if (changedTasks.size === 0) return null;
+
+	return buildTaskMutationResult({
+		lines,
+		node,
+		changedTasks,
+		replacementByLine,
+		registry,
+		settings,
+		unsupportedRecurrenceWarning: "TaskLite: unsupported recurrence rule; updated without creating the next copy.",
+	});
+}
+
+function updateSingleTaskStatusAtLine({
+	lines,
+	lineNumber,
+	metadata,
+	registry,
+	settings,
+	status,
+}: TaskStatusMutationInput & {status: StatusConfiguration}): ToggleResult | null {
+	const tree = buildTaskTree(lines, metadata, registry);
+	const node = tree.byLine.get(lineNumber);
+	if (!node?.task) return null;
+	if (node.task.status.symbol === status.symbol && !needsMissingStatusDate(node.task, status)) return null;
+
+	const changedTask = applyTaskStatus(node.task, status, settings, {fillMissingStatusDate: true});
+	const changedTasks = new Map<number, TaskLine>([[node.lineNumber, changedTask]]);
+	const replacementByLine = new Map<number, string>([[node.lineNumber, serializeTaskLine(changedTask)]]);
+	return buildTaskMutationResult({
+		lines,
+		node,
+		changedTasks,
+		replacementByLine,
+		registry,
+		settings,
+		unsupportedRecurrenceWarning: "TaskLite: unsupported recurrence rule; toggled without creating the next copy.",
+	});
+}
+
+function buildTaskMutationResult({
+	lines,
+	node,
+	changedTasks,
+	replacementByLine,
+	registry,
+	settings,
+	unsupportedRecurrenceWarning,
+}: TaskMutationContext): ToggleResult {
+	const baseRange = getSubtreeLineRange(node);
+	const recurringNode = findRecurringTerminatedNode(node, changedTasks);
 	const recurringRange = recurringNode ? getSubtreeLineRange(recurringNode) : null;
-	const replacementRange = getReplacementRange(recurringRange ?? range, replacementByLine);
+	const replacementRange = getReplacementRange(recurringRange ?? baseRange, replacementByLine);
 	const originalLines = lines
 		.slice(replacementRange.from, replacementRange.to + 1)
 		.map((line, index) => replacementByLine.get(replacementRange.from + index) ?? line);
 
-	const completedTask = recurringNode ? changedTasks.get(recurringNode.lineNumber) : toggledTask;
-	const recurrence = recurringNode?.task?.metadata.recurrence ?? node.task.metadata.recurrence;
-	const shift = parseRecurrenceRule(recurrence);
-	const reachedDone =
-		Boolean(completedTask && recurringNode?.task) &&
-		completedTask!.status.type === "DONE" &&
-		recurringNode!.task!.status.type !== "DONE";
-	if (!reachedDone || !recurrence) {
+	if (!recurringNode?.task) {
 		return {fromLine: replacementRange.from, toLine: replacementRange.to, replacement: originalLines};
 	}
-	if (!shift) {
+
+	const completedTask = changedTasks.get(recurringNode.lineNumber);
+	if (!completedTask) {
+		return {fromLine: replacementRange.from, toLine: replacementRange.to, replacement: originalLines};
+	}
+
+	const occurrence = buildRecurringTaskOccurrence({
+		lines,
+		recurringNode,
+		terminatedTask: completedTask,
+		registry,
+		settings,
+		unsupportedWarning: unsupportedRecurrenceWarning,
+	});
+	if (!occurrence) {
+		return {fromLine: replacementRange.from, toLine: replacementRange.to, replacement: originalLines};
+	}
+	if (occurrence.warning) {
 		return {
 			fromLine: replacementRange.from,
 			toLine: replacementRange.to,
 			replacement: originalLines,
-			warning: "TaskLite: unsupported recurrence rule; toggled without creating the next copy.",
+			warning: occurrence.warning,
 		};
 	}
-
-	const recurringSubtree = getSubtreeNodes(recurringNode ?? node);
-	const nextTask = makeNextOccurrence((recurringNode ?? node).task!, completedTask!, registry, settings, shift);
-	const nextLines = settings.copySubtasksOnRecurrence
-		? copySubtreeForNextOccurrence(recurringSubtree, recurringNode ?? node, nextTask, registry)
-		: [serializeTaskLine(nextTask)];
+	if (occurrence.skippedBecauseExisting) {
+		return {fromLine: replacementRange.from, toLine: replacementRange.to, replacement: originalLines};
+	}
 
 	return {
 		fromLine: replacementRange.from,
 		toLine: replacementRange.to,
-		replacement: [...nextLines, ...originalLines],
+		replacement: [...occurrence.nextLines, ...originalLines],
 	};
+}
+
+function needsMissingStatusDate(task: TaskLine, status: TaskLine["status"]): boolean {
+	return (status.type === "DONE" && !task.metadata.dates.done) || (status.type === "CANCELLED" && !task.metadata.dates.cancelled);
 }
 
 function togglePlainCheckbox(node: TaskTreeNode, registry: StatusRegistry): ToggleResult | null {
@@ -87,27 +226,91 @@ function togglePlainCheckbox(node: TaskTreeNode, registry: StatusRegistry): Togg
 	return {fromLine: node.lineNumber, toLine: node.lineNumber, replacement: [replacement]};
 }
 
-function completeParentTasks(
+function applyBehaviorToSubtree(
 	node: TaskTreeNode,
+	behavior: TaskBehavior,
+	changedTasks: Map<number, TaskLine>,
+	replacementByLine: Map<number, string>,
+	registry: StatusRegistry,
+	settings: TaskLiteSettings,
+): void {
+	for (const current of getSubtreeNodes(node)) {
+		if (!current.task) continue;
+		const nextStatus = statusForSubtreeBehavior(current.task.status.type, behavior, registry);
+		if (!nextStatus) continue;
+		replaceTaskStatus(current, nextStatus, changedTasks, replacementByLine, settings);
+	}
+}
+
+function applyBehaviorToParents(
+	node: TaskTreeNode,
+	behavior: TaskBehavior,
 	changedTasks: Map<number, TaskLine>,
 	replacementByLine: Map<number, string>,
 	registry: StatusRegistry,
 	settings: TaskLiteSettings,
 ): void {
 	let parent = node.parent;
-	while (parent?.task && parent.task.status.type !== "DONE" && areAllTaskChildrenDone(parent, replacementByLine, registry)) {
-		const completedParent = applyTaskStatus(parent.task, registry.get("x"), settings);
-		changedTasks.set(parent.lineNumber, completedParent);
-		replacementByLine.set(parent.lineNumber, serializeTaskLine(completedParent));
+	while (parent?.task) {
+		const nextStatus = statusForParentBehavior(parent, behavior, replacementByLine, registry);
+		if (!nextStatus) break;
+		replaceTaskStatus(parent, nextStatus, changedTasks, replacementByLine, settings);
 		parent = parent.parent;
 	}
 }
 
-function findRecurringCompletedNode(node: TaskTreeNode, changedTasks: Map<number, TaskLine>): TaskTreeNode | null {
+function statusForSubtreeBehavior(
+	type: StatusType,
+	behavior: TaskBehavior,
+	registry: StatusRegistry,
+): StatusConfiguration | null {
+	if (behavior === "finish") return type === "CANCELLED" ? null : registry.get("x");
+	if (behavior === "cancel") return type === "DONE" ? null : registry.get("-");
+	if (behavior === "unfinish") return type === "DONE" ? registry.get(" ") : null;
+	return type === "CANCELLED" ? registry.get(" ") : null;
+}
+
+function statusForParentBehavior(
+	parent: TaskTreeNode,
+	behavior: TaskBehavior,
+	replacementByLine: Map<number, string>,
+	registry: StatusRegistry,
+): StatusConfiguration | null {
+	if (!parent.task) return null;
+	if (behavior === "finish") {
+		if (parent.task.status.type === "CANCELLED" || parent.task.status.type === "DONE") return null;
+		return areAllTaskChildrenTerminated(parent, replacementByLine, registry) ? registry.get("x") : null;
+	}
+	if (behavior === "cancel") {
+		if (parent.task.status.type === "DONE" || parent.task.status.type === "CANCELLED") return null;
+		return areAllTaskChildrenTerminated(parent, replacementByLine, registry) ? registry.get("-") : null;
+	}
+	if (behavior === "unfinish") {
+		return parent.task.status.type === "DONE" ? registry.get(" ") : null;
+	}
+	return parent.task.status.type === "CANCELLED" ? registry.get(" ") : null;
+}
+
+function replaceTaskStatus(
+	node: TaskTreeNode,
+	status: StatusConfiguration,
+	changedTasks: Map<number, TaskLine>,
+	replacementByLine: Map<number, string>,
+	settings: TaskLiteSettings,
+): void {
+	if (!node.task) return;
+	const currentTask = changedTasks.get(node.lineNumber) ?? node.task;
+	if (currentTask.status.symbol === status.symbol && !needsMissingStatusDate(currentTask, status)) return;
+	const updatedTask = applyTaskStatus(currentTask, status, settings, {fillMissingStatusDate: true});
+	changedTasks.set(node.lineNumber, updatedTask);
+	replacementByLine.set(node.lineNumber, serializeTaskLine(updatedTask));
+}
+
+function findRecurringTerminatedNode(node: TaskTreeNode, changedTasks: Map<number, TaskLine>): TaskTreeNode | null {
 	let current: TaskTreeNode | null = node;
 	while (current) {
 		const changedTask = changedTasks.get(current.lineNumber);
-		if (current.task?.metadata.recurrence && changedTask?.status.type === "DONE" && current.task.status.type !== "DONE") {
+		if (current.task?.metadata.recurrence && isTerminalStatus(changedTask?.status.type) && !isTerminalStatus(current.task.status.type)) {
 			return current;
 		}
 		current = current.parent;
@@ -115,16 +318,20 @@ function findRecurringCompletedNode(node: TaskTreeNode, changedTasks: Map<number
 	return null;
 }
 
-function areAllTaskChildrenDone(parent: TaskTreeNode, replacementByLine: Map<number, string>, registry: StatusRegistry): boolean {
+function areAllTaskChildrenTerminated(parent: TaskTreeNode, replacementByLine: Map<number, string>, registry: StatusRegistry): boolean {
 	const taskChildren = parent.children.filter((child) => child.task);
 	if (taskChildren.length === 0) return false;
 	return taskChildren.every((child) => {
 		if (!child.task) return false;
 		const replacement = replacementByLine.get(child.lineNumber);
-		if (!replacement) return child.task.status.type === "DONE";
+		if (!replacement) return isTerminalStatus(child.task.status.type);
 		const statusSymbol = replacement.match(/\[(.)\]/u)?.[1] ?? child.task.status.symbol;
-		return registry.get(statusSymbol).type === "DONE";
+		return isTerminalStatus(registry.get(statusSymbol).type);
 	});
+}
+
+function isTerminalStatus(type: StatusType | undefined): boolean {
+	return type === "DONE" || type === "CANCELLED";
 }
 
 function getReplacementRange(
@@ -138,53 +345,4 @@ function getReplacementRange(
 		if (lineNumber > to) to = lineNumber;
 	}
 	return {from, to};
-}
-
-function makeNextOccurrence(
-	original: TaskLine,
-	completed: TaskLine,
-	registry: StatusRegistry,
-	settings: TaskLiteSettings,
-	shift: Parameters<typeof shiftTaskDates>[1],
-): TaskLine {
-	const metadata = copyTaskMetadata(original.metadata);
-	const completedOn = completed.metadata.dates.done ?? todayString();
-	metadata.dates = shiftTaskDates(metadata.dates, shift, completedOn);
-	metadata.dates.done = null;
-	metadata.dates.cancelled = null;
-	metadata.blockLink = null;
-	metadata.id = null;
-	metadata.dependsOn = null;
-	if (settings.setCreatedDate) {
-		metadata.dates.created = todayString();
-	}
-	return {
-		...original,
-		status: registry.recurrenceStatus(completed.status),
-		metadata,
-		original: "",
-	};
-}
-
-function copySubtreeForNextOccurrence(
-	subtree: TaskTreeNode[],
-	root: TaskTreeNode,
-	nextTask: TaskLine,
-	registry: StatusRegistry,
-): string[] {
-	return subtree.map((node) => {
-		if (node.lineNumber === root.lineNumber) {
-			return serializeTaskLine(nextTask);
-		}
-		if (!node.task) {
-			return node.original;
-		}
-		const metadata = copyTaskMetadata(node.task.metadata);
-		metadata.dates.done = null;
-		metadata.dates.cancelled = null;
-		metadata.blockLink = null;
-		metadata.id = null;
-		metadata.dependsOn = null;
-		return `${node.task.indentation}${node.task.listMarker} [${registry.get(" ").symbol}] ${serializeTaskBody(metadata)}`.trimEnd();
-	});
 }

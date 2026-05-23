@@ -3,7 +3,7 @@ import type { StatusRegistry } from "../model/status";
 import { buildTaskTree, type TaskTreeNode } from "../model/tree";
 import { serializeTaskBody } from "../model/format";
 import type { TaskLiteSettings } from "../settings";
-import { toggleFileTask } from "../editor/apply";
+import { toggleFileTask, toggleFileTaskCancellation } from "../editor/apply";
 
 export class InlineTaskRenderer {
 	constructor(
@@ -64,6 +64,20 @@ export class InlineTaskRenderer {
 				checkbox.checked = node.task?.status.type !== "DONE";
 				checkbox.disabled = true;
 				void toggleFileTask({
+					app: this.app,
+					path,
+					lineNumber: node.lineNumber,
+					registry: this.registry,
+					settings: this.getSettings(),
+				});
+			}, {capture: true});
+			checkbox.addEventListener("contextmenu", (event) => {
+				event.preventDefault();
+				event.stopPropagation();
+				event.stopImmediatePropagation();
+				checkbox.checked = node.task?.status.type !== "CANCELLED";
+				checkbox.disabled = true;
+				void toggleFileTaskCancellation({
 					app: this.app,
 					path,
 					lineNumber: node.lineNumber,

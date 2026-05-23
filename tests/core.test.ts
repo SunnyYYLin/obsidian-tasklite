@@ -2,9 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { parseTaskLine, TASK_SYMBOLS } from "../src/model/format";
 import { StatusRegistry } from "../src/model/status";
 import { fieldsFromTaskLine, taskLineFromFields } from "../src/model/taskLineFields";
-import { toggleTaskAtLine } from "../src/editor/toggle";
+import { clickTaskCheckboxAtLine, toggleTaskAtLine } from "../src/editor/toggle";
 import { reconcileExternalTaskCompletion } from "../src/editor/externalReconcileCore";
-import { createTasksApiV1 } from "../src/compat/tasksApi";
+import { createTaskLiteCoreApi } from "../src/api/taskLiteCoreApi";
+import { createTasksApiV1FromCore } from "../src/compat/tasksApi";
 import type TaskLitePlugin from "../src/main";
 import type { TaskLiteSettings } from "../src/settings";
 
@@ -156,10 +157,7 @@ describe("TaskLite core", () => {
 	});
 
 	test("exposes recurring toggles through the Tasks API shim", () => {
-		const api = createTasksApiV1({
-			settings,
-			statusRegistry: new StatusRegistry(),
-		} as TaskLitePlugin);
+		const api = createTestTasksApi();
 
 		const result = api.executeToggleTaskDoneCommand(
 			`- [ ] Parent ${TASK_SYMBOLS.due} 2026-05-20 ${TASK_SYMBOLS.recurrence} every week`,
@@ -173,10 +171,7 @@ describe("TaskLite core", () => {
 	});
 
 	test("normalizes done dates for single-line Tasks API toggles", () => {
-		const api = createTasksApiV1({
-			settings,
-			statusRegistry: new StatusRegistry(),
-		} as TaskLitePlugin);
+		const api = createTestTasksApi();
 
 		const result = api.executeToggleTaskDoneCommand("- [x] Ship", "tasks.md");
 
@@ -195,16 +190,7 @@ describe("TaskLite core", () => {
 					].join("\n"),
 			},
 		};
-		const api = createTasksApiV1({
-			app: {
-				workspace: {
-					activeEditor: view,
-					getLeavesOfType: () => [],
-				},
-			},
-			settings,
-			statusRegistry: new StatusRegistry(),
-		} as TaskLitePlugin);
+		const api = createTestTasksApi({workspace: {activeEditor: view, getLeavesOfType: () => []}});
 
 		const result = api.executeToggleTaskDoneCommand(
 			`- [ ] Parent ${TASK_SYMBOLS.due} 2026-05-20 ${TASK_SYMBOLS.recurrence} every week`,
@@ -233,16 +219,7 @@ describe("TaskLite core", () => {
 					].join("\n"),
 			},
 		};
-		const api = createTasksApiV1({
-			app: {
-				workspace: {
-					activeEditor: view,
-					getLeavesOfType: () => [],
-				},
-			},
-			settings,
-			statusRegistry: new StatusRegistry(),
-		} as TaskLitePlugin);
+		const api = createTestTasksApi({workspace: {activeEditor: view, getLeavesOfType: () => []}});
 
 		const result = api.executeToggleTaskDoneCommand("- [x] Second child", "tasks.md");
 
@@ -253,14 +230,116 @@ describe("TaskLite core", () => {
 		]);
 	});
 
+	test("finishes a task through the native core API without exposing toggle", async () => {
+		const registry = new StatusRegistry();
+		let content = ["- [ ] Parent", "  - [x] First child", "  - [ ] Second child"].join("\n");
+		const file = {path: "tasks.md", basename: "tasks", extension: "md"};
+		const app = {
+			vault: {
+				getAbstractFileByPath: () => file,
+				read: () => Promise.resolve(content),
+				modify: (_file: unknown, value: string) => {
+					content = value;
+					return Promise.resolve();
+				},
+			},
+			metadataCache: {
+				getFileCache: () => null,
+			},
+		};
+		const api = createTaskLiteCoreApi({
+			app: app as TaskLitePlugin["app"],
+			registry,
+			getSettings: () => settings,
+		});
+
+		expect("toggleTask" in api).toBe(false);
+		await expect(api.finishTask("tasks.md", 2)).resolves.toBe(true);
+		expect(content.split("\n")).toEqual([
+			expect.stringContaining(`- [x] Parent ${TASK_SYMBOLS.done} 2026-05-16`),
+			"  - [x] First child",
+			expect.stringContaining(`  - [x] Second child ${TASK_SYMBOLS.done} 2026-05-16`),
+		]);
+	});
+
+	test("cancels a task through the native core API and cancels satisfied parents", async () => {
+		const registry = new StatusRegistry();
+		let content = ["- [ ] Parent", "  - [x] First child", "  - [ ] Second child"].join("\n");
+		const file = {path: "tasks.md", basename: "tasks", extension: "md"};
+		const app = {
+			vault: {
+				getAbstractFileByPath: () => file,
+				read: () => Promise.resolve(content),
+				modify: (_file: unknown, value: string) => {
+					content = value;
+					return Promise.resolve();
+				},
+			},
+			metadataCache: {
+				getFileCache: () => null,
+			},
+		};
+		const api = createTaskLiteCoreApi({
+			app: app as TaskLitePlugin["app"],
+			registry,
+			getSettings: () => settings,
+		});
+
+		await expect(api.cancelTask("tasks.md", 2)).resolves.toBe(true);
+		expect(content.split("\n")).toEqual([
+			expect.stringContaining(`- [-] Parent ${TASK_SYMBOLS.cancelled} 2026-05-16`),
+			"  - [x] First child",
+			expect.stringContaining(`  - [-] Second child ${TASK_SYMBOLS.cancelled} 2026-05-16`),
+		]);
+	});
+
+	test("cancels unfinished descendants and creates next occurrence for recurring tasks", async () => {
+		const registry = new StatusRegistry();
+		let content = [
+			`- [ ] Parent ${TASK_SYMBOLS.due} 2026-05-20 ${TASK_SYMBOLS.recurrence} every week`,
+			"  - [x] Done child",
+			"  - [ ] Todo child",
+			"    - [ ] Nested todo",
+		].join("\n");
+		const file = {path: "tasks.md", basename: "tasks", extension: "md"};
+		const app = {
+			vault: {
+				getAbstractFileByPath: () => file,
+				read: () => Promise.resolve(content),
+				modify: (_file: unknown, value: string) => {
+					content = value;
+					return Promise.resolve();
+				},
+			},
+			metadataCache: {
+				getFileCache: () => null,
+			},
+		};
+		const api = createTaskLiteCoreApi({
+			app: app as TaskLitePlugin["app"],
+			registry,
+			getSettings: () => settings,
+		});
+
+		await expect(api.cancelTask("tasks.md", 0)).resolves.toBe(true);
+		expect(content.split("\n")).toEqual([
+			`- [ ] Parent ${TASK_SYMBOLS.due} 2026-05-27 ${TASK_SYMBOLS.recurrence} every week`,
+			"  - [ ] Done child",
+			"  - [ ] Todo child",
+			"    - [ ] Nested todo",
+			expect.stringContaining(`- [-] Parent ${TASK_SYMBOLS.due} 2026-05-20 ${TASK_SYMBOLS.cancelled} 2026-05-16`),
+			"  - [x] Done child",
+			expect.stringContaining(`  - [-] Todo child ${TASK_SYMBOLS.cancelled} 2026-05-16`),
+			expect.stringContaining(`    - [-] Nested todo ${TASK_SYMBOLS.cancelled} 2026-05-16`),
+		]);
+	});
+
 	test("opens create and edit task modals through the Tasks API shim", async () => {
 		const calls: Array<{title: string; initialLine: string}> = [];
-		const api = createTasksApiV1(
-			{
-				app: {},
-				settings,
-				statusRegistry: new StatusRegistry(),
-			} as TaskLitePlugin,
+		const plugin = createTestPlugin();
+		const api = createTasksApiV1FromCore(
+			plugin.api,
+			plugin,
 			(options) => {
 				calls.push({title: options.title, initialLine: options.initialLine});
 				return Promise.resolve(`${options.title}: ${options.initialLine}`);
@@ -319,6 +398,27 @@ describe("TaskLite core", () => {
 		]);
 	});
 
+	test("editor checkbox click uses finish semantics for unfinished tasks", () => {
+		const registry = new StatusRegistry();
+		const result = clickTaskCheckboxAtLine({
+			lines: [
+				"- [ ] Parent",
+				"  - [x] First child",
+				"  - [ ] Second child",
+			],
+			lineNumber: 2,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.replacement).toEqual([
+			expect.stringContaining(`- [x] Parent ${TASK_SYMBOLS.done} 2026-05-16`),
+			"  - [x] First child",
+			expect.stringContaining(`  - [x] Second child ${TASK_SYMBOLS.done} 2026-05-16`),
+		]);
+	});
+
 	test("creates next occurrence when a recurring ancestor is auto-completed", () => {
 		const registry = new StatusRegistry();
 		const result = toggleTaskAtLine({
@@ -345,6 +445,40 @@ describe("TaskLite core", () => {
 			"    - [ ] Curl G.1",
 			"    - [ ] Curl G.2",
 			"    - [ ] Curl G.3",
+			expect.stringContaining(`- [x] Daily workout ${TASK_SYMBOLS.due} 2026-05-22 ${TASK_SYMBOLS.done} 2026-05-16`),
+			"  - [x] Cardio",
+			expect.stringContaining(`  - [x] Curl ${TASK_SYMBOLS.done} 2026-05-16`),
+			"    - [x] Curl G.1",
+			"    - [x] Curl G.2",
+			expect.stringContaining(`    - [x] Curl G.3 ${TASK_SYMBOLS.done} 2026-05-16`),
+		]);
+	});
+
+	test("does not duplicate an already-created recurring occurrence", () => {
+		const registry = new StatusRegistry();
+		const result = toggleTaskAtLine({
+			lines: [
+				`- [ ] Daily workout ${TASK_SYMBOLS.due} 2026-05-23 ${TASK_SYMBOLS.recurrence} every day`,
+				"  - [ ] Cardio",
+				"  - [ ] Curl",
+				"    - [ ] Curl G.1",
+				"    - [ ] Curl G.2",
+				"    - [ ] Curl G.3",
+				`- [ ] Daily workout ${TASK_SYMBOLS.due} 2026-05-22 ${TASK_SYMBOLS.recurrence} every day`,
+				"  - [x] Cardio",
+				"  - [ ] Curl",
+				"    - [x] Curl G.1",
+				"    - [x] Curl G.2",
+				"    - [ ] Curl G.3",
+			],
+			lineNumber: 11,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.fromLine).toBe(6);
+		expect(result?.replacement).toEqual([
 			expect.stringContaining(`- [x] Daily workout ${TASK_SYMBOLS.due} 2026-05-22 ${TASK_SYMBOLS.done} 2026-05-16`),
 			"  - [x] Cardio",
 			expect.stringContaining(`  - [x] Curl ${TASK_SYMBOLS.done} 2026-05-16`),
@@ -390,7 +524,40 @@ describe("TaskLite core", () => {
 			expect.stringContaining(`    - [x] Curl G.3 ${TASK_SYMBOLS.done} 2026-05-16`),
 		]);
 	});
+
+	test("does not reconcile external edits that change line count", () => {
+		const registry = new StatusRegistry();
+		const result = reconcileExternalTaskCompletion({
+			before: ["- [ ] Parent", "  - [ ] Child"],
+			after: ["- [ ] Parent"],
+			registry,
+			settings,
+		});
+
+		expect(result).toBeNull();
+	});
 });
+
+function createTestTasksApi(app: Record<string, unknown> = {}) {
+	const plugin = createTestPlugin(app);
+	return createTasksApiV1FromCore(plugin.api, plugin);
+}
+
+function createTestPlugin(app: Record<string, unknown> = {}) {
+	const registry = new StatusRegistry();
+	const testApp = app as TaskLitePlugin["app"];
+	const api = createTaskLiteCoreApi({
+		app: testApp,
+		registry,
+		getSettings: () => settings,
+	});
+	return {
+		app: testApp,
+		settings,
+		statusRegistry: registry,
+		api,
+	} as TaskLitePlugin;
+}
 
 function parseDate(value: string): Date {
 	const [year, month, day] = value.split("-").map((part) => Number.parseInt(part, 10));

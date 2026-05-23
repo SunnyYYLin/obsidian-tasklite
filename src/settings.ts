@@ -1,6 +1,7 @@
 import { Notice, PluginSettingTab, Setting, type App } from "obsidian";
 import type TaskLitePlugin from "./main";
 import { DEFAULT_STATUS_SETTINGS, normalizeStatusSettings, type StatusSettings } from "./model/status";
+import { t } from "./i18n";
 
 export interface TaskLiteSettings {
 	setCreatedDate: boolean;
@@ -30,8 +31,8 @@ export class TaskLiteSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		new Setting(containerEl)
-			.setName("Set done date")
-			.setDesc("When a task enters done, add the done date.")
+			.setName(t("settings.setDoneDate.name"))
+			.setDesc(t("settings.setDoneDate.desc"))
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.setDoneDate).onChange(async (value) => {
 					this.plugin.settings.setDoneDate = value;
@@ -40,8 +41,8 @@ export class TaskLiteSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Set cancelled date")
-			.setDesc("When a task enters cancelled, add the cancelled date.")
+			.setName(t("settings.setCancelledDate.name"))
+			.setDesc(t("settings.setCancelledDate.desc"))
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.setCancelledDate).onChange(async (value) => {
 					this.plugin.settings.setCancelledDate = value;
@@ -50,8 +51,8 @@ export class TaskLiteSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Set created date")
-			.setDesc("When creating the next recurring task, add the created date.")
+			.setName(t("settings.setCreatedDate.name"))
+			.setDesc(t("settings.setCreatedDate.desc"))
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.setCreatedDate).onChange(async (value) => {
 					this.plugin.settings.setCreatedDate = value;
@@ -60,8 +61,8 @@ export class TaskLiteSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Copy subtasks on recurrence")
-			.setDesc("When a recurring parent task completes, copy its descendant list items into the next occurrence.")
+			.setName(t("settings.copySubtasksOnRecurrence.name"))
+			.setDesc(t("settings.copySubtasksOnRecurrence.desc"))
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.copySubtasksOnRecurrence).onChange(async (value) => {
 					this.plugin.settings.copySubtasksOnRecurrence = value;
@@ -70,23 +71,23 @@ export class TaskLiteSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Emoji suggestions")
-			.setDesc("Show emoji field suggestions while editing task lines.")
+			.setName(t("settings.emojiSuggestions.name"))
+			.setDesc(t("settings.emojiSuggestions.desc"))
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.autoSuggestInEditor).onChange(async (value) => {
 					this.plugin.settings.autoSuggestInEditor = value;
 					await this.plugin.saveSettings();
-					new Notice("Reload the app to fully refresh editor suggestions.");
+					new Notice(t("notice.reloadForSuggestions"));
 				}),
 			);
 
 		new Setting(containerEl)
-			.setName("Import task statuses")
-			.setDesc("Best-effort import from the vault config folder.")
+			.setName(t("settings.importStatuses.name"))
+			.setDesc(t("settings.importStatuses.desc"))
 			.addButton((button) =>
-				button.setButtonText("Import statuses").onClick(async () => {
+				button.setButtonText(t("settings.importStatuses.button")).onClick(async () => {
 					const imported = await this.plugin.importTasksStatusSettings();
-					new Notice(imported ? "Imported status settings." : "No status settings found.");
+					new Notice(imported ? t("notice.importedStatusSettings") : t("notice.noStatusSettings"));
 					this.display();
 				}),
 			);

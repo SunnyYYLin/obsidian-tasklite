@@ -1,4 +1,4 @@
-import { toggleTaskAtLine } from "./toggle";
+import { finishTaskAtLine } from "./toggle";
 import { buildTaskTree } from "../model/tree";
 import { taskIdentityKey } from "../model/taskIdentity";
 import type { StatusRegistry } from "../model/status";
@@ -15,10 +15,11 @@ export function reconcileExternalTaskCompletion({
 	registry: StatusRegistry;
 	settings: TaskLiteSettings;
 }): string | null {
+	if (before.length !== after.length) return null;
 	const lineNumber = findExternallyCompletedLine(before, after, registry);
 	if (lineNumber === null) return null;
 
-	const result = toggleTaskAtLine({lines: before, lineNumber, metadata: null, registry, settings});
+	const result = finishTaskAtLine({lines: before, lineNumber, metadata: null, registry, settings});
 	if (!result) return null;
 
 	const lines = [...before];
