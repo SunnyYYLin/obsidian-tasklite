@@ -120,10 +120,25 @@ class TaskLineModal extends Modal {
 	private addTargetFileSetting(container: HTMLElement, options: TaskLineModalTargetFileOptions): void {
 		const values = targetFileOptions(this.app, options.basePath);
 		let input: TextComponent | null = null;
+		let manualInput = false;
 		new Setting(container).setName(t("modal.file")).addText((text) => {
 			input = text;
+			text.inputEl.readOnly = true;
+			text.inputEl.addClass("taskslite-file-input");
+			text.inputEl.setAttr("autocomplete", "off");
+			text.inputEl.setAttr("autocorrect", "off");
+			text.inputEl.setAttr("autocapitalize", "none");
+			text.inputEl.setAttr("spellcheck", "false");
 			text.setPlaceholder(options.defaultValue).onChange((value) => {
 				this.targetFileValue = value;
+			});
+			text.inputEl.addEventListener("click", () => {
+				if (!manualInput) {
+					new TargetFileSuggestModal(this.app, values, input?.getValue() ?? "", (value) => {
+						this.targetFileValue = value;
+						input?.setValue(value);
+					}).open();
+				}
 			});
 		}).addExtraButton((button) => {
 			button
@@ -134,6 +149,19 @@ class TaskLineModal extends Modal {
 						this.targetFileValue = value;
 						input?.setValue(value);
 					}).open();
+				});
+		}).addExtraButton((button) => {
+			button
+				.setIcon("pencil")
+				.setTooltip(t("modal.editFilePath"))
+				.onClick(() => {
+					manualInput = !manualInput;
+					if (input) {
+						input.inputEl.readOnly = !manualInput;
+						input.inputEl.toggleClass("taskslite-file-input-manual", manualInput);
+						if (manualInput) input.inputEl.focus();
+						else input.inputEl.blur();
+					}
 				});
 		});
 	}
