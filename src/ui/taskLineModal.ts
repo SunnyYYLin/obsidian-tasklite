@@ -1,4 +1,4 @@
-import { Modal, Setting, type App } from "obsidian";
+import { Modal, Setting, SuggestModal, type App, type TextComponent } from "obsidian";
 import { TASK_SYMBOLS } from "../model/format";
 import { allStatuses, type StatusConfiguration, type StatusRegistry } from "../model/status";
 import { fieldsFromTaskLine, taskLineFromFields, type TaskLineFields } from "../model/taskLineFields";
@@ -119,16 +119,22 @@ class TaskLineModal extends Modal {
 
 	private addTargetFileSetting(container: HTMLElement, options: TaskLineModalTargetFileOptions): void {
 		const values = targetFileOptions(this.app, options.basePath);
-		const listId = `taskslite-file-options-${Math.random().toString(36).slice(2)}`;
-		const dataList = container.createEl("datalist", {attr: {id: listId}});
-		for (const value of values) {
-			dataList.createEl("option", {attr: {value}});
-		}
+		let input: TextComponent | null = null;
 		new Setting(container).setName(t("modal.file")).addText((text) => {
-			text.inputEl.setAttr("list", listId);
+			input = text;
 			text.setPlaceholder(options.defaultValue).onChange((value) => {
 				this.targetFileValue = value;
 			});
+		}).addExtraButton((button) => {
+			button
+				.setIcon("folder-open")
+				.setTooltip(t("modal.chooseFile"))
+				.onClick(() => {
+					new TargetFileSuggestModal(this.app, values, input?.getValue() ?? "", (value) => {
+						this.targetFileValue = value;
+						input?.setValue(value);
+					}).open();
+				});
 		});
 	}
 
@@ -218,6 +224,33 @@ class TaskLineModal extends Modal {
 		this.resolved = true;
 		this.resolve(result);
 		this.close();
+	}
+}
+
+class TargetFileSuggestModal extends SuggestModal<string> {
+	constructor(
+		app: App,
+		private readonly values: string[],
+		private readonly initialQuery: string,
+		private readonly onChoose: (value: string) => void,
+	) {
+		super(app);
+		this.setPlaceholder(t("modal.filePlaceholder"));
+		this.inputEl.value = initialQuery;
+	}
+
+	getSuggestions(query: string): string[] {
+		const normalized = query.trim().toLowerCase();
+		if (!normalized) return this.values;
+		return this.values.filter((value) => value.toLowerCase().includes(normalized));
+	}
+
+	renderSuggestion(value: string, el: HTMLElement): void {
+		el.setText(value);
+	}
+
+	onChooseSuggestion(value: string): void {
+		this.onChoose(value);
 	}
 }
 
