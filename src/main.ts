@@ -159,7 +159,8 @@ export default class TaskLitePlugin extends Plugin {
 
 		new InlineTaskRenderer(this, this.app, this.statusRegistry, () => this.settings).register();
 		new ExternalTaskReconciler(this, this.app, this.statusRegistry, () => this.settings).register();
-		this.registerEditorExtension(createLivePreviewExtension(this.app, this.statusRegistry, () => this.settings));
+		const livePreviewExtension = createLivePreviewExtension(this.app, this.statusRegistry, () => this.settings);
+		if (livePreviewExtension) this.registerEditorExtension(livePreviewExtension as Parameters<Plugin["registerEditorExtension"]>[0]);
 		this.registerEditorSuggest(new TaskLiteEmojiSuggest(this));
 		this.addSettingTab(new TaskLiteSettingTab(this.app, this));
 	}
