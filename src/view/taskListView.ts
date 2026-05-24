@@ -99,13 +99,14 @@ export class TaskLiteTaskListView extends ItemView {
 		const content = this.contentEl;
 		content.empty();
 		content.addClass("taskslite-list-root");
+		const layout = content.createDiv({cls: "taskslite-list-layout"});
 
 		const tabs = taskListTabs();
 		const visibleTasks = filterTasksForTab(tasks, this.activeTab);
-		this.renderHeader(content, visibleTasks.length);
-		this.renderTabs(content, tabs, visibleTasks);
+		this.renderHeader(layout, visibleTasks.length);
+		this.renderTabs(layout, tabs, visibleTasks);
 		for (const group of groupTasks(visibleTasks, this.activeTab, this.collapsedGroups)) {
-			this.renderGroup(content, group);
+			this.renderGroup(layout, group);
 		}
 	}
 
@@ -125,12 +126,6 @@ export class TaskLiteTaskListView extends ItemView {
 		addButton.createSpan({text: t("taskTodo.addTask")});
 		addButton.addEventListener("click", async () => {
 			await this.createInboxTask();
-		});
-
-		const refreshButton = actions.createEl("button", {cls: "taskslite-icon-button", attr: {"aria-label": t("common.refresh")}});
-		setIcon(refreshButton, "refresh-cw");
-		refreshButton.addEventListener("click", () => {
-			void this.render();
 		});
 	}
 
@@ -238,6 +233,7 @@ export class TaskLiteTaskListView extends ItemView {
 		for (const datePart of taskDateParts(item.task)) {
 			const date = dates.createSpan({text: datePart, cls: "taskslite-list-date"});
 			if (datePart.startsWith(TASK_SYMBOLS.due)) date.addClass("taskslite-list-date-due");
+			if (datePart.startsWith(TASK_SYMBOLS.scheduled)) date.addClass("taskslite-list-date-scheduled");
 		}
 
 		const extra = otherMetadataParts(item.task);
@@ -251,6 +247,13 @@ export class TaskLiteTaskListView extends ItemView {
 
 	private renderItemActions(row: HTMLElement, item: TaskListItem): void {
 		const actions = row.createDiv({cls: "taskslite-list-actions"});
+		const addSubtaskButton = actions.createEl("button", {cls: "taskslite-list-action", attr: {"aria-label": t("task.action.addSubtask")}});
+		setIcon(addSubtaskButton, "list-plus");
+		addSubtaskButton.addEventListener("click", async (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			await this.createSubtask(item);
+		});
 		const cancelButton = actions.createEl("button", {cls: "taskslite-list-action", attr: {"aria-label": t("task.action.cancel")}});
 		setIcon(cancelButton, item.task.status.type === "CANCELLED" ? "rotate-ccw" : "circle-slash");
 		cancelButton.addEventListener("click", async (event) => {
@@ -311,17 +314,7 @@ export class TaskLiteTaskListView extends ItemView {
 	}
 
 	private async createInboxTask(): Promise<void> {
-		const parentTasks = (await this.api.listTasks({
-			includeChildren: true,
-			includeCompleted: true,
-			includeCancelled: true,
-		}))
-			.filter((record) => record.path.startsWith("Tasks/"))
-			.map((record) => ({
-				label: `${record.basename} / ${record.task.metadata.description}`,
-				path: record.path,
-				lineNumber: record.lineNumber,
-			}));
+		const parentTasks = await this.loadParentTaskOptions();
 		const result = await openTaskLineModalWithTarget({
 			app: this.appRef,
 			title: t("taskTodo.createTask"),
@@ -343,6 +336,49 @@ export class TaskLiteTaskListView extends ItemView {
 			console.warn("TaskLite failed to create inbox task", error);
 		}
 		await this.render();
+	}
+
+	private async createSubtask(parent: TaskListItem): Promise<void> {
+		const parentTasks = await this.loadParentTaskOptions();
+		const result = await openTaskLineModalWithTarget({
+			app: this.appRef,
+			title: t("taskTodo.createTask"),
+			initialLine: "",
+			registry: this.registry,
+			settings: this.getSettings(),
+			targetFile: {
+				basePath: parent.path.replace(/\/[^/]+$/u, ""),
+				defaultValue: parent.path.replace(/^.*\/|\.md$/gu, ""),
+			},
+			parentTask: {
+				options: parentTasks,
+				initialValue: {
+					path: parent.path,
+					lineNumber: parent.lineNumber,
+				},
+			},
+		});
+		if (!result) return;
+
+		try {
+			await this.api.createTask(result.line, {path: result.targetPath, parentLineNumber: result.parentLineNumber});
+		} catch (error) {
+			new Notice(t("notice.inboxPathFolder"));
+			console.warn("TaskLite failed to create subtask", error);
+		}
+		await this.render();
+	}
+
+	private async loadParentTaskOptions(): Promise<Array<{label: string; path: string; lineNumber: number}>> {
+		return (await this.api.listTasks({
+			includeChildren: true,
+			includeCompleted: true,
+			includeCancelled: true,
+		})).map((record) => ({
+			label: `${record.basename} / ${record.task.metadata.description}`,
+			path: record.path,
+			lineNumber: record.lineNumber,
+		}));
 	}
 }
 
@@ -407,13 +443,22 @@ function otherMetadataParts(task: TaskLine): string[] {
 
 function groupTasks(tasks: TaskListItem[], activeTab: TaskListTabId, collapsedGroups: Set<string>): TaskGroup[] {
 	if (activeTab === "today") {
-		const group: TaskGroup = {
-			id: "today",
-			title: t("taskTodo.group.today"),
-			items: tasks,
-			collapsed: collapsedGroups.has("today"),
-		};
-		return group.items.length > 0 ? [group] : [];
+		const overdueItems = tasks.filter(isOverdueTask);
+		const todayItems = tasks.filter((task) => !isOverdueTask(task));
+		return [
+			{
+				id: "today-overdue",
+				title: t("taskTodo.group.overdue"),
+				items: overdueItems.filter(isActiveOverdueTask),
+				collapsed: collapsedGroups.has("today-overdue"),
+			},
+			{
+				id: "today",
+				title: t("taskTodo.group.today"),
+				items: todayItems,
+				collapsed: collapsedGroups.has("today"),
+			},
+		].filter((group) => group.items.length > 0);
 	}
 
 	const today = todayString();
@@ -460,8 +505,20 @@ function isTodayTask(item: TaskListItem): boolean {
 	const today = todayString();
 	const {start, due, scheduled} = item.task.metadata.dates;
 	if (scheduled === today || due === today) return true;
+	if ((scheduled && scheduled < today) || (due && due < today)) return true;
 	if (!start || !due) return false;
 	return start <= today && today <= due;
+}
+
+function isOverdueTask(item: TaskListItem): boolean {
+	const today = todayString();
+	const {scheduled, due} = item.task.metadata.dates;
+	return Boolean((scheduled && scheduled < today) || (due && due < today));
+}
+
+function isActiveOverdueTask(item: TaskListItem): boolean {
+	if (item.task.status.type === "DONE" || item.task.status.type === "CANCELLED") return false;
+	return isOverdueTask(item);
 }
 
 function taskKey(item: Pick<TaskListItem, "path" | "lineNumber">): string {

@@ -26,6 +26,10 @@ interface TaskLineModalParentTaskOptions {
 		path: string;
 		lineNumber: number;
 	}>;
+	initialValue?: {
+		path: string;
+		lineNumber: number;
+	};
 }
 
 export interface TaskLineModalResult {
@@ -61,6 +65,9 @@ class TaskLineModal extends Modal {
 		this.fields = fieldsFromTaskLine(options.initialLine, options.registry);
 		this.isCreateMode = options.initialLine.trim() === "";
 		this.targetFileValue = "";
+		if (options.parentTask?.initialValue) {
+			this.parentTaskValue = serializeParentTaskValue(options.parentTask.initialValue.path, options.parentTask.initialValue.lineNumber);
+		}
 	}
 
 	onOpen(): void {
@@ -82,7 +89,8 @@ class TaskLineModal extends Modal {
 			this.addParentTaskSetting(this.contentEl, this.options.parentTask);
 		}
 
-		new Setting(this.contentEl).setName(t("modal.status")).addDropdown((dropdown) => {
+		new Setting(this.contentEl).setName(t("modal.status")).setClass("taskslite-modal-setting-compact").addDropdown((dropdown) => {
+			dropdown.selectEl.addClass("taskslite-modal-compact-control");
 			for (const status of modalStatuses(this.options.settings, this.options.registry)) {
 				dropdown.addOption(status.symbol, statusOptionLabel(status));
 			}
@@ -115,14 +123,14 @@ class TaskLineModal extends Modal {
 			)
 			.addButton((button) =>
 				button
-					.setButtonText(t("common.save"))
-					.setCta()
-					.onClick(() => {
-						this.finish({
-							line: taskLineFromFields(this.fields, this.options.registry),
-							targetPath: this.options.targetFile ? targetFilePath(this.options.targetFile.basePath, this.targetFileValue) : undefined,
-							parentLineNumber: this.options.parentTask ? parseParentTaskValue(this.parentTaskValue).lineNumber : undefined,
-						});
+						.setButtonText(t("common.save"))
+						.setCta()
+						.onClick(() => {
+							this.finish({
+								line: taskLineFromFields(this.fields, this.options.registry, this.options.initialLine),
+								targetPath: this.options.targetFile ? targetFilePath(this.options.targetFile.basePath, this.targetFileValue) : undefined,
+								parentLineNumber: this.options.parentTask ? parseParentTaskValue(this.parentTaskValue).lineNumber : undefined,
+							});
 					}),
 			);
 	}
@@ -182,9 +190,9 @@ class TaskLineModal extends Modal {
 	}
 
 	private addDateSetting(name: string, key: "start" | "created" | "scheduled" | "due" | "done" | "cancelled"): void {
-		new Setting(this.contentEl).setName(name).addText((text) => {
+		new Setting(this.contentEl).setName(name).setClass("taskslite-modal-setting-compact").addText((text) => {
 			text.inputEl.type = "date";
-			text.inputEl.addClass("taskslite-modal-date-input");
+			text.inputEl.addClass("taskslite-modal-date-input", "taskslite-modal-compact-control");
 			text.setValue(this.fields[key]).onChange((value) => {
 				this.fields[key] = value;
 			});
@@ -192,15 +200,42 @@ class TaskLineModal extends Modal {
 	}
 
 	private addParentTaskSetting(container: HTMLElement, options: TaskLineModalParentTaskOptions): void {
-		new Setting(container).setName(t("modal.parentTask")).addDropdown((dropdown) => {
-			dropdown.addOption("", t("common.none"));
-			for (const option of options.options) {
-				dropdown.addOption(serializeParentTaskValue(option.path, option.lineNumber), option.label);
-			}
-			dropdown.setValue(this.parentTaskValue).onChange((value) => {
-				this.parentTaskValue = value;
+		let input: TextComponent | null = null;
+		new Setting(container)
+			.setName(t("modal.parentTask"))
+			.setClass("taskslite-modal-setting-compact")
+			.addText((text) => {
+				input = text;
+				text.inputEl.readOnly = true;
+				text.inputEl.addClass("taskslite-modal-compact-control", "taskslite-parent-task-input");
+				text.setValue(parentTaskLabel(options.options, this.parentTaskValue));
+				text.inputEl.addEventListener("click", () => {
+					new ParentTaskSuggestModal(this.app, options.options, this.parentTaskValue, (value) => {
+						this.parentTaskValue = value;
+						input?.setValue(parentTaskLabel(options.options, value));
+					}).open();
+				});
+			})
+			.addExtraButton((button) => {
+				button
+					.setIcon("search")
+					.setTooltip(t("modal.parentTask"))
+					.onClick(() => {
+						new ParentTaskSuggestModal(this.app, options.options, this.parentTaskValue, (value) => {
+							this.parentTaskValue = value;
+							input?.setValue(parentTaskLabel(options.options, value));
+						}).open();
+					});
+			})
+			.addExtraButton((button) => {
+				button
+					.setIcon("x")
+					.setTooltip(t("common.none"))
+					.onClick(() => {
+						this.parentTaskValue = "";
+						input?.setValue(parentTaskLabel(options.options, ""));
+					});
 			});
-		});
 	}
 
 	private addAdvancedDetails(): HTMLElement {
@@ -211,7 +246,8 @@ class TaskLineModal extends Modal {
 	}
 
 	private addOnCompletionSetting(container: HTMLElement): void {
-		new Setting(container).setName(`${TASK_SYMBOLS.onCompletion} ${t("modal.onCompletion")}`).addDropdown((dropdown) => {
+		new Setting(container).setName(`${TASK_SYMBOLS.onCompletion} ${t("modal.onCompletion")}`).setClass("taskslite-modal-setting-compact").addDropdown((dropdown) => {
+			dropdown.selectEl.addClass("taskslite-modal-compact-control");
 			const values = ["", "delete", "keep", "complete"];
 			for (const value of values) {
 				dropdown.addOption(value, value || t("common.none"));
@@ -226,7 +262,8 @@ class TaskLineModal extends Modal {
 	}
 
 	private addRecurrenceSetting(container: HTMLElement): void {
-		new Setting(container).setName(`${TASK_SYMBOLS.recurrence} ${t("modal.recurrence")}`).addDropdown((dropdown) => {
+		new Setting(container).setName(`${TASK_SYMBOLS.recurrence} ${t("modal.recurrence")}`).setClass("taskslite-modal-setting-compact").addDropdown((dropdown) => {
+			dropdown.selectEl.addClass("taskslite-modal-compact-control");
 			const values = [
 				"",
 				"every day",
@@ -251,7 +288,8 @@ class TaskLineModal extends Modal {
 	}
 
 	private addPrioritySetting(container: HTMLElement): void {
-		new Setting(container).setName(t("modal.priority")).addDropdown((dropdown) => {
+		new Setting(container).setName(t("modal.priority")).setClass("taskslite-modal-setting-compact").addDropdown((dropdown) => {
+			dropdown.selectEl.addClass("taskslite-modal-compact-control");
 			dropdown.addOption("", t("common.none"));
 			dropdown.addOption(TASK_SYMBOLS.priority.highest, `${TASK_SYMBOLS.priority.highest} ${t("priority.highest")}`);
 			dropdown.addOption(TASK_SYMBOLS.priority.high, `${TASK_SYMBOLS.priority.high} ${t("priority.high")}`);
@@ -310,6 +348,45 @@ class TargetFileSuggestModal extends SuggestModal<string> {
 	}
 }
 
+class ParentTaskSuggestModal extends SuggestModal<string> {
+	constructor(
+		app: App,
+		private readonly options: TaskLineModalParentTaskOptions["options"],
+		private readonly currentValue: string,
+		private readonly onChoose: (value: string) => void,
+	) {
+		super(app);
+		this.setPlaceholder(t("modal.parentTask"));
+		this.inputEl.value = parentTaskLabel(options, currentValue);
+	}
+
+	getSuggestions(query: string): string[] {
+		const normalized = query.trim().toLowerCase();
+		const all = ["", ...this.options.map((option) => serializeParentTaskValue(option.path, option.lineNumber))];
+		if (!normalized) return all;
+		return all.filter((value) => parentTaskSearchText(this.options, value).includes(normalized));
+	}
+
+	renderSuggestion(value: string, el: HTMLElement): void {
+		if (value === "") {
+			el.setText(t("common.none"));
+			return;
+		}
+		const option = this.options.find((entry) => serializeParentTaskValue(entry.path, entry.lineNumber) === value);
+		if (!option) {
+			el.setText(value);
+			return;
+		}
+		el.addClass("taskslite-suggest-item");
+		el.createSpan({text: option.path, cls: "taskslite-suggest-token"});
+		el.createSpan({text: option.label});
+	}
+
+	onChooseSuggestion(value: string): void {
+		this.onChoose(value);
+	}
+}
+
 function modalStatuses(settings: TaskLiteSettings, registry: StatusRegistry): StatusConfiguration[] {
 	const statuses = allStatuses(settings.statusSettings);
 	if (statuses.some((status) => status.symbol === " ")) return statuses;
@@ -351,6 +428,18 @@ function parseParentTaskValue(value: string): {path: string; lineNumber: number 
 	const [path, linePart] = value.split("::");
 	const parsed = Number.parseInt(linePart ?? "", 10);
 	return {path: path ?? "", lineNumber: Number.isFinite(parsed) ? parsed : undefined};
+}
+
+function parentTaskLabel(options: TaskLineModalParentTaskOptions["options"], value: string): string {
+	if (!value) return t("common.none");
+	const option = options.find((entry) => serializeParentTaskValue(entry.path, entry.lineNumber) === value);
+	return option?.label ?? value;
+}
+
+function parentTaskSearchText(options: TaskLineModalParentTaskOptions["options"], value: string): string {
+	if (!value) return t("common.none").toLowerCase();
+	const option = options.find((entry) => serializeParentTaskValue(entry.path, entry.lineNumber) === value);
+	return `${option?.label ?? ""} ${option?.path ?? ""}`.toLowerCase();
 }
 
 function normalizeFolderPath(value: string): string {

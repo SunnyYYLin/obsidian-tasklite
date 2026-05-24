@@ -126,6 +126,11 @@ async function mutateFileTask({
 	settings: TaskLiteSettings;
 	mutate: EditorTaskMutation;
 }): Promise<boolean> {
+	const openEditor = findOpenMarkdownEditor(app, path);
+	if (openEditor) {
+		return mutateOpenEditorTask({editor: openEditor, app, path, lineNumber, registry, settings, mutate});
+	}
+
 	const file = app.vault.getAbstractFileByPath(path);
 	if (!(file instanceof TFile)) return false;
 	const content = await app.vault.read(file);
@@ -135,6 +140,42 @@ async function mutateFileTask({
 
 	lines.splice(result.fromLine, result.toLine - result.fromLine + 1, ...result.replacement);
 	await app.vault.modify(file, lines.join("\n"));
+	if (result.warning) new Notice(result.warning);
+	return true;
+}
+
+function mutateOpenEditorTask({
+	editor,
+	app,
+	path,
+	lineNumber,
+	registry,
+	settings,
+	mutate,
+}: {
+	editor: Editor;
+	app: App;
+	path: string;
+	lineNumber: number;
+	registry: StatusRegistry;
+	settings: TaskLiteSettings;
+	mutate: EditorTaskMutation;
+}): boolean {
+	const cursor = editor.getCursor();
+	const lines = Array.from({length: editor.lineCount()}, (_value, index) => editor.getLine(index));
+	const result = mutate({lines, lineNumber, metadata: getFileCache(app, path), registry, settings});
+	if (!result) return false;
+
+	const from = {line: result.fromLine, ch: 0};
+	const lastLine = editor.getLine(result.toLine);
+	const to = {line: result.toLine, ch: lastLine.length};
+	editor.replaceRange(result.replacement.join("\n"), from, to);
+	const nextCursorLine = Math.min(
+		Math.max(cursor.line + (result.replacement.length - (result.toLine - result.fromLine + 1)), 0),
+		Math.max(editor.lineCount() - 1, 0),
+	);
+	const nextCursorCh = cursor.line === lineNumber ? Math.min(cursor.ch, result.replacement[0]?.length ?? 0) : cursor.ch;
+	editor.setCursor({line: nextCursorLine, ch: nextCursorCh});
 	if (result.warning) new Notice(result.warning);
 	return true;
 }
@@ -173,4 +214,25 @@ function getFileCache(app: App, path: string): CachedMetadata | null {
 	const file = app.vault.getAbstractFileByPath(path);
 	if (!(file instanceof TFile)) return null;
 	return app.metadataCache.getFileCache(file);
+}
+
+function findOpenMarkdownEditor(app: App, path: string): Editor | null {
+	const workspace = app.workspace as {
+		activeEditor?: unknown;
+		getLeavesOfType?: (viewType: string) => Array<{view: unknown}>;
+	};
+	const activeEditor = getEditorForPath(workspace.activeEditor, path);
+	if (activeEditor) return activeEditor;
+
+	for (const leaf of workspace.getLeavesOfType?.("markdown") ?? []) {
+		const editor = getEditorForPath(leaf.view, path);
+		if (editor) return editor;
+	}
+	return null;
+}
+
+function getEditorForPath(value: unknown, path: string): Editor | null {
+	const info = value as {file?: TFile | null; editor?: Editor} | null | undefined;
+	if (info?.file?.path === path && info.editor) return info.editor;
+	return null;
 }

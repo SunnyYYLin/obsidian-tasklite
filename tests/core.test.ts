@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { parseTaskLine, TASK_SYMBOLS } from "../src/model/format";
 import { StatusRegistry } from "../src/model/status";
 import { fieldsFromTaskLine, taskLineFromFields } from "../src/model/taskLineFields";
-import { clickTaskCheckboxAtLine, toggleTaskAtLine } from "../src/editor/toggle";
+import { clickTaskCheckboxAtLine, rightClickTaskCheckboxAtLine, toggleTaskAtLine } from "../src/editor/toggle";
 import { reconcileExternalTaskCompletion } from "../src/editor/externalReconcileCore";
 import { createTaskLiteCoreApi } from "../src/api/taskLiteCoreApi";
 import { createTasksApiV1FromCore } from "../src/compat/tasksApi";
@@ -375,6 +375,15 @@ describe("TaskLite core", () => {
 		expect(taskLineFromFields(fields, registry)).toBe(`- [-] Ship ${TASK_SYMBOLS.cancelled} 2026-05-17`);
 	});
 
+	test("preserves indentation and list marker when round-tripping edited tasks", () => {
+		const registry = new StatusRegistry();
+		const original = `  * [ ] Child task ${TASK_SYMBOLS.due} 2026-05-20`;
+		const fields = fieldsFromTaskLine(original, registry);
+		fields.description = "Edited child";
+
+		expect(taskLineFromFields(fields, registry, original)).toBe(`  * [ ] Edited child ${TASK_SYMBOLS.due} 2026-05-20`);
+	});
+
 	test("auto-completes parent when all task children are done", () => {
 		const registry = new StatusRegistry();
 		const result = toggleTaskAtLine({
@@ -417,6 +426,38 @@ describe("TaskLite core", () => {
 			"  - [x] First child",
 			expect.stringContaining(`  - [x] Second child ${TASK_SYMBOLS.done} 2026-05-16`),
 		]);
+	});
+
+	test("editor checkbox right click uncancels a cancelled task and parent", () => {
+		const registry = new StatusRegistry();
+		const result = rightClickTaskCheckboxAtLine({
+			lines: [
+				`- [-] Parent ${TASK_SYMBOLS.cancelled} 2026-05-16`,
+				`  - [-] Child ${TASK_SYMBOLS.cancelled} 2026-05-16`,
+			],
+			lineNumber: 1,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.replacement).toEqual([
+			"- [ ] Parent",
+			"  - [ ] Child",
+		]);
+	});
+
+	test("right click uncancels a single cancelled task", () => {
+		const registry = new StatusRegistry();
+		const result = rightClickTaskCheckboxAtLine({
+			lines: [`- [-] Cancelled task ${TASK_SYMBOLS.cancelled} 2026-05-16`],
+			lineNumber: 0,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.replacement).toEqual(["- [ ] Cancelled task"]);
 	});
 
 	test("creates next occurrence when a recurring ancestor is auto-completed", () => {

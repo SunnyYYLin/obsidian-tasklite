@@ -12,16 +12,6 @@ export interface TasksPluginApiV1 {
 	executeToggleTaskDoneCommand(line: string, path: string): string;
 }
 
-interface AppWithPlugins extends App {
-	plugins?: {
-		plugins?: Record<string, unknown>;
-	};
-}
-
-interface TasksPluginLike {
-	apiV1?: TasksPluginApiV1;
-}
-
 interface OpenTaskLineModalOptions {
 	app: App;
 	title: string;
@@ -71,18 +61,6 @@ async function defaultOpenTaskLineModal(options: OpenTaskLineModalOptions): Prom
 }
 
 export function registerTasksApiShim(plugin: TaskLitePlugin): () => void {
-	const plugins = (plugin.app as AppWithPlugins).plugins?.plugins;
-	if (!plugins) return () => undefined;
-
-	const existing = plugins[TASKS_PLUGIN_ID] as TasksPluginLike | undefined;
-	if (existing?.apiV1) return () => undefined;
-
-	const shim: TasksPluginLike = {apiV1: createTasksApiV1(plugin)};
-	plugins[TASKS_PLUGIN_ID] = shim;
-
-	return () => {
-		if (plugins[TASKS_PLUGIN_ID] === shim) {
-			delete plugins[TASKS_PLUGIN_ID];
-		}
-	};
+	void plugin;
+	return () => undefined;
 }

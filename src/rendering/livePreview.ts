@@ -1,25 +1,8 @@
-import type { App } from "obsidian";
+import { ViewPlugin, type EditorView, type PluginValue } from "@codemirror/view";
+import type { App, Plugin } from "obsidian";
 import type { StatusRegistry } from "../model/status";
 import type { TaskLiteSettings } from "../settings";
 import { clickTaskCheckboxAtLine, rightClickTaskCheckboxAtLine, type ToggleResult } from "../editor/toggle";
-
-interface EditorViewLike {
-	dom: HTMLElement;
-	posAtDOM(target: Node): number;
-	state: {
-		doc: {
-			lineAt(position: number): {number: number};
-			line(lineNumber: number): {from: number; to: number};
-			toString(): string;
-		};
-		lineBreak: string;
-	};
-	dispatch(spec: {changes: {from: number; to: number; insert: string}}): void;
-}
-
-interface ViewPluginLike {
-	fromClass(value: new (view: EditorViewLike) => {destroy(): void}): unknown;
-}
 
 type CheckboxMutation = (input: {
 	lines: string[];
@@ -29,20 +12,21 @@ type CheckboxMutation = (input: {
 	settings: TaskLiteSettings;
 }) => ToggleResult | null;
 
-export function createLivePreviewExtension(app: App, registry: StatusRegistry, getSettings: () => TaskLiteSettings): unknown | null {
-	const ViewPlugin = loadViewPlugin();
-	if (!ViewPlugin) return null;
-
+export function createLivePreviewExtension(
+	app: App,
+	registry: StatusRegistry,
+	getSettings: () => TaskLiteSettings,
+): Parameters<Plugin["registerEditorExtension"]>[0] {
 	return ViewPlugin.fromClass(
-		class TaskLiteLivePreview {
-			constructor(private readonly view: EditorViewLike) {
-				this.view.dom.addEventListener("click", this.handleClick);
-				this.view.dom.addEventListener("contextmenu", this.handleContextMenu);
+		class TaskLiteLivePreview implements PluginValue {
+			constructor(private readonly view: EditorView) {
+				this.view.dom.addEventListener("click", this.handleClick, true);
+				this.view.dom.addEventListener("contextmenu", this.handleContextMenu, true);
 			}
 
 			destroy(): void {
-				this.view.dom.removeEventListener("click", this.handleClick);
-				this.view.dom.removeEventListener("contextmenu", this.handleContextMenu);
+				this.view.dom.removeEventListener("click", this.handleClick, true);
+				this.view.dom.removeEventListener("contextmenu", this.handleContextMenu, true);
 			}
 
 			private handleClick = (event: MouseEvent): void => {
@@ -54,10 +38,9 @@ export function createLivePreviewExtension(app: App, registry: StatusRegistry, g
 			};
 
 			private applyCheckboxMutation(event: MouseEvent, mutate: CheckboxMutation): void {
-				const rawTarget = event.target;
-				if (!(rawTarget instanceof HTMLElement)) return;
-				const target = rawTarget.closest("input.task-list-item-checkbox");
-				if (!(target instanceof HTMLInputElement) || target.type !== "checkbox") return;
+				const target = event.target;
+				if (!(target instanceof HTMLInputElement) || target.type !== "checkbox" || !target.classList.contains("task-list-item-checkbox")) return;
+
 				const position = this.view.posAtDOM(target);
 				const line = this.view.state.doc.lineAt(position);
 				const activeFile = app.workspace.getActiveFile();
@@ -74,6 +57,8 @@ export function createLivePreviewExtension(app: App, registry: StatusRegistry, g
 
 				event.preventDefault();
 				event.stopPropagation();
+				event.stopImmediatePropagation();
+
 				const from = this.view.state.doc.line(result.fromLine + 1).from;
 				const toLine = this.view.state.doc.line(result.toLine + 1);
 				this.view.dispatch({
@@ -86,23 +71,4 @@ export function createLivePreviewExtension(app: App, registry: StatusRegistry, g
 			}
 		},
 	);
-}
-
-function loadViewPlugin(): ViewPluginLike | null {
-	try {
-		const dynamicRequire = getRuntimeRequire();
-		if (!dynamicRequire) return null;
-		const moduleName = ["@codemirror", "view"].join("/");
-		return dynamicRequire(moduleName)?.ViewPlugin ?? null;
-	} catch {
-		return null;
-	}
-}
-
-function getRuntimeRequire(): ((id: string) => {ViewPlugin?: ViewPluginLike} | null | undefined) | null {
-	const fromGlobal = (globalThis as {require?: unknown}).require;
-	if (typeof fromGlobal === "function") return fromGlobal as (id: string) => {ViewPlugin?: ViewPluginLike} | null | undefined;
-	return Function("return typeof require === 'function' ? require : null")() as
-		| ((id: string) => {ViewPlugin?: ViewPluginLike} | null | undefined)
-		| null;
 }

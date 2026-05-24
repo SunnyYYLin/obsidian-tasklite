@@ -4,7 +4,6 @@ import { registerTasksApiShim } from "./compat/tasksApi";
 import { StatusRegistry } from "./model/status";
 import { cancelEditorTask, toggleEditorTask, toggleEditorTaskCancellation, uncancelEditorTask } from "./editor/apply";
 import { ExternalTaskReconciler } from "./editor/externalReconcile";
-import { InlineTaskRenderer } from "./rendering/inlineRenderer";
 import { createLivePreviewExtension } from "./rendering/livePreview";
 import { TaskLiteEmojiSuggest } from "./suggest/emojiSuggest";
 import { openTaskLineModal } from "./ui/taskLineModal";
@@ -157,10 +156,8 @@ export default class TaskLitePlugin extends Plugin {
 			},
 		});
 
-		new InlineTaskRenderer(this, this.app, this.statusRegistry, () => this.settings).register();
 		new ExternalTaskReconciler(this, this.app, this.statusRegistry, () => this.settings).register();
-		const livePreviewExtension = createLivePreviewExtension(this.app, this.statusRegistry, () => this.settings);
-		if (livePreviewExtension) this.registerEditorExtension(livePreviewExtension as Parameters<Plugin["registerEditorExtension"]>[0]);
+		this.registerEditorExtension(createLivePreviewExtension(this.app, this.statusRegistry, () => this.settings) as Parameters<Plugin["registerEditorExtension"]>[0]);
 		this.registerEditorSuggest(new TaskLiteEmojiSuggest(this));
 		this.addSettingTab(new TaskLiteSettingTab(this.app, this));
 	}

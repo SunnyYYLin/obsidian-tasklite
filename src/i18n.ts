@@ -1,4 +1,4 @@
-const messages = {
+﻿const messages = {
 	en: {
 		"common.cancel": "Cancel",
 		"common.save": "Save",
@@ -16,6 +16,7 @@ const messages = {
 		"command.openTaskList": "Open task list",
 		"task.action.cancel": "Cancel task",
 		"task.action.complete": "Complete task",
+		"task.action.addSubtask": "Add subtask",
 		"task.action.expandSubtasks": "Expand subtasks",
 		"task.action.collapseSubtasks": "Collapse subtasks",
 		"taskTodo.addTask": "Add task",
@@ -25,6 +26,7 @@ const messages = {
 		"taskTodo.empty.inPlan": "No planned tasks.",
 		"taskTodo.empty.today": "Nothing for today.",
 		"taskTodo.group.earlier": "Earlier",
+		"taskTodo.group.overdue": "Overdue",
 		"taskTodo.group.today": "Today",
 		"taskTodo.group.tomorrow": "Tomorrow",
 		"taskTodo.group.next7Days": "Next 7 days",
@@ -83,7 +85,7 @@ const messages = {
 		"command.toggleTask": "切换任务",
 		"command.toggleTaskCancellation": "切换任务取消状态",
 		"command.cancelTask": "取消任务",
-		"command.uncancelTask": "取消任务的取消状态",
+		"command.uncancelTask": "恢复已取消任务",
 		"command.createTask": "创建任务",
 		"command.editTask": "编辑任务",
 		"command.createOrEditTask": "创建或编辑任务",
@@ -91,6 +93,7 @@ const messages = {
 		"command.openTaskList": "打开任务列表",
 		"task.action.cancel": "取消任务",
 		"task.action.complete": "完成任务",
+		"task.action.addSubtask": "添加子任务",
 		"task.action.expandSubtasks": "展开子任务",
 		"task.action.collapseSubtasks": "收起子任务",
 		"taskTodo.addTask": "添加任务",
@@ -100,6 +103,7 @@ const messages = {
 		"taskTodo.empty.inPlan": "没有带计划日期或截止日期的任务。",
 		"taskTodo.empty.today": "今天没有任务。",
 		"taskTodo.group.earlier": "早前",
+		"taskTodo.group.overdue": "逾期",
 		"taskTodo.group.today": "今天",
 		"taskTodo.group.tomorrow": "明天",
 		"taskTodo.group.next7Days": "未来 7 天",

@@ -1,22 +1,3 @@
-.taskslite-task {
-	--taskslite-muted: var(--text-muted);
-}
-
-.taskslite-task[data-task-status-type="DONE"] .taskslite-description,
-.taskslite-task[data-task-status-type="CANCELLED"] .taskslite-description {
-	color: var(--text-muted);
-	text-decoration: line-through;
-}
-
-.taskslite-task[data-task-status-type="IN_PROGRESS"] .taskslite-description {
-	color: var(--text-accent);
-}
-
-.taskslite-metadata {
-	color: var(--taskslite-muted);
-	font-size: 0.9em;
-}
-
 .taskslite-suggest-item {
 	display: flex;
 	gap: 0.5rem;
@@ -32,6 +13,14 @@
 	align-items: stretch;
 }
 
+.taskslite-modal .setting-item {
+	gap: 0.75rem;
+}
+
+.taskslite-modal .setting-item-info {
+	min-width: 0;
+}
+
 .taskslite-modal input,
 .taskslite-modal textarea,
 .taskslite-modal select {
@@ -42,6 +31,10 @@
 .taskslite-modal .setting-item-control > select,
 .taskslite-modal-date-input {
 	width: min(14rem, 100%);
+}
+
+.taskslite-modal-compact-control {
+	max-width: 100%;
 }
 
 .taskslite-modal-description {
@@ -78,13 +71,24 @@
 	color: var(--text-normal);
 }
 
+.taskslite-list-layout {
+	width: min(58rem, 100%);
+	margin: 0 auto;
+}
+
+.taskslite-list-layout::after {
+	content: "";
+	display: block;
+	height: calc(1rem + env(safe-area-inset-bottom, 0px) + 4.5rem);
+}
+
 .taskslite-list-header {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
 	gap: 0.75rem;
-	margin: 0 auto 1rem;
-	max-width: 58rem;
+	margin: 0 0 1rem;
+	width: 100%;
 }
 
 .taskslite-list-title-group,
@@ -163,9 +167,45 @@
 	background: var(--background-secondary-alt);
 }
 
+.taskslite-list-tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	width: 100%;
+	margin: 0 0 1rem;
+}
+
+.taskslite-list-tab {
+	-webkit-appearance: none;
+	appearance: none;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	height: 2.1rem;
+	padding: 0 0.85rem;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	background: var(--background-secondary);
+	color: var(--text-muted);
+	font: inherit;
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.taskslite-list-tab:hover {
+	background: var(--background-secondary-alt);
+	color: var(--text-normal);
+}
+
+.taskslite-list-tab.is-active {
+	border-color: color-mix(in srgb, var(--text-accent) 35%, var(--background-modifier-border));
+	background: color-mix(in srgb, var(--text-accent) 12%, var(--background-secondary));
+	color: var(--text-accent);
+}
+
 .taskslite-list-section {
-	width: min(58rem, 100%);
-	margin: 0 auto 0.75rem;
+	width: 100%;
+	margin: 0 0 0.75rem;
 }
 
 .taskslite-section-header {
@@ -284,6 +324,11 @@
 	color: var(--text-muted);
 }
 
+.taskslite-list-item[data-task-status-type="CANCELLED"] .taskslite-list-item-title,
+.taskslite-list-item[data-task-status-type="CANCELLED"] .taskslite-list-item-meta {
+	opacity: 0.45;
+}
+
 .taskslite-list-item-body {
 	min-width: 0;
 }
@@ -358,6 +403,10 @@
 	color: var(--text-accent);
 }
 
+.taskslite-list-date-scheduled {
+	color: color-mix(in srgb, var(--color-orange) 75%, var(--text-normal));
+}
+
 .taskslite-list-parent {
 	color: var(--text-faint);
 }
@@ -376,6 +425,10 @@
 	justify-content: flex-end;
 	gap: 0.25rem;
 	opacity: 0.75;
+}
+
+.taskslite-parent-task-input {
+	cursor: pointer;
 }
 
 .taskslite-list-item:hover .taskslite-list-actions,
@@ -417,9 +470,56 @@
 }
 
 @media (max-width: 700px) {
+	.taskslite-modal .setting-item.taskslite-modal-setting-compact {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: start;
+		column-gap: 0.75rem;
+	}
+
+	.taskslite-modal .setting-item.taskslite-modal-setting-compact .setting-item-info {
+		margin: 0;
+		padding-right: 0;
+	}
+
+	.taskslite-modal .setting-item.taskslite-modal-setting-compact .setting-item-name {
+		font-size: 0.95rem;
+		line-height: 1.25;
+	}
+
+	.taskslite-modal .setting-item.taskslite-modal-setting-compact .setting-item-control {
+		display: flex;
+		flex: 0 0 auto;
+		align-items: flex-start;
+		justify-content: flex-end;
+		width: auto;
+		margin-top: 0;
+	}
+
+	.taskslite-modal .taskslite-modal-compact-control,
+	.taskslite-modal .setting-item.taskslite-modal-setting-compact .setting-item-control > select,
+	.taskslite-modal .setting-item.taskslite-modal-setting-compact .setting-item-control > input[type="date"] {
+		width: min(9.75rem, 40vw);
+		min-width: 7.25rem;
+		max-width: 100%;
+		height: 2.5rem;
+		min-height: 2.5rem;
+		padding-top: 0.2rem;
+		padding-bottom: 0.2rem;
+		padding-left: 0.9rem;
+		padding-right: 2rem;
+		font-size: 0.95rem;
+		line-height: 1.2;
+		border-radius: 999px;
+	}
+
 	.taskslite-list-root {
 		padding: 0.75rem;
-		padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px) + 5.5rem);
+		padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px) + 7.5rem);
+	}
+
+	.taskslite-list-layout::after {
+		height: calc(2.5rem + env(safe-area-inset-bottom, 0px) + 8.5rem);
 	}
 
 	.taskslite-list-header,
@@ -431,6 +531,13 @@
 
 	.taskslite-list-header {
 		align-items: flex-start;
+	}
+
+	.taskslite-list-tabs {
+		flex-wrap: nowrap;
+		overflow-x: auto;
+		-webkit-overflow-scrolling: touch;
+		padding-bottom: 0.1rem;
 	}
 
 	.taskslite-list-header-actions {

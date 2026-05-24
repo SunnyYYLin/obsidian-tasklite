@@ -38,8 +38,9 @@ export function fieldsFromTaskLine(line: string, registry: StatusRegistry): Task
 	};
 }
 
-export function taskLineFromFields(fields: TaskLineFields, registry: StatusRegistry): string {
+export function taskLineFromFields(fields: TaskLineFields, registry: StatusRegistry, templateLine = ""): string {
 	const status = registry.get(fields.statusSymbol);
+	const templateTask = normalizeTaskLine(templateLine, registry);
 	const metadata: TaskMetadata = {
 		description: fields.description.trim(),
 		priority: emptyToNull(fields.priority),
@@ -59,8 +60,8 @@ export function taskLineFromFields(fields: TaskLineFields, registry: StatusRegis
 		tags: [],
 	};
 	const task: TaskLine = {
-		indentation: "",
-		listMarker: "-",
+		indentation: templateTask.indentation,
+		listMarker: templateTask.listMarker || "-",
 		status,
 		metadata,
 		original: "",
