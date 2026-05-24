@@ -96,6 +96,7 @@ bun run build
 ## Versioning & releases
 
 - Bump `version` in `manifest.json` (SemVer) and update `versions.json` to map plugin version → minimum app version.
+- Agent rule: every time the agent makes a user-visible optimization or polish change, increment the prerelease alpha version by 1. For example, `0.2.2-alpha.2` becomes `0.2.2-alpha.3`.
 - Use the repository release flow for normal releases:
   1. Run `bun test` and `bun run build`.
   2. Run `npm version patch`, `npm version minor`, or `npm version major` as appropriate. The version script updates `manifest.json` and `versions.json`; npm updates `package.json` and `package-lock.json`.

@@ -12,6 +12,7 @@ interface TaskLineModalOptions {
 	registry: StatusRegistry;
 	settings: TaskLiteSettings;
 	targetFile?: TaskLineModalTargetFileOptions;
+	parentTask?: TaskLineModalParentTaskOptions;
 }
 
 interface TaskLineModalTargetFileOptions {
@@ -19,9 +20,18 @@ interface TaskLineModalTargetFileOptions {
 	defaultValue: string;
 }
 
+interface TaskLineModalParentTaskOptions {
+	options: Array<{
+		label: string;
+		path: string;
+		lineNumber: number;
+	}>;
+}
+
 export interface TaskLineModalResult {
 	line: string;
 	targetPath?: string;
+	parentLineNumber?: number;
 }
 
 export function openTaskLineModal(options: TaskLineModalOptions): Promise<string> {
@@ -40,6 +50,7 @@ class TaskLineModal extends Modal {
 	private readonly fields: TaskLineFields;
 	private readonly isCreateMode: boolean;
 	private targetFileValue: string;
+	private parentTaskValue = "";
 	private resolved = false;
 
 	constructor(
@@ -66,6 +77,9 @@ class TaskLineModal extends Modal {
 
 		if (this.options.targetFile) {
 			this.addTargetFileSetting(this.contentEl, this.options.targetFile);
+		}
+		if (this.options.parentTask) {
+			this.addParentTaskSetting(this.contentEl, this.options.parentTask);
 		}
 
 		new Setting(this.contentEl).setName(t("modal.status")).addDropdown((dropdown) => {
@@ -107,6 +121,7 @@ class TaskLineModal extends Modal {
 						this.finish({
 							line: taskLineFromFields(this.fields, this.options.registry),
 							targetPath: this.options.targetFile ? targetFilePath(this.options.targetFile.basePath, this.targetFileValue) : undefined,
+							parentLineNumber: this.options.parentTask ? parseParentTaskValue(this.parentTaskValue).lineNumber : undefined,
 						});
 					}),
 			);
@@ -169,8 +184,21 @@ class TaskLineModal extends Modal {
 	private addDateSetting(name: string, key: "start" | "created" | "scheduled" | "due" | "done" | "cancelled"): void {
 		new Setting(this.contentEl).setName(name).addText((text) => {
 			text.inputEl.type = "date";
+			text.inputEl.addClass("taskslite-modal-date-input");
 			text.setValue(this.fields[key]).onChange((value) => {
 				this.fields[key] = value;
+			});
+		});
+	}
+
+	private addParentTaskSetting(container: HTMLElement, options: TaskLineModalParentTaskOptions): void {
+		new Setting(container).setName(t("modal.parentTask")).addDropdown((dropdown) => {
+			dropdown.addOption("", t("common.none"));
+			for (const option of options.options) {
+				dropdown.addOption(serializeParentTaskValue(option.path, option.lineNumber), option.label);
+			}
+			dropdown.setValue(this.parentTaskValue).onChange((value) => {
+				this.parentTaskValue = value;
 			});
 		});
 	}
@@ -313,6 +341,16 @@ function targetFilePath(basePath: string, value: string): string {
 	const withoutLeadingSlash = trimmed.replace(/^\/+/u, "");
 	const withExtension = withoutLeadingSlash.toLowerCase().endsWith(".md") ? withoutLeadingSlash : `${withoutLeadingSlash}.md`;
 	return `${prefix}/${withExtension}`.replace(/\/+/gu, "/");
+}
+
+function serializeParentTaskValue(path: string, lineNumber: number): string {
+	return `${path}::${lineNumber}`;
+}
+
+function parseParentTaskValue(value: string): {path: string; lineNumber: number | undefined} {
+	const [path, linePart] = value.split("::");
+	const parsed = Number.parseInt(linePart ?? "", 10);
+	return {path: path ?? "", lineNumber: Number.isFinite(parsed) ? parsed : undefined};
 }
 
 function normalizeFolderPath(value: string): string {

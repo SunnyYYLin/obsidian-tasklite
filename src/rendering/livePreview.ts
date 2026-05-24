@@ -54,7 +54,9 @@ export function createLivePreviewExtension(app: App, registry: StatusRegistry, g
 			};
 
 			private applyCheckboxMutation(event: MouseEvent, mutate: CheckboxMutation): void {
-				const target = event.target;
+				const rawTarget = event.target;
+				if (!(rawTarget instanceof HTMLElement)) return;
+				const target = rawTarget.closest("input.task-list-item-checkbox");
 				if (!(target instanceof HTMLInputElement) || target.type !== "checkbox") return;
 				const position = this.view.posAtDOM(target);
 				const line = this.view.state.doc.lineAt(position);
