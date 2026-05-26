@@ -1,6 +1,7 @@
 import type { App, CachedMetadata, Editor } from "obsidian";
 import { Notice, TFile } from "obsidian";
 import type { StatusRegistry } from "../model/status";
+import type { TaskDocumentStore } from "../model/taskDocumentStore";
 import type { TaskLiteSettings } from "../settings";
 import { cancelTaskAtLine, clickTaskCheckboxAtLine, rightClickTaskCheckboxAtLine, uncancelTaskAtLine, type ToggleResult } from "./toggle";
 
@@ -18,14 +19,16 @@ export function toggleEditorTask({
 	path,
 	registry,
 	settings,
+	documentStore,
 }: {
 	editor: Editor;
 	app: App;
 	path: string;
 	registry: StatusRegistry;
 	settings: TaskLiteSettings;
+	documentStore?: TaskDocumentStore;
 }): boolean {
-	return mutateEditorTask({editor, app, path, registry, settings, mutate: clickTaskCheckboxAtLine});
+	return mutateEditorTask({editor, app, path, registry, settings, documentStore, mutate: clickTaskCheckboxAtLine});
 }
 
 export function cancelEditorTask({
@@ -34,14 +37,16 @@ export function cancelEditorTask({
 	path,
 	registry,
 	settings,
+	documentStore,
 }: {
 	editor: Editor;
 	app: App;
 	path: string;
 	registry: StatusRegistry;
 	settings: TaskLiteSettings;
+	documentStore?: TaskDocumentStore;
 }): boolean {
-	return mutateEditorTask({editor, app, path, registry, settings, mutate: cancelTaskAtLine});
+	return mutateEditorTask({editor, app, path, registry, settings, documentStore, mutate: cancelTaskAtLine});
 }
 
 export function uncancelEditorTask({
@@ -50,14 +55,16 @@ export function uncancelEditorTask({
 	path,
 	registry,
 	settings,
+	documentStore,
 }: {
 	editor: Editor;
 	app: App;
 	path: string;
 	registry: StatusRegistry;
 	settings: TaskLiteSettings;
+	documentStore?: TaskDocumentStore;
 }): boolean {
-	return mutateEditorTask({editor, app, path, registry, settings, mutate: uncancelTaskAtLine});
+	return mutateEditorTask({editor, app, path, registry, settings, documentStore, mutate: uncancelTaskAtLine});
 }
 
 export function toggleEditorTaskCancellation({
@@ -66,17 +73,19 @@ export function toggleEditorTaskCancellation({
 	path,
 	registry,
 	settings,
+	documentStore,
 }: {
 	editor: Editor;
 	app: App;
 	path: string;
 	registry: StatusRegistry;
 	settings: TaskLiteSettings;
+	documentStore?: TaskDocumentStore;
 }): boolean {
 	const line = editor.getLine(editor.getCursor().line);
 	const statusSymbol = line.match(/\[(.)\]/u)?.[1] ?? "";
 	const mutate = registry.get(statusSymbol).type === "CANCELLED" ? uncancelTaskAtLine : cancelTaskAtLine;
-	return mutateEditorTask({editor, app, path, registry, settings, mutate});
+	return mutateEditorTask({editor, app, path, registry, settings, documentStore, mutate});
 }
 
 export async function toggleFileTask({
@@ -85,14 +94,16 @@ export async function toggleFileTask({
 	lineNumber,
 	registry,
 	settings,
+	documentStore,
 }: {
 	app: App;
 	path: string;
 	lineNumber: number;
 	registry: StatusRegistry;
 	settings: TaskLiteSettings;
+	documentStore?: TaskDocumentStore;
 }): Promise<boolean> {
-	return mutateFileTask({app, path, lineNumber, registry, settings, mutate: clickTaskCheckboxAtLine});
+	return mutateFileTask({app, path, lineNumber, registry, settings, documentStore, mutate: clickTaskCheckboxAtLine});
 }
 
 export async function toggleFileTaskCancellation({
@@ -101,14 +112,16 @@ export async function toggleFileTaskCancellation({
 	lineNumber,
 	registry,
 	settings,
+	documentStore,
 }: {
 	app: App;
 	path: string;
 	lineNumber: number;
 	registry: StatusRegistry;
 	settings: TaskLiteSettings;
+	documentStore?: TaskDocumentStore;
 }): Promise<boolean> {
-	return mutateFileTask({app, path, lineNumber, registry, settings, mutate: rightClickTaskCheckboxAtLine});
+	return mutateFileTask({app, path, lineNumber, registry, settings, documentStore, mutate: rightClickTaskCheckboxAtLine});
 }
 
 async function mutateFileTask({
@@ -117,6 +130,7 @@ async function mutateFileTask({
 	lineNumber,
 	registry,
 	settings,
+	documentStore,
 	mutate,
 }: {
 	app: App;
@@ -124,11 +138,12 @@ async function mutateFileTask({
 	lineNumber: number;
 	registry: StatusRegistry;
 	settings: TaskLiteSettings;
+	documentStore?: TaskDocumentStore;
 	mutate: EditorTaskMutation;
 }): Promise<boolean> {
 	const openEditor = findOpenMarkdownEditor(app, path);
 	if (openEditor) {
-		return mutateOpenEditorTask({editor: openEditor, app, path, lineNumber, registry, settings, mutate});
+		return mutateOpenEditorTask({editor: openEditor, app, path, lineNumber, registry, settings, documentStore, mutate});
 	}
 
 	const file = app.vault.getAbstractFileByPath(path);
@@ -151,6 +166,7 @@ function mutateOpenEditorTask({
 	lineNumber,
 	registry,
 	settings,
+	documentStore,
 	mutate,
 }: {
 	editor: Editor;
@@ -159,6 +175,7 @@ function mutateOpenEditorTask({
 	lineNumber: number;
 	registry: StatusRegistry;
 	settings: TaskLiteSettings;
+	documentStore?: TaskDocumentStore;
 	mutate: EditorTaskMutation;
 }): boolean {
 	const cursor = editor.getCursor();
@@ -170,6 +187,7 @@ function mutateOpenEditorTask({
 	const lastLine = editor.getLine(result.toLine);
 	const to = {line: result.toLine, ch: lastLine.length};
 	editor.replaceRange(result.replacement.join("\n"), from, to);
+	refreshOpenEditorDocument(app, path, editor, documentStore);
 	const nextCursorLine = Math.min(
 		Math.max(cursor.line + (result.replacement.length - (result.toLine - result.fromLine + 1)), 0),
 		Math.max(editor.lineCount() - 1, 0),
@@ -186,6 +204,7 @@ function mutateEditorTask({
 	path,
 	registry,
 	settings,
+	documentStore,
 	mutate,
 }: {
 	editor: Editor;
@@ -193,6 +212,7 @@ function mutateEditorTask({
 	path: string;
 	registry: StatusRegistry;
 	settings: TaskLiteSettings;
+	documentStore?: TaskDocumentStore;
 	mutate: EditorTaskMutation;
 }): boolean {
 	const cursor = editor.getCursor();
@@ -205,9 +225,17 @@ function mutateEditorTask({
 	const lastLine = editor.getLine(result.toLine);
 	const to = {line: result.toLine, ch: lastLine.length};
 	editor.replaceRange(result.replacement.join("\n"), from, to);
+	refreshOpenEditorDocument(app, path, editor, documentStore);
 	editor.setCursor({line: result.fromLine, ch: Math.min(cursor.ch, result.replacement[0]?.length ?? 0)});
 	if (result.warning) new Notice(result.warning);
 	return true;
+}
+
+function refreshOpenEditorDocument(app: App, path: string, editor: Editor, documentStore: TaskDocumentStore | undefined): void {
+	if (!documentStore) return;
+	const file = app.vault.getAbstractFileByPath(path);
+	if (!(file instanceof TFile)) return;
+	void documentStore.replaceDocumentContent(file, editor.getValue());
 }
 
 function getFileCache(app: App, path: string): CachedMetadata | null {

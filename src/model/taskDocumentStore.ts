@@ -1,0 +1,196 @@
+import type { App, CachedMetadata, Plugin, TFile } from "obsidian";
+import { buildTaskTree, type TaskTree, type TaskTreeNode } from "./tree";
+import type { StatusRegistry } from "./status";
+import type { TaskLine } from "./format";
+
+export interface TaskDocument {
+	path: string;
+	basename: string;
+	file: TFile;
+	lines: string[];
+	tree: TaskTree;
+	content: string;
+}
+
+export interface TaskDocumentRecord {
+	path: string;
+	basename: string;
+	lineNumber: number;
+	parentLine: number | null;
+	depth: number;
+	hasChildren: boolean;
+	task: TaskLine;
+}
+
+export class TaskDocumentStore {
+	private readonly documents = new Map<string, TaskDocument>();
+	private readonly recordsByPath = new Map<string, TaskDocumentRecord[]>();
+	private readonly dirtyPaths = new Set<string>();
+	private readonly rebuildTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	private indexedAllFiles = false;
+
+	constructor(
+		private readonly app: App,
+		private readonly registry: StatusRegistry,
+	) {}
+
+	register(plugin: Plugin): void {
+		plugin.registerEvent(
+			this.app.vault.on("modify", (file) => {
+				if (!isMarkdownFile(file)) return;
+				this.queueRebuild(file);
+			}),
+		);
+		plugin.registerEvent(
+			this.app.vault.on("create", (file) => {
+				if (!isMarkdownFile(file)) return;
+				this.queueRebuild(file);
+			}),
+		);
+		plugin.registerEvent(
+			this.app.vault.on("delete", (file) => {
+				if (!isPathFile(file)) return;
+				this.forget(file.path);
+			}),
+		);
+		plugin.registerEvent(
+			this.app.vault.on("rename", (file, oldPath) => {
+				this.forget(oldPath);
+				if (isMarkdownFile(file)) this.queueRebuild(file);
+			}),
+		);
+	}
+
+	invalidate(path: string): void {
+		this.dirtyPaths.add(path);
+	}
+
+	getCachedContent(path: string): string | null {
+		return this.documents.get(path)?.content ?? null;
+	}
+
+	invalidateAll(): void {
+		this.documents.clear();
+		this.recordsByPath.clear();
+		this.dirtyPaths.clear();
+		this.indexedAllFiles = false;
+	}
+
+	forget(path: string): void {
+		this.documents.delete(path);
+		this.recordsByPath.delete(path);
+		this.dirtyPaths.delete(path);
+		const timer = this.rebuildTimers.get(path);
+		if (timer !== undefined) clearTimeout(timer);
+		this.rebuildTimers.delete(path);
+	}
+
+	async getDocumentByPath(path: string): Promise<TaskDocument | null> {
+		const file = this.app.vault.getAbstractFileByPath(path);
+		if (!isMarkdownFile(file)) return null;
+		return this.getDocument(file);
+	}
+
+	async getDocument(file: TFile): Promise<TaskDocument> {
+		const existing = this.documents.get(file.path);
+		if (existing && !this.dirtyPaths.has(file.path)) return existing;
+		return this.rebuildFile(file);
+	}
+
+	async replaceDocumentContent(file: TFile, content: string): Promise<TaskDocument> {
+		return this.setDocument(file, content, this.app.metadataCache.getFileCache(file));
+	}
+
+	async listRecords(): Promise<TaskDocumentRecord[]> {
+		await this.ensureAllFilesIndexed();
+		const records: TaskDocumentRecord[] = [];
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			if (this.dirtyPaths.has(file.path)) await this.rebuildFile(file);
+			records.push(...(this.recordsByPath.get(file.path) ?? []));
+		}
+		return records;
+	}
+
+	private queueRebuild(file: TFile): void {
+		this.invalidate(file.path);
+		const existingTimer = this.rebuildTimers.get(file.path);
+		if (existingTimer !== undefined) clearTimeout(existingTimer);
+		const timer = setTimeout(() => {
+			this.rebuildTimers.delete(file.path);
+			void this.rebuildFile(file);
+		}, 200);
+		this.rebuildTimers.set(file.path, timer);
+	}
+
+	private async ensureAllFilesIndexed(): Promise<void> {
+		if (this.indexedAllFiles) return;
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			await this.getDocument(file);
+		}
+		this.indexedAllFiles = true;
+	}
+
+	private async rebuildFile(file: TFile): Promise<TaskDocument> {
+		const content = await this.app.vault.cachedRead(file);
+		return this.setDocument(file, content, this.app.metadataCache.getFileCache(file));
+	}
+
+	private setDocument(file: TFile, content: string, metadata: CachedMetadata | null): TaskDocument {
+		const lines = content.split("\n");
+		const tree = buildTaskTree(lines, metadata, this.registry);
+		const document: TaskDocument = {
+			path: file.path,
+			basename: file.basename,
+			file,
+			lines,
+			tree,
+			content,
+		};
+		this.documents.set(file.path, document);
+		this.recordsByPath.set(file.path, taskRecordsFromDocument(document));
+		this.dirtyPaths.delete(file.path);
+		return document;
+	}
+}
+
+function taskRecordsFromDocument(document: TaskDocument): TaskDocumentRecord[] {
+	const records: TaskDocumentRecord[] = [];
+	for (const node of document.tree.nodes) {
+		if (!node.task) continue;
+		records.push({
+			path: document.path,
+			basename: document.basename,
+			lineNumber: node.lineNumber,
+			parentLine: node.parentLine,
+			depth: taskDepth(node),
+			hasChildren: node.children.some((child) => child.task),
+			task: node.task,
+		});
+	}
+	return records;
+}
+
+function taskDepth(node: TaskTreeNode): number {
+	let depth = 0;
+	let current = node.parent;
+	while (current) {
+		depth++;
+		current = current.parent;
+	}
+	return depth;
+}
+
+function isMarkdownFile(value: unknown): value is TFile {
+	return Boolean(
+		value &&
+			typeof value === "object" &&
+			"path" in value &&
+			"basename" in value &&
+			"extension" in value &&
+			(value as {extension?: unknown}).extension === "md",
+	);
+}
+
+function isPathFile(value: unknown): value is {path: string} {
+	return Boolean(value && typeof value === "object" && "path" in value && typeof (value as {path?: unknown}).path === "string");
+}

@@ -1,6 +1,7 @@
 import { ViewPlugin, type EditorView, type PluginValue } from "@codemirror/view";
 import type { App, Plugin } from "obsidian";
 import type { StatusRegistry } from "../model/status";
+import type { TaskDocumentStore } from "../model/taskDocumentStore";
 import type { TaskLiteSettings } from "../settings";
 import { clickTaskCheckboxAtLine, rightClickTaskCheckboxAtLine, type ToggleResult } from "../editor/toggle";
 
@@ -16,6 +17,7 @@ export function createLivePreviewExtension(
 	app: App,
 	registry: StatusRegistry,
 	getSettings: () => TaskLiteSettings,
+	documentStore?: TaskDocumentStore,
 ): Parameters<Plugin["registerEditorExtension"]>[0] {
 	return ViewPlugin.fromClass(
 		class TaskLiteLivePreview implements PluginValue {
@@ -68,6 +70,9 @@ export function createLivePreviewExtension(
 						insert: result.replacement.join(this.view.state.lineBreak),
 					},
 				});
+				if (activeFile) {
+					void documentStore?.replaceDocumentContent(activeFile, this.view.state.doc.toString());
+				}
 			}
 		},
 	);

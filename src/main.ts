@@ -2,6 +2,7 @@ import { MarkdownView, Notice, Plugin, type Editor } from "obsidian";
 import { createTaskLiteCoreApi, type TaskLiteCoreApi } from "./api/taskLiteCoreApi";
 import { registerTasksApiShim } from "./compat/tasksApi";
 import { StatusRegistry } from "./model/status";
+import { TaskDocumentStore } from "./model/taskDocumentStore";
 import { cancelEditorTask, toggleEditorTask, toggleEditorTaskCancellation, uncancelEditorTask } from "./editor/apply";
 import { ExternalTaskReconciler } from "./editor/externalReconcile";
 import { createLivePreviewExtension } from "./rendering/livePreview";
@@ -20,6 +21,7 @@ import {
 export default class TaskLitePlugin extends Plugin {
 	settings: TaskLiteSettings = DEFAULT_SETTINGS;
 	readonly statusRegistry = new StatusRegistry(DEFAULT_SETTINGS.statusSettings);
+	readonly documentStore = new TaskDocumentStore(this.app, this.statusRegistry);
 	api!: TaskLiteCoreApi;
 	private unregisterTasksApiShim: (() => void) | null = null;
 
@@ -30,7 +32,9 @@ export default class TaskLitePlugin extends Plugin {
 			app: this.app,
 			registry: this.statusRegistry,
 			getSettings: () => this.settings,
+			documentStore: this.documentStore,
 		});
+		this.documentStore.register(this);
 		this.unregisterTasksApiShim = registerTasksApiShim(this);
 		this.registerView(
 			TASKLITE_TASK_LIST_VIEW,
@@ -54,6 +58,7 @@ export default class TaskLitePlugin extends Plugin {
 					path,
 					registry: this.statusRegistry,
 					settings: this.settings,
+					documentStore: this.documentStore,
 				});
 			},
 		});
@@ -72,6 +77,7 @@ export default class TaskLitePlugin extends Plugin {
 					path,
 					registry: this.statusRegistry,
 					settings: this.settings,
+					documentStore: this.documentStore,
 				});
 			},
 		});
@@ -90,6 +96,7 @@ export default class TaskLitePlugin extends Plugin {
 					path,
 					registry: this.statusRegistry,
 					settings: this.settings,
+					documentStore: this.documentStore,
 				});
 			},
 		});
@@ -108,6 +115,7 @@ export default class TaskLitePlugin extends Plugin {
 					path,
 					registry: this.statusRegistry,
 					settings: this.settings,
+					documentStore: this.documentStore,
 				});
 			},
 		});
@@ -156,8 +164,8 @@ export default class TaskLitePlugin extends Plugin {
 			},
 		});
 
-		new ExternalTaskReconciler(this, this.app, this.statusRegistry, () => this.settings).register();
-		this.registerEditorExtension(createLivePreviewExtension(this.app, this.statusRegistry, () => this.settings) as Parameters<Plugin["registerEditorExtension"]>[0]);
+		new ExternalTaskReconciler(this, this.app, this.statusRegistry, () => this.settings, this.documentStore).register();
+		this.registerEditorExtension(createLivePreviewExtension(this.app, this.statusRegistry, () => this.settings, this.documentStore) as Parameters<Plugin["registerEditorExtension"]>[0]);
 		this.registerEditorSuggest(new TaskLiteEmojiSuggest(this));
 		this.addSettingTab(new TaskLiteSettingTab(this.app, this));
 	}
@@ -228,6 +236,7 @@ export default class TaskLitePlugin extends Plugin {
 
 	async saveSettings(): Promise<void> {
 		this.statusRegistry.set(this.settings.statusSettings);
+		this.documentStore.invalidateAll();
 		await this.saveData(this.settings);
 	}
 

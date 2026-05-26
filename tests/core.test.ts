@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { parseTaskLine, TASK_SYMBOLS } from "../src/model/format";
 import { StatusRegistry } from "../src/model/status";
 import { fieldsFromTaskLine, taskLineFromFields } from "../src/model/taskLineFields";
+import { TaskDocumentStore } from "../src/model/taskDocumentStore";
 import { clickTaskCheckboxAtLine, rightClickTaskCheckboxAtLine, toggleTaskAtLine } from "../src/editor/toggle";
 import { reconcileExternalTaskCompletion } from "../src/editor/externalReconcileCore";
 import { createTaskLiteCoreApi } from "../src/api/taskLiteCoreApi";
@@ -577,6 +578,53 @@ describe("TaskLite core", () => {
 
 		expect(result).toBeNull();
 	});
+
+	test("caches task records and rebuilds only invalidated files", async () => {
+		const registry = new StatusRegistry();
+		let firstContent = "- [ ] First";
+		let secondContent = "- [ ] Second";
+		let readCount = 0;
+		const events = new Map<string, (file: unknown, oldPath?: string) => void>();
+		const firstFile = createTestFile("first.md", "first");
+		const secondFile = createTestFile("second.md", "second");
+		const app = {
+			vault: {
+				on: (name: string, callback: (file: unknown, oldPath?: string) => void) => {
+					events.set(name, callback);
+					return {};
+				},
+				getMarkdownFiles: () => [firstFile, secondFile],
+				cachedRead: (file: {path: string}) => {
+					readCount++;
+					return Promise.resolve(file.path === "first.md" ? firstContent : secondContent);
+				},
+				getAbstractFileByPath: (path: string) => (path === "first.md" ? firstFile : secondFile),
+			},
+			metadataCache: {
+				getFileCache: () => null,
+			},
+		};
+		const plugin = {
+			registerEvent: () => {},
+		};
+		const store = new TaskDocumentStore(app as TaskLitePlugin["app"], registry);
+		store.register(plugin as unknown as TaskLitePlugin);
+
+		await expect(store.listRecords()).resolves.toHaveLength(2);
+		await expect(store.listRecords()).resolves.toHaveLength(2);
+		expect(readCount).toBe(2);
+
+		firstContent = "- [ ] First changed";
+		store.invalidate("first.md");
+		await expect(store.listRecords()).resolves.toHaveLength(2);
+		expect(readCount).toBe(3);
+
+		secondContent = "- [ ] Second changed";
+		events.get("modify")?.(secondFile);
+		await new Promise((resolve) => setTimeout(resolve, 250));
+		await expect(store.listRecords()).resolves.toHaveLength(2);
+		expect(readCount).toBe(4);
+	});
 });
 
 function createTestTasksApi(app: Record<string, unknown> = {}) {
@@ -598,6 +646,10 @@ function createTestPlugin(app: Record<string, unknown> = {}) {
 		statusRegistry: registry,
 		api,
 	} as TaskLitePlugin;
+}
+
+function createTestFile(path: string, basename: string) {
+	return {path, basename, extension: "md"};
 }
 
 function parseDate(value: string): Date {

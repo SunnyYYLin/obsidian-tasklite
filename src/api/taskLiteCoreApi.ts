@@ -10,7 +10,8 @@ import {
 import { parseTaskLine, serializeTaskLine, type TaskLine } from "../model/format";
 import { taskIdentityKey } from "../model/taskIdentity";
 import { applyTaskStatus } from "../model/taskState";
-import { buildTaskTree } from "../model/tree";
+import { buildTaskTree, type TaskTreeNode } from "../model/tree";
+import type { TaskDocumentStore } from "../model/taskDocumentStore";
 import type { StatusRegistry } from "../model/status";
 import type { TaskLiteSettings } from "../settings";
 
@@ -49,6 +50,7 @@ interface TaskLiteCoreApiOptions {
 	app: App;
 	registry: StatusRegistry;
 	getSettings: () => TaskLiteSettings;
+	documentStore?: TaskDocumentStore;
 }
 
 interface AppLike {
@@ -63,14 +65,14 @@ interface MarkdownEditorInfoLike {
 	editor?: Editor;
 }
 
-export function createTaskLiteCoreApi({app, registry, getSettings}: TaskLiteCoreApiOptions): TaskLiteCoreApi {
+export function createTaskLiteCoreApi({app, registry, getSettings, documentStore}: TaskLiteCoreApiOptions): TaskLiteCoreApi {
 	return {
-		listTasks: (options) => listTasks({app, registry, options}),
-		finishTask: (path, lineNumber) => updateFileTask({app, path, lineNumber, registry, settings: getSettings(), mutate: finishTaskAtLine}),
-		unfinishTask: (path, lineNumber) => updateFileTask({app, path, lineNumber, registry, settings: getSettings(), mutate: unfinishTaskAtLine}),
-		cancelTask: (path, lineNumber) => updateFileTask({app, path, lineNumber, registry, settings: getSettings(), mutate: cancelTaskAtLine}),
-		uncancelTask: (path, lineNumber) => updateFileTask({app, path, lineNumber, registry, settings: getSettings(), mutate: uncancelTaskAtLine}),
-		createTask: (line, options) => createTask({app, line, options, settings: getSettings()}),
+		listTasks: (options) => listTasks({app, registry, documentStore, options}),
+		finishTask: (path, lineNumber) => updateFileTask({app, path, lineNumber, registry, settings: getSettings(), documentStore, mutate: finishTaskAtLine}),
+		unfinishTask: (path, lineNumber) => updateFileTask({app, path, lineNumber, registry, settings: getSettings(), documentStore, mutate: unfinishTaskAtLine}),
+		cancelTask: (path, lineNumber) => updateFileTask({app, path, lineNumber, registry, settings: getSettings(), documentStore, mutate: cancelTaskAtLine}),
+		uncancelTask: (path, lineNumber) => updateFileTask({app, path, lineNumber, registry, settings: getSettings(), documentStore, mutate: uncancelTaskAtLine}),
+		createTask: (line, options) => createTask({app, line, options, settings: getSettings(), documentStore}),
 		executeTasksToggleCommand: (line, path) => {
 			const context = findOpenEditorTaskContext(app, line, path);
 			if (!context) return executeSingleLineApiToggle(line, registry, getSettings());
@@ -87,12 +89,18 @@ export function createTaskLiteCoreApi({app, registry, getSettings}: TaskLiteCore
 async function listTasks({
 	app,
 	registry,
+	documentStore,
 	options = {},
 }: {
 	app: App;
 	registry: StatusRegistry;
+	documentStore?: TaskDocumentStore;
 	options?: ListTasksOptions;
 }): Promise<TaskLiteTaskRecord[]> {
+	if (documentStore) {
+		return filterTaskRecords(await documentStore.listRecords(), options);
+	}
+
 	const records: TaskLiteTaskRecord[] = [];
 	for (const file of app.vault.getMarkdownFiles()) {
 		const content = await app.vault.cachedRead(file);
@@ -114,7 +122,7 @@ async function listTasks({
 			});
 		}
 	}
-	return records;
+	return filterTaskRecords(records, options);
 }
 
 async function createTask({
@@ -122,11 +130,13 @@ async function createTask({
 	line,
 	options,
 	settings,
+	documentStore,
 }: {
 	app: App;
 	line: string;
 	options: CreateTaskOptions | undefined;
 	settings: TaskLiteSettings;
+	documentStore?: TaskDocumentStore;
 }): Promise<void> {
 	const inboxPath = normalizePath(options?.path || "Tasks/New_Tasks.md");
 	let file = app.vault.getAbstractFileByPath(inboxPath);
@@ -142,12 +152,16 @@ async function createTask({
 	const insertion = formatCreatedTaskLine(line, lines, options?.parentLineNumber);
 	if (typeof options?.parentLineNumber === "number" && options.parentLineNumber >= 0 && options.parentLineNumber < lines.length) {
 		lines.splice(options.parentLineNumber + 1, 0, insertion);
-		await app.vault.modify(file, lines.join("\n"));
+		const nextContent = lines.join("\n");
+		await app.vault.modify(file, nextContent);
+		await documentStore?.replaceDocumentContent(file, nextContent);
 		return;
 	}
 
 	const separator = content.length > 0 && !content.endsWith("\n") ? "\n" : "";
-	await app.vault.modify(file, `${content}${separator}${insertion}\n`);
+	const nextContent = `${content}${separator}${insertion}\n`;
+	await app.vault.modify(file, nextContent);
+	await documentStore?.replaceDocumentContent(file, nextContent);
 }
 
 async function updateFileTask({
@@ -156,6 +170,7 @@ async function updateFileTask({
 	lineNumber,
 	registry,
 	settings,
+	documentStore,
 	mutate,
 }: {
 	app: App;
@@ -163,6 +178,7 @@ async function updateFileTask({
 	lineNumber: number;
 	registry: StatusRegistry;
 	settings: TaskLiteSettings;
+	documentStore?: TaskDocumentStore;
 	mutate: (input: {
 		lines: string[];
 		lineNumber: number;
@@ -173,8 +189,8 @@ async function updateFileTask({
 }): Promise<boolean> {
 	const file = app.vault.getAbstractFileByPath(path);
 	if (!isTFile(file)) return false;
-	const content = await app.vault.read(file);
-	const lines = content.split("\n");
+	const document = await documentStore?.getDocumentByPath(path);
+	const lines = document ? [...document.lines] : (await app.vault.read(file)).split("\n");
 	const result = mutate({
 		lines,
 		lineNumber,
@@ -185,8 +201,29 @@ async function updateFileTask({
 	if (!result) return false;
 
 	lines.splice(result.fromLine, result.toLine - result.fromLine + 1, ...result.replacement);
-	await app.vault.modify(file, lines.join("\n"));
+	const nextContent = lines.join("\n");
+	await app.vault.modify(file, nextContent);
+	await documentStore?.replaceDocumentContent(file, nextContent);
 	return true;
+}
+
+function filterTaskRecords(records: TaskLiteTaskRecord[], options: ListTasksOptions): TaskLiteTaskRecord[] {
+	return records.filter((record) => {
+		if (!options.includeChildren && record.parentLine !== null) return false;
+		if (!options.includeCompleted && record.task.status.type === "DONE") return false;
+		if (!options.includeCancelled && record.task.status.type === "CANCELLED") return false;
+		return true;
+	});
+}
+
+function taskDepth(node: TaskTreeNode): number {
+	let depth = 0;
+	let current = node.parent;
+	while (current) {
+		depth++;
+		current = current.parent;
+	}
+	return depth;
 }
 
 function formatCreatedTaskLine(line: string, lines: string[], parentLineNumber: number | undefined): string {
@@ -273,16 +310,6 @@ function getEditorForPath(value: unknown, path: string): Editor | null {
 	const info = value as MarkdownEditorInfoLike | null | undefined;
 	if (info?.file?.path === path && info.editor) return info.editor;
 	return null;
-}
-
-function taskDepth(node: {parent: unknown | null}): number {
-	let depth = 0;
-	let current = node.parent as {parent: unknown | null} | null;
-	while (current) {
-		depth++;
-		current = current.parent as {parent: unknown | null} | null;
-	}
-	return depth;
 }
 
 function isTFile(value: unknown): value is TFile {
