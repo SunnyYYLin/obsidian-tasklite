@@ -23,6 +23,13 @@ export default tseslint.config(
 		},
 	},
 	...obsidianmd.configs.recommended,
+	{
+		files: ['tests/**/*.ts'],
+		rules: {
+			'@typescript-eslint/no-unsafe-argument': 'off',
+			'@typescript-eslint/await-thenable': 'off',
+		},
+	},
 	globalIgnores([
 		"node_modules",
 		"dist",

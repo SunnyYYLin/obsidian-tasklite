@@ -165,7 +165,8 @@ describe("TaskLite core", () => {
 			"tasks.md",
 		);
 
-		expect(result.split("\n")).toEqual([
+		const lines: string[] = result.split("\n");
+		expect(lines).toEqual([
 			`- [ ] Parent ${TASK_SYMBOLS.due} 2026-05-27 ${TASK_SYMBOLS.recurrence} every week`,
 			expect.stringContaining(`- [x] Parent ${TASK_SYMBOLS.due} 2026-05-20`),
 		]);
@@ -255,7 +256,7 @@ describe("TaskLite core", () => {
 		});
 
 		expect("toggleTask" in api).toBe(false);
-		await expect(api.finishTask("tasks.md", 2)).resolves.toBe(true);
+		expect(await api.finishTask("tasks.md", 2)).toBe(true);
 		expect(content.split("\n")).toEqual([
 			expect.stringContaining(`- [x] Parent ${TASK_SYMBOLS.done} 2026-05-16`),
 			"  - [x] First child",
@@ -286,7 +287,7 @@ describe("TaskLite core", () => {
 			getSettings: () => settings,
 		});
 
-		await expect(api.cancelTask("tasks.md", 2)).resolves.toBe(true);
+		expect(await api.cancelTask("tasks.md", 2)).toBe(true);
 		expect(content.split("\n")).toEqual([
 			expect.stringContaining(`- [-] Parent ${TASK_SYMBOLS.cancelled} 2026-05-16`),
 			"  - [x] First child",
@@ -322,7 +323,7 @@ describe("TaskLite core", () => {
 			getSettings: () => settings,
 		});
 
-		await expect(api.cancelTask("tasks.md", 0)).resolves.toBe(true);
+		expect(await api.cancelTask("tasks.md", 0)).toBe(true);
 		expect(content.split("\n")).toEqual([
 			`- [ ] Parent ${TASK_SYMBOLS.due} 2026-05-27 ${TASK_SYMBOLS.recurrence} every week`,
 			"  - [ ] Done child",
@@ -347,8 +348,8 @@ describe("TaskLite core", () => {
 			},
 		);
 
-		await expect(api.createTaskLineModal()).resolves.toBe("Create task: ");
-		await expect(api.editTaskLineModal("- [ ] Existing")).resolves.toBe("Edit task: - [ ] Existing");
+		expect(await api.createTaskLineModal()).toBe("Create task: ");
+		expect(await api.editTaskLineModal("- [ ] Existing")).toBe("Edit task: - [ ] Existing");
 		expect(calls).toEqual([
 			{title: "Create task", initialLine: ""},
 			{title: "Edit task", initialLine: "- [ ] Existing"},
@@ -610,19 +611,19 @@ describe("TaskLite core", () => {
 		const store = new TaskDocumentStore(app as TaskLitePlugin["app"], registry);
 		store.register(plugin as unknown as TaskLitePlugin);
 
-		await expect(store.listRecords()).resolves.toHaveLength(2);
-		await expect(store.listRecords()).resolves.toHaveLength(2);
+		expect(await store.listRecords()).toHaveLength(2);
+		expect(await store.listRecords()).toHaveLength(2);
 		expect(readCount).toBe(2);
 
 		firstContent = "- [ ] First changed";
 		store.invalidate("first.md");
-		await expect(store.listRecords()).resolves.toHaveLength(2);
+		expect(await store.listRecords()).toHaveLength(2);
 		expect(readCount).toBe(3);
 
 		secondContent = "- [ ] Second changed";
 		events.get("modify")?.(secondFile);
 		await new Promise((resolve) => setTimeout(resolve, 250));
-		await expect(store.listRecords()).resolves.toHaveLength(2);
+		expect(await store.listRecords()).toHaveLength(2);
 		expect(readCount).toBe(4);
 	});
 });

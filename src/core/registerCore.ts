@@ -1,4 +1,4 @@
-import { MarkdownView, Notice, type Editor, type Plugin } from "obsidian";
+import { MarkdownView, Notice, type Editor } from "obsidian";
 import type TaskLitePlugin from "../main";
 import { cancelEditorTask, toggleEditorTask, toggleEditorTaskCancellation, uncancelEditorTask } from "../editor/apply";
 import { ExternalTaskReconciler } from "../editor/externalReconcile";
@@ -122,7 +122,7 @@ export function registerTaskLiteCore(plugin: TaskLitePlugin): void {
 	});
 
 	new ExternalTaskReconciler(plugin, plugin.app, plugin.statusRegistry, () => plugin.settings, plugin.documentStore).register();
-	plugin.registerEditorExtension(createLivePreviewExtension(plugin.app, plugin.statusRegistry, () => plugin.settings, plugin.documentStore) as Parameters<Plugin["registerEditorExtension"]>[0]);
+	plugin.registerEditorExtension(createLivePreviewExtension(plugin.app, plugin.statusRegistry, () => plugin.settings, plugin.documentStore));
 	plugin.registerEditorSuggest(new TaskLiteEmojiSuggest(plugin));
 	plugin.addSettingTab(new TaskLiteSettingTab(plugin.app, plugin));
 }

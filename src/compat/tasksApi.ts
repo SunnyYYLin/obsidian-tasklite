@@ -3,8 +3,6 @@ import type TaskLitePlugin from "../main";
 import type { TaskLiteCoreApi } from "../api/taskLiteCoreApi";
 import { t } from "../i18n";
 
-const TASKS_PLUGIN_ID = "obsidian-tasks-plugin";
-
 export interface TasksPluginApiV1 {
 	isTasksPluginEnabled(): boolean;
 	createTaskLineModal(): Promise<string>;
