@@ -1,10 +1,10 @@
-import { MarkdownView, Notice, type Editor } from "obsidian";
+import { MarkdownView, Notice, TFile, type Editor } from "obsidian";
 import type TaskLitePlugin from "../main";
 import { cancelEditorTask, toggleEditorTask, toggleEditorTaskCancellation, uncancelEditorTask } from "../editor/apply";
 import { ExternalTaskReconciler } from "../editor/externalReconcile";
 import { createLivePreviewExtension } from "../rendering/livePreview";
 import { TaskLiteEmojiSuggest } from "../suggest/emojiSuggest";
-import { openTaskLineModal } from "../ui/taskLineModal";
+import { openTaskLineModal, openTaskLineModalWithTarget } from "../ui/taskLineModal";
 import { TaskLiteSettingTab } from "../settings";
 import { t } from "../i18n";
 
@@ -88,8 +88,13 @@ export function registerTaskLiteCore(plugin: TaskLitePlugin): void {
 	plugin.addCommand({
 		id: "create-task",
 		name: t("command.createTask"),
-		editorCallback: (editor: Editor) => {
-			void createTaskInEditor(plugin, editor);
+		editorCheckCallback: (checking: boolean, editor: Editor, view) => {
+			if (!(view instanceof MarkdownView)) return false;
+			if (checking) return true;
+			const file = view.file;
+			if (!file) return false;
+			void createTaskInEditor(plugin, editor, file);
+			return true;
 		},
 	});
 
@@ -107,8 +112,13 @@ export function registerTaskLiteCore(plugin: TaskLitePlugin): void {
 	plugin.addCommand({
 		id: "create-or-edit-task",
 		name: t("command.createOrEditTask"),
-		editorCallback: (editor: Editor) => {
-			void createOrEditTaskInEditor(plugin, editor);
+		editorCheckCallback: (checking: boolean, editor: Editor, view) => {
+			if (!(view instanceof MarkdownView)) return false;
+			if (checking) return true;
+			const file = view.file;
+			if (!file) return false;
+			void createOrEditTaskInEditor(plugin, editor, file);
+			return true;
 		},
 	});
 
@@ -127,26 +137,38 @@ export function registerTaskLiteCore(plugin: TaskLitePlugin): void {
 	plugin.addSettingTab(new TaskLiteSettingTab(plugin.app, plugin));
 }
 
-async function createTaskInEditor(plugin: TaskLitePlugin, editor: Editor): Promise<void> {
-	const line = await openTaskLineModal({
+async function createTaskInEditor(plugin: TaskLitePlugin, editor: Editor, currentFile: TFile): Promise<void> {
+	const result = await openTaskLineModalWithTarget({
 		app: plugin.app,
 		title: t("command.createTask"),
 		initialLine: "",
 		registry: plugin.statusRegistry,
 		settings: plugin.settings,
+		targetFile: {basePath: currentFile.parent?.path ?? "", defaultValue: currentFile.basename},
 	});
-	if (!line) return;
+	if (!result?.line) return;
+
+	const targetPath = result.targetPath ?? currentFile.path;
+	if (targetPath !== currentFile.path) {
+		const targetFile = plugin.app.vault.getAbstractFileByPath(targetPath);
+		if (targetFile instanceof TFile) {
+			const content = await plugin.app.vault.read(targetFile);
+			const separator = content.length > 0 && !content.endsWith("\n") ? "\n" : "";
+			await plugin.app.vault.modify(targetFile, `${content}${separator}${result.line}\n`);
+		}
+		return;
+	}
 
 	const cursor = editor.getCursor();
 	const currentLine = editor.getLine(cursor.line);
 	if (currentLine.trim() === "") {
-		editor.replaceRange(line, {line: cursor.line, ch: 0}, {line: cursor.line, ch: currentLine.length});
-		editor.setCursor({line: cursor.line, ch: line.length});
+		editor.replaceRange(result.line, {line: cursor.line, ch: 0}, {line: cursor.line, ch: currentLine.length});
+		editor.setCursor({line: cursor.line, ch: result.line.length});
 		return;
 	}
 
-	editor.replaceRange(`\n${line}`, {line: cursor.line, ch: currentLine.length});
-	editor.setCursor({line: cursor.line + 1, ch: line.length});
+	editor.replaceRange(`\n${result.line}`, {line: cursor.line, ch: currentLine.length});
+	editor.setCursor({line: cursor.line + 1, ch: result.line.length});
 }
 
 async function editTaskInEditor(plugin: TaskLitePlugin, editor: Editor): Promise<void> {
@@ -165,11 +187,11 @@ async function editTaskInEditor(plugin: TaskLitePlugin, editor: Editor): Promise
 	editor.setCursor({line: cursor.line, ch: Math.min(cursor.ch, line.length)});
 }
 
-async function createOrEditTaskInEditor(plugin: TaskLitePlugin, editor: Editor): Promise<void> {
+async function createOrEditTaskInEditor(plugin: TaskLitePlugin, editor: Editor, file: TFile): Promise<void> {
 	const cursor = editor.getCursor();
 	const currentLine = editor.getLine(cursor.line);
 	if (currentLine.trim() === "") {
-		await createTaskInEditor(plugin, editor);
+		await createTaskInEditor(plugin, editor, file);
 		return;
 	}
 	await editTaskInEditor(plugin, editor);

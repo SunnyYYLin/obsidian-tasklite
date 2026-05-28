@@ -3,7 +3,7 @@ import { parseTaskLine, TASK_SYMBOLS } from "../src/model/format";
 import { StatusRegistry } from "../src/model/status";
 import { fieldsFromTaskLine, taskLineFromFields } from "../src/model/taskLineFields";
 import { TaskDocumentStore } from "../src/model/taskDocumentStore";
-import { clickTaskCheckboxAtLine, rightClickTaskCheckboxAtLine, toggleTaskAtLine } from "../src/editor/toggle";
+import { cancelTaskAtLine, clickTaskCheckboxAtLine, rightClickTaskCheckboxAtLine, toggleTaskAtLine, unfinishTaskAtLine } from "../src/editor/toggle";
 import { reconcileExternalTaskCompletion } from "../src/editor/externalReconcileCore";
 import { createTaskLiteCoreApi } from "../src/api/taskLiteCoreApi";
 import { createTasksApiV1FromCore } from "../src/compat/tasksApi";
@@ -33,6 +33,16 @@ const settings: TaskLiteSettings = {
 	setCancelledDate: true,
 	copySubtasksOnRecurrence: true,
 	autoSuggestInEditor: true,
+	toggleBehavior: {
+		cascadeFinish: true,
+		cascadeCancel: true,
+		cascadeUnfinish: false,
+		cascadeUncancel: true,
+		parentOnFinish: true,
+		parentOnCancel: true,
+		parentOnUnfinish: true,
+		parentOnUncancel: true,
+	},
 	statusSettings: {
 		coreStatuses: [
 			{symbol: " ", name: "Todo", nextStatusSymbol: "x", availableAsCommand: true, type: "TODO"},
@@ -289,7 +299,7 @@ describe("TaskLite core", () => {
 
 		expect(await api.cancelTask("tasks.md", 2)).toBe(true);
 		expect(content.split("\n")).toEqual([
-			expect.stringContaining(`- [-] Parent ${TASK_SYMBOLS.cancelled} 2026-05-16`),
+			expect.stringContaining(`- [x] Parent ${TASK_SYMBOLS.done} 2026-05-16`),
 			"  - [x] First child",
 			expect.stringContaining(`  - [-] Second child ${TASK_SYMBOLS.cancelled} 2026-05-16`),
 		]);
@@ -460,6 +470,185 @@ describe("TaskLite core", () => {
 		});
 
 		expect(result?.replacement).toEqual(["- [ ] Cancelled task"]);
+	});
+
+	test("unfinish parent only changes parent when cascade is off", () => {
+		const registry = new StatusRegistry();
+		const result = toggleTaskAtLine({
+			lines: [
+				`- [x] Parent ${TASK_SYMBOLS.done} 2026-05-16`,
+				`  - [x] Child done ${TASK_SYMBOLS.done} 2026-05-16`,
+				`  - [-] Child cancelled ${TASK_SYMBOLS.cancelled} 2026-05-16`,
+			],
+			lineNumber: 0,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.replacement).toEqual([
+			"- [ ] Parent",
+			`  - [x] Child done ${TASK_SYMBOLS.done} 2026-05-16`,
+			`  - [-] Child cancelled ${TASK_SYMBOLS.cancelled} 2026-05-16`,
+		]);
+	});
+
+	test("unfinish child causes parent to auto-unfinish without cascading to siblings", () => {
+		const registry = new StatusRegistry();
+		const result = toggleTaskAtLine({
+			lines: [
+				`- [x] Parent ${TASK_SYMBOLS.done} 2026-05-16`,
+				`  - [x] First child ${TASK_SYMBOLS.done} 2026-05-16`,
+				`  - [x] Second child ${TASK_SYMBOLS.done} 2026-05-16`,
+			],
+			lineNumber: 1,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.replacement).toEqual([
+			"- [ ] Parent",
+			"  - [ ] First child",
+		]);
+	});
+
+	test("uncancel parent with only cancelled children restores all to todo", () => {
+		const registry = new StatusRegistry();
+		const result = toggleTaskAtLine({
+			lines: [
+				`- [-] Parent ${TASK_SYMBOLS.cancelled} 2026-05-16`,
+				`  - [-] Child ${TASK_SYMBOLS.cancelled} 2026-05-16`,
+			],
+			lineNumber: 0,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.replacement).toEqual([
+			"- [ ] Parent",
+			"  - [ ] Child",
+		]);
+	});
+
+	test("uncancel parent preserves done children but restores cancelled children", () => {
+		const registry = new StatusRegistry();
+		const result = toggleTaskAtLine({
+			lines: [
+				`- [-] Parent ${TASK_SYMBOLS.cancelled} 2026-05-16`,
+				`  - [x] Done child ${TASK_SYMBOLS.done} 2026-05-15`,
+				`  - [-] Cancelled child ${TASK_SYMBOLS.cancelled} 2026-05-16`,
+			],
+			lineNumber: 0,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.replacement).toEqual([
+			"- [ ] Parent",
+			`  - [x] Done child ${TASK_SYMBOLS.done} 2026-05-15`,
+			"  - [ ] Cancelled child",
+		]);
+	});
+
+	test("cascade finish off: only target task changes", () => {
+		const registry = new StatusRegistry();
+		const noCascadeSettings = {...settings, toggleBehavior: {...settings.toggleBehavior, cascadeFinish: false}};
+		const result = toggleTaskAtLine({
+			lines: [
+				"- [ ] Parent",
+				"  - [ ] Child",
+			],
+			lineNumber: 0,
+			metadata: null,
+			registry,
+			settings: noCascadeSettings,
+		});
+
+		expect(result?.replacement).toEqual([
+			expect.stringContaining(`- [x] Parent ${TASK_SYMBOLS.done}`),
+			"  - [ ] Child",
+		]);
+	});
+
+	test("cascade cancel off: only target task changes", () => {
+		const registry = new StatusRegistry();
+		const noCascadeSettings = {...settings, toggleBehavior: {...settings.toggleBehavior, cascadeCancel: false}};
+		const result = cancelTaskAtLine({
+			lines: [
+				"- [ ] Parent",
+				"  - [ ] Child",
+			],
+			lineNumber: 0,
+			metadata: null,
+			registry,
+			settings: noCascadeSettings,
+		});
+
+		expect(result?.replacement).toEqual([
+			expect.stringContaining(`- [-] Parent ${TASK_SYMBOLS.cancelled}`),
+			"  - [ ] Child",
+		]);
+	});
+
+	test("parentOnCancel off: cancel does not auto-done parent", () => {
+		const registry = new StatusRegistry();
+		const noParentSettings = {...settings, toggleBehavior: {...settings.toggleBehavior, parentOnCancel: false}};
+		const result = cancelTaskAtLine({
+			lines: [
+				"- [ ] Parent",
+				`  - [x] Done child ${TASK_SYMBOLS.done} 2026-05-16`,
+				"  - [ ] Todo child",
+			],
+			lineNumber: 2,
+			metadata: null,
+			registry,
+			settings: noParentSettings,
+		});
+
+		expect(result?.replacement).toEqual([
+			expect.stringContaining(`  - [-] Todo child ${TASK_SYMBOLS.cancelled}`),
+		]);
+	});
+
+	test("parentOnCancel: cancel last remaining child auto-dones parent", () => {
+		const registry = new StatusRegistry();
+		const result = cancelTaskAtLine({
+			lines: [
+				"- [ ] Parent",
+				"  - [ ] Only child",
+			],
+			lineNumber: 1,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.replacement).toEqual([
+			expect.stringContaining(`- [x] Parent ${TASK_SYMBOLS.done}`),
+			expect.stringContaining(`  - [-] Only child ${TASK_SYMBOLS.cancelled}`),
+		]);
+	});
+
+	test("parentOnUnfinish off: unfinish child does not change parent", () => {
+		const registry = new StatusRegistry();
+		const noParentSettings = {...settings, toggleBehavior: {...settings.toggleBehavior, parentOnUnfinish: false}};
+		const result = unfinishTaskAtLine({
+			lines: [
+				`- [x] Parent ${TASK_SYMBOLS.done} 2026-05-16`,
+				`  - [x] Child ${TASK_SYMBOLS.done} 2026-05-16`,
+			],
+			lineNumber: 1,
+			metadata: null,
+			registry,
+			settings: noParentSettings,
+		});
+
+		expect(result?.replacement).toEqual([
+			"  - [ ] Child",
+		]);
 	});
 
 	test("creates next occurrence when a recurring ancestor is auto-completed", () => {

@@ -116,8 +116,14 @@ function applyTaskBehaviorAtLine({
 
 	const changedTasks = new Map<number, TaskLine>();
 	const replacementByLine = new Map<number, string>();
-	applyBehaviorToSubtree(node, behavior, changedTasks, replacementByLine, registry, settings);
-	applyBehaviorToParents(node, behavior, changedTasks, replacementByLine, registry, settings);
+	if (shouldCascade(behavior, settings)) {
+		applyBehaviorToSubtree(node, behavior, changedTasks, replacementByLine, registry, settings);
+	} else {
+		applyBehaviorToTarget(node, behavior, changedTasks, replacementByLine, registry, settings);
+	}
+	if (shouldPropagateToParent(behavior, settings)) {
+		applyBehaviorToParents(node, behavior, changedTasks, replacementByLine, registry, settings);
+	}
 	if (changedTasks.size === 0) return null;
 
 	return buildTaskMutationResult({
@@ -236,10 +242,24 @@ function applyBehaviorToSubtree(
 ): void {
 	for (const current of getSubtreeNodes(node)) {
 		if (!current.task) continue;
-		const nextStatus = statusForSubtreeBehavior(current.task.status.type, behavior, registry);
+		const nextStatus = statusForSubtreeBehavior(current, behavior, registry, replacementByLine, settings);
 		if (!nextStatus) continue;
 		replaceTaskStatus(current, nextStatus, changedTasks, replacementByLine, settings);
 	}
+}
+
+function applyBehaviorToTarget(
+	node: TaskTreeNode,
+	behavior: TaskBehavior,
+	changedTasks: Map<number, TaskLine>,
+	replacementByLine: Map<number, string>,
+	registry: StatusRegistry,
+	settings: TaskLiteSettings,
+): void {
+	if (!node.task) return;
+	const nextStatus = statusForSubtreeBehavior(node, behavior, registry, replacementByLine, settings);
+	if (!nextStatus) return;
+	replaceTaskStatus(node, nextStatus, changedTasks, replacementByLine, settings);
 }
 
 function applyBehaviorToParents(
@@ -260,13 +280,20 @@ function applyBehaviorToParents(
 }
 
 function statusForSubtreeBehavior(
-	type: StatusType,
+	node: TaskTreeNode,
 	behavior: TaskBehavior,
 	registry: StatusRegistry,
+	replacementByLine: Map<number, string>,
+	settings: TaskLiteSettings,
 ): StatusConfiguration | null {
+	const type = node.task!.status.type;
 	if (behavior === "finish") return type === "CANCELLED" ? null : registry.get("x");
-	if (behavior === "cancel") return type === "DONE" ? null : registry.get("-");
-	if (behavior === "unfinish") return type === "DONE" ? registry.get(" ") : null;
+	if (behavior === "cancel") {
+		if (type === "DONE") return null;
+		if (settings.toggleBehavior.parentOnCancel && node.children.length > 0 && areNonCancelledChildrenDone(node, replacementByLine, registry)) return registry.get("x");
+		return registry.get("-");
+	}
+	if (behavior === "unfinish") return registry.get(" ");
 	return type === "CANCELLED" ? registry.get(" ") : null;
 }
 
@@ -283,10 +310,10 @@ function statusForParentBehavior(
 	}
 	if (behavior === "cancel") {
 		if (parent.task.status.type === "DONE" || parent.task.status.type === "CANCELLED") return null;
-		return areAllTaskChildrenTerminated(parent, replacementByLine, registry) ? registry.get("-") : null;
+		return areNonCancelledChildrenDone(parent, replacementByLine, registry) ? registry.get("x") : null;
 	}
 	if (behavior === "unfinish") {
-		return parent.task.status.type === "DONE" ? registry.get(" ") : null;
+		return parent.task.status.type === "DONE" || parent.task.status.type === "CANCELLED" ? registry.get(" ") : null;
 	}
 	return parent.task.status.type === "CANCELLED" ? registry.get(" ") : null;
 }
@@ -332,6 +359,33 @@ function areAllTaskChildrenTerminated(parent: TaskTreeNode, replacementByLine: M
 
 function isTerminalStatus(type: StatusType | undefined): boolean {
 	return type === "DONE" || type === "CANCELLED";
+}
+
+function shouldCascade(behavior: TaskBehavior, settings: TaskLiteSettings): boolean {
+	if (behavior === "finish") return settings.toggleBehavior.cascadeFinish;
+	if (behavior === "cancel") return settings.toggleBehavior.cascadeCancel;
+	if (behavior === "unfinish") return settings.toggleBehavior.cascadeUnfinish;
+	return settings.toggleBehavior.cascadeUncancel;
+}
+
+function shouldPropagateToParent(behavior: TaskBehavior, settings: TaskLiteSettings): boolean {
+	if (behavior === "finish") return settings.toggleBehavior.parentOnFinish;
+	if (behavior === "cancel") return settings.toggleBehavior.parentOnCancel;
+	if (behavior === "unfinish") return settings.toggleBehavior.parentOnUnfinish;
+	return settings.toggleBehavior.parentOnUncancel;
+}
+
+function areNonCancelledChildrenDone(parent: TaskTreeNode, replacementByLine: Map<number, string>, registry: StatusRegistry): boolean {
+	const taskChildren = parent.children.filter((child) => child.task);
+	for (const child of taskChildren) {
+		if (!child.task) continue;
+		const replacement = replacementByLine.get(child.lineNumber);
+		const statusSymbol = replacement ? (replacement.match(/\[(.)\]/u)?.[1] ?? child.task.status.symbol) : child.task.status.symbol;
+		const statusType = registry.get(statusSymbol).type;
+		if (statusType === "CANCELLED") continue;
+		if (statusType !== "DONE") return false;
+	}
+	return true;
 }
 
 function getReplacementRange(
