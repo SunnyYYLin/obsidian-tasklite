@@ -924,6 +924,10 @@ describe("TaskLite core", () => {
 			},
 			metadataCache: {
 				getFileCache: () => null,
+				on: (name: string, callback: (file: unknown) => void) => {
+					events.set(name, callback);
+					return {};
+				},
 			},
 		};
 		const plugin = {
@@ -942,7 +946,7 @@ describe("TaskLite core", () => {
 		expect(readCount).toBe(3);
 
 		secondContent = "- [ ] Second changed";
-		events.get("modify")?.(secondFile);
+		events.get("changed")?.(secondFile);
 		await new Promise((resolve) => setTimeout(resolve, 250));
 		expect(await store.listRecords()).toHaveLength(2);
 		expect(readCount).toBe(4);

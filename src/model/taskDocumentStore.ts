@@ -36,7 +36,7 @@ export class TaskDocumentStore {
 
 	register(plugin: Plugin): void {
 		plugin.registerEvent(
-			this.app.vault.on("modify", (file) => {
+			this.app.metadataCache.on("changed", (file) => {
 				if (!isMarkdownFile(file)) return;
 				this.queueRebuild(file);
 			}),
@@ -98,7 +98,8 @@ export class TaskDocumentStore {
 	}
 
 	async replaceDocumentContent(file: TFile, content: string): Promise<TaskDocument | null> {
-		return this.setDocument(file, content, this.app.metadataCache.getFileCache(file));
+		// 主动修改内容时，Obsidian 的 metadataCache 必定滞后，传入 null 强制使用 inferListItems
+		return this.setDocument(file, content, null);
 	}
 
 	async listRecords(): Promise<TaskDocumentRecord[]> {
