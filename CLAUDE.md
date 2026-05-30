@@ -79,10 +79,11 @@ npm version patch    # 发布版本（会同步更新 manifest.json 和 versions
 
 ## 版本与发布
 
-- 当前版本：`0.3.0-alpha.1`（已剥离 TaskTodo 模块）
+- 当前版本：`0.3.1-alpha.1`（支持 🏁 keep|delete 循环任务完成后行为）
 - Agent 规则：每次做出用户可见的优化或打磨变更时，递增 prerelease alpha 版本号
 - `npm version` 会运行 `version-bump.mjs` 同步 `manifest.json` 和 `versions.json`
 - 推送匹配 `x.y.z` 格式的 tag 会触发 `.github/workflows/release.yml` 自动构建发布
+- **发布流程**：`npm version` 之后必须立即 `git push && git push --tags`，确保 alpha 版本自动发布
 
 ## 测试
 
