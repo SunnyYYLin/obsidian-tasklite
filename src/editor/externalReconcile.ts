@@ -28,6 +28,9 @@ export class ExternalTaskReconciler {
 	private async reconcile(file: TFile): Promise<void> {
 		if (this.applying.has(file.path)) return;
 
+		const metadata = this.app.metadataCache.getFileCache(file);
+		if (metadata?.frontmatter?.tasks === "ignore") return;
+
 		const after = await this.app.vault.read(file);
 		const before = this.documentStore.getCachedContent(file.path);
 		await this.documentStore.replaceDocumentContent(file, after);

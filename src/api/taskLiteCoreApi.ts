@@ -103,9 +103,11 @@ async function listTasks({
 
 	const records: TaskLiteTaskRecord[] = [];
 	for (const file of app.vault.getMarkdownFiles()) {
+		const metadata = app.metadataCache.getFileCache(file);
+		if (metadata?.frontmatter?.tasks === "ignore") continue;
 		const content = await app.vault.cachedRead(file);
 		const lines = content.split("\n");
-		const tree = buildTaskTree(lines, app.metadataCache.getFileCache(file), registry);
+		const tree = buildTaskTree(lines, metadata, registry);
 		for (const node of tree.nodes) {
 			if (!node.task) continue;
 			if (!options.includeChildren && node.parent) continue;

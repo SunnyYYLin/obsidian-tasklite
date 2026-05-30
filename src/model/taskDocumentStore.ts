@@ -91,13 +91,13 @@ export class TaskDocumentStore {
 		return this.getDocument(file);
 	}
 
-	async getDocument(file: TFile): Promise<TaskDocument> {
+	async getDocument(file: TFile): Promise<TaskDocument | null> {
 		const existing = this.documents.get(file.path);
 		if (existing && !this.dirtyPaths.has(file.path)) return existing;
 		return this.rebuildFile(file);
 	}
 
-	async replaceDocumentContent(file: TFile, content: string): Promise<TaskDocument> {
+	async replaceDocumentContent(file: TFile, content: string): Promise<TaskDocument | null> {
 		return this.setDocument(file, content, this.app.metadataCache.getFileCache(file));
 	}
 
@@ -130,12 +130,16 @@ export class TaskDocumentStore {
 		this.indexedAllFiles = true;
 	}
 
-	private async rebuildFile(file: TFile): Promise<TaskDocument> {
+	private async rebuildFile(file: TFile): Promise<TaskDocument | null> {
 		const content = await this.app.vault.cachedRead(file);
 		return this.setDocument(file, content, this.app.metadataCache.getFileCache(file));
 	}
 
-	private setDocument(file: TFile, content: string, metadata: CachedMetadata | null): TaskDocument {
+	private setDocument(file: TFile, content: string, metadata: CachedMetadata | null): TaskDocument | null {
+		if (shouldIgnoreFile(metadata)) {
+			this.forget(file.path);
+			return null;
+		}
 		const lines = content.split("\n");
 		const tree = buildTaskTree(lines, metadata, this.registry);
 		const document: TaskDocument = {
@@ -189,6 +193,10 @@ function isMarkdownFile(value: unknown): value is TFile {
 			"extension" in value &&
 			(value as {extension?: unknown}).extension === "md",
 	);
+}
+
+function shouldIgnoreFile(metadata: CachedMetadata | null): boolean {
+	return metadata?.frontmatter?.tasks === "ignore";
 }
 
 function isPathFile(value: unknown): value is {path: string} {
