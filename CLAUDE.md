@@ -32,7 +32,6 @@ npm version patch    # 发布版本（会同步更新 manifest.json 和 versions
   - `taskIdentity.ts` — 基于 body 内容（排除 done/cancelled 日期）的任务身份匹配
   - `tree.ts` — `buildTaskTree` 将 Markdown 列表构建为 `TaskTree`（父子节点树），支持从 Obsidian `CachedMetadata.listItems` 或纯文本推断
   - `recurrence.ts` — 循环规则解析（every day/week/month/year 及 N 变体）
-  - `taskLineFields.ts` — 任务行字段的结构化读写
 
 - **`src/editor/`** — 编辑器交互层
   - `toggle.ts` — 核心切换逻辑：`toggleTaskAtLine` 根据当前状态选择 finish/unfinish/cancel/uncancel，并递归处理子树和父链；支持循环任务自动创建下一个 occurrence
@@ -43,14 +42,8 @@ npm version patch    # 发布版本（会同步更新 manifest.json 和 versions
 - **`src/rendering/`** — 编辑器渲染
   - `livePreview.ts` — CodeMirror 6 扩展，在 Live Preview 中拦截 checkbox 点击并走 TaskLite toggle 逻辑
 
-- **`src/ui/`** — 用户界面
-  - `taskLineModal.ts` — 轻量级任务编辑弹窗
-
 - **`src/api/`** — 对外 API
   - `taskLiteCoreApi.ts` — `TaskLiteCoreApi` 接口，供外部插件调用（listTasks/finishTask/createTask 等）
-
-- **`src/compat/`** — 兼容层
-  - `tasksApi.ts` — Tasks 插件 API v1 兼容适配器
 
 - **`src/suggest/`** — 编辑器建议
   - `emojiSuggest.ts` — 在任务行输入 `@` 时弹出 emoji 字段建议

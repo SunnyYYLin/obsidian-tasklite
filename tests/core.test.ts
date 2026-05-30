@@ -1,12 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { parseTaskLine, TASK_SYMBOLS } from "../src/model/format";
 import { StatusRegistry } from "../src/model/status";
-import { fieldsFromTaskLine, taskLineFromFields } from "../src/model/taskLineFields";
 import { TaskDocumentStore } from "../src/model/taskDocumentStore";
 import { cancelTaskAtLine, clickTaskCheckboxAtLine, rightClickTaskCheckboxAtLine, toggleTaskAtLine, unfinishTaskAtLine } from "../src/editor/toggle";
 import { reconcileExternalTaskCompletion } from "../src/editor/externalReconcileCore";
 import { createTaskLiteCoreApi } from "../src/api/taskLiteCoreApi";
-import { createTasksApiV1FromCore } from "../src/compat/tasksApi";
 import type TaskLitePlugin from "../src/main";
 import type { TaskLiteSettings } from "../src/settings";
 
@@ -209,10 +207,10 @@ describe("TaskLite core", () => {
 		expect(result?.replacement[0]).toContain(`${TASK_SYMBOLS.due} 2026-02-28`);
 	});
 
-	test("exposes recurring toggles through the Tasks API shim", () => {
-		const api = createTestTasksApi();
+	test("exposes recurring toggles through the core API", () => {
+		const api = createTestCoreApi();
 
-		const result = api.executeToggleTaskDoneCommand(
+		const result = api.executeTasksToggleCommand(
 			`- [ ] Parent ${TASK_SYMBOLS.due} 2026-05-20 ${TASK_SYMBOLS.recurrence} every week`,
 			"tasks.md",
 		);
@@ -224,15 +222,15 @@ describe("TaskLite core", () => {
 		]);
 	});
 
-	test("normalizes done dates for single-line Tasks API toggles", () => {
-		const api = createTestTasksApi();
+	test("normalizes done dates for single-line core API toggles", () => {
+		const api = createTestCoreApi();
 
-		const result = api.executeToggleTaskDoneCommand("- [x] Ship", "tasks.md");
+		const result = api.executeTasksToggleCommand("- [x] Ship", "tasks.md");
 
 		expect(result).toBe(`- [x] Ship ${TASK_SYMBOLS.done} 2026-05-16`);
 	});
 
-	test("copies subtasks for Tasks API toggles when the source file is open", () => {
+	test("copies subtasks for core API toggles when the source file is open", () => {
 		const view = {
 			file: {path: "tasks.md"},
 			editor: {
@@ -244,9 +242,9 @@ describe("TaskLite core", () => {
 					].join("\n"),
 			},
 		};
-		const api = createTestTasksApi({workspace: {activeEditor: view, getLeavesOfType: () => []}});
+		const api = createTestCoreApi({workspace: {activeEditor: view, getLeavesOfType: () => []}});
 
-		const result = api.executeToggleTaskDoneCommand(
+		const result = api.executeTasksToggleCommand(
 			`- [ ] Parent ${TASK_SYMBOLS.due} 2026-05-20 ${TASK_SYMBOLS.recurrence} every week`,
 			"tasks.md",
 		);
@@ -261,7 +259,7 @@ describe("TaskLite core", () => {
 		]);
 	});
 
-	test("uses open file context when Tasks API passes an already-checked child line", () => {
+	test("uses open file context when core API passes an already-checked child line", () => {
 		const view = {
 			file: {path: "tasks.md"},
 			editor: {
@@ -273,9 +271,9 @@ describe("TaskLite core", () => {
 					].join("\n"),
 			},
 		};
-		const api = createTestTasksApi({workspace: {activeEditor: view, getLeavesOfType: () => []}});
+		const api = createTestCoreApi({workspace: {activeEditor: view, getLeavesOfType: () => []}});
 
-		const result = api.executeToggleTaskDoneCommand("- [x] Second child", "tasks.md");
+		const result = api.executeTasksToggleCommand("- [x] Second child", "tasks.md");
 
 		expect(result.split("\n")).toEqual([
 			expect.stringContaining(`- [x] Parent ${TASK_SYMBOLS.done} 2026-05-16`),
@@ -386,56 +384,6 @@ describe("TaskLite core", () => {
 			expect.stringContaining(`  - [-] Todo child ${TASK_SYMBOLS.cancelled} 2026-05-16`),
 			expect.stringContaining(`    - [-] Nested todo ${TASK_SYMBOLS.cancelled} 2026-05-16`),
 		]);
-	});
-
-	test("opens create and edit task modals through the Tasks API shim", async () => {
-		const calls: Array<{title: string; initialLine: string}> = [];
-		const plugin = createTestPlugin();
-		const api = createTasksApiV1FromCore(
-			plugin.api,
-			plugin,
-			(options) => {
-				calls.push({title: options.title, initialLine: options.initialLine});
-				return Promise.resolve(`${options.title}: ${options.initialLine}`);
-			},
-		);
-
-		expect(await api.createTaskLineModal()).toBe("Create task: ");
-		expect(await api.editTaskLineModal("- [ ] Existing")).toBe("Edit task: - [ ] Existing");
-		expect(calls).toEqual([
-			{title: "Create task", initialLine: ""},
-			{title: "Edit task", initialLine: "- [ ] Existing"},
-		]);
-	});
-
-	test("round-trips modal fields through TaskLite Markdown", () => {
-		const registry = new StatusRegistry();
-		const fields = fieldsFromTaskLine(`- [ ] Ship ${TASK_SYMBOLS.due} 2026-05-20 ${TASK_SYMBOLS.recurrence} every week`, registry);
-		fields.statusSymbol = "x";
-		fields.done = "2026-05-16";
-		fields.id = "abc";
-
-		expect(taskLineFromFields(fields, registry)).toBe(
-			`- [x] Ship ${TASK_SYMBOLS.due} 2026-05-20 ${TASK_SYMBOLS.done} 2026-05-16 ${TASK_SYMBOLS.recurrence} every week ${TASK_SYMBOLS.id} abc`,
-		);
-	});
-
-	test("removes done date when editing a task to cancelled", () => {
-		const registry = new StatusRegistry();
-		const fields = fieldsFromTaskLine(`- [x] Ship ${TASK_SYMBOLS.done} 2026-05-16`, registry);
-		fields.statusSymbol = "-";
-		fields.cancelled = "2026-05-17";
-
-		expect(taskLineFromFields(fields, registry)).toBe(`- [-] Ship ${TASK_SYMBOLS.cancelled} 2026-05-17`);
-	});
-
-	test("preserves indentation and list marker when round-tripping edited tasks", () => {
-		const registry = new StatusRegistry();
-		const original = `  * [ ] Child task ${TASK_SYMBOLS.due} 2026-05-20`;
-		const fields = fieldsFromTaskLine(original, registry);
-		fields.description = "Edited child";
-
-		expect(taskLineFromFields(fields, registry, original)).toBe(`  * [ ] Edited child ${TASK_SYMBOLS.due} 2026-05-20`);
 	});
 
 	test("auto-completes parent when all task children are done", () => {
@@ -998,9 +946,9 @@ describe("TaskLite core", () => {
 	});
 });
 
-function createTestTasksApi(app: Record<string, unknown> = {}) {
+function createTestCoreApi(app: Record<string, unknown> = {}) {
 	const plugin = createTestPlugin(app);
-	return createTasksApiV1FromCore(plugin.api, plugin);
+	return plugin.api;
 }
 
 function createTestPlugin(app: Record<string, unknown> = {}) {

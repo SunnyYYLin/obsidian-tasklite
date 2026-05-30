@@ -1,6 +1,5 @@
 import { Plugin } from "obsidian";
 import { createTaskLiteCoreApi, type TaskLiteCoreApi } from "./api/taskLiteCoreApi";
-import { registerTasksApiShim } from "./compat/tasksApi";
 import { registerTaskLiteCore } from "./core/registerCore";
 import { StatusRegistry } from "./model/status";
 import { TaskDocumentStore } from "./model/taskDocumentStore";
@@ -16,7 +15,6 @@ export default class TaskLitePlugin extends Plugin {
 	readonly statusRegistry = new StatusRegistry(DEFAULT_SETTINGS.statusSettings);
 	readonly documentStore = new TaskDocumentStore(this.app, this.statusRegistry);
 	api!: TaskLiteCoreApi;
-	private unregisterTasksApiShim: (() => void) | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -28,13 +26,10 @@ export default class TaskLitePlugin extends Plugin {
 			documentStore: this.documentStore,
 		});
 		this.documentStore.register(this);
-		this.unregisterTasksApiShim = registerTasksApiShim(this);
 		registerTaskLiteCore(this);
 	}
 
 	onunload(): void {
-		this.unregisterTasksApiShim?.();
-		this.unregisterTasksApiShim = null;
 	}
 
 	async loadSettings(): Promise<void> {
