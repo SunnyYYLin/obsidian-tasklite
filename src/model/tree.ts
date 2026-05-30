@@ -33,7 +33,7 @@ export function buildTaskTree(lines: string[], metadata: CachedMetadata | null |
 		const match = line.match(listItemRegex);
 		if (!match) continue;
 
-		const statusCharacter = match[3] ?? null;
+		const statusCharacter = match[3] || null;
 		const node: TaskTreeNode = {
 			lineNumber,
 			parentLine: typeof item.parent === "number" && item.parent >= 0 ? item.parent : null,

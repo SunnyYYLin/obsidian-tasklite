@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { parseTaskLine, TASK_SYMBOLS } from "../src/model/format";
 import { StatusRegistry } from "../src/model/status";
 import { buildTaskTree } from "../src/model/tree";
+import { taskIdentityKey } from "../src/model/taskIdentity";
 import { TaskDocumentStore } from "../src/model/taskDocumentStore";
 import { cancelTaskAtLine, clickTaskCheckboxAtLine, rightClickTaskCheckboxAtLine, toggleTaskAtLine, unfinishTaskAtLine } from "../src/editor/toggle";
 import { reconcileExternalTaskCompletion } from "../src/editor/externalReconcileCore";
@@ -946,19 +947,518 @@ describe("TaskLite core", () => {
 		expect(readCount).toBe(4);
 	});
 
-	test("recognizes empty bracket as valid checkbox", () => {
-		const registry = new StatusRegistry();
-		const result = toggleTaskAtLine({
-			lines: ["- [] - []"],
-			lineNumber: 0,
-			metadata: null,
-			registry,
-			settings,
+	describe("bracket edge cases", () => {
+		test("empty brackets are not treated as a checkbox", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree(["- [] - []"], null, registry);
+			const node = tree.byLine.get(0);
+			expect(node).toBeDefined();
+			expect(node!.task).toBeNull();
+			expect(node!.statusCharacter).toBeNull();
 		});
 
-		expect(result).not.toBeNull();
-		expect(result?.replacement[0]).toContain(`- [x] - []`);
-		expect(result?.replacement[0]).toContain(TASK_SYMBOLS.done);
+		test("standalone -[] without space is not a checkbox", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree(["-[]"], null, registry);
+			const node = tree.byLine.get(0);
+			expect(node).toBeDefined();
+			expect(node!.statusCharacter).toBeNull();
+			expect(node!.task).toBeNull();
+		});
+
+		test("- [x] is a valid done task", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree(["- [x]"], null, registry);
+			const node = tree.byLine.get(0);
+			expect(node).toBeDefined();
+			expect(node!.statusCharacter).toBe("x");
+			expect(node!.task).not.toBeNull();
+			expect(node!.task!.status.type).toBe("DONE");
+		});
+
+		test("- [-] is a valid cancelled task", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree(["- [-]"], null, registry);
+			const node = tree.byLine.get(0);
+			expect(node).toBeDefined();
+			expect(node!.statusCharacter).toBe("-");
+			expect(node!.task).not.toBeNull();
+			expect(node!.task!.status.type).toBe("CANCELLED");
+		});
+
+		test("- [/] is a valid in-progress task", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree(["- [/] task"], null, registry);
+			const node = tree.byLine.get(0);
+			expect(node).toBeDefined();
+			expect(node!.statusCharacter).toBe("/");
+			expect(node!.task).not.toBeNull();
+			expect(node!.task!.status.type).toBe("IN_PROGRESS");
+		});
+
+		test("- [ ] -[] toggles the first checkbox, not the -[]", () => {
+			const registry = new StatusRegistry();
+			const result = toggleTaskAtLine({
+				lines: ["- [ ] -[]"],
+				lineNumber: 0,
+				metadata: null,
+				registry,
+				settings,
+			});
+
+			expect(result).not.toBeNull();
+			expect(result?.replacement[0]).toContain("- [x] -[]");
+			expect(result?.replacement[0]).toContain(TASK_SYMBOLS.done);
+		});
+
+		test("- [ ] [] in description is treated as text", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree(["- [ ] []"], null, registry);
+			const node = tree.byLine.get(0);
+			expect(node).toBeDefined();
+			expect(node!.task).not.toBeNull();
+			expect(node!.task!.status.type).toBe("TODO");
+			expect(node!.task!.metadata.description).toBe("[]");
+		});
+
+		test("- [ ] [x] in description is treated as text", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree(["- [ ] [x]"], null, registry);
+			const node = tree.byLine.get(0);
+			expect(node).toBeDefined();
+			expect(node!.task).not.toBeNull();
+			expect(node!.task!.metadata.description).toBe("[x]");
+		});
+
+		test("multiple -[] in description are treated as text", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree(["- [ ] -[] -[]"], null, registry);
+			const node = tree.byLine.get(0);
+			expect(node).toBeDefined();
+			expect(node!.task).not.toBeNull();
+			expect(node!.task!.metadata.description).toBe("-[] -[]");
+		});
+
+		test("- [] no trailing text is a list item without task", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree(["- []"], null, registry);
+			const node = tree.byLine.get(0);
+			expect(node).toBeDefined();
+			expect(node!.statusCharacter).toBeNull();
+			expect(node!.task).toBeNull();
+		});
+
+		test("- [] followed by text is a list item without task", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree(["- [] hello"], null, registry);
+			const node = tree.byLine.get(0);
+			expect(node).toBeDefined();
+			expect(node!.statusCharacter).toBeNull();
+			expect(node!.task).toBeNull();
+		});
+	});
+
+	describe("regex boundary cases", () => {
+		test("* marker works as list marker", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree(["* [ ] task"], null, registry);
+			const node = tree.byLine.get(0);
+			expect(node).toBeDefined();
+			expect(node!.task).not.toBeNull();
+			expect(node!.listMarker).toBe("*");
+		});
+
+		test("+ marker works as list marker", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree(["+ [ ] task"], null, registry);
+			const node = tree.byLine.get(0);
+			expect(node).toBeDefined();
+			expect(node!.task).not.toBeNull();
+			expect(node!.listMarker).toBe("+");
+		});
+
+		test("tab indentation is recognized", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree(["\t- [ ] task"], null, registry);
+			const node = tree.byLine.get(0);
+			expect(node).toBeDefined();
+			expect(node!.task).not.toBeNull();
+			expect(node!.indentation).toBe("\t");
+		});
+
+		test("space indentation is recognized", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree(["  - [ ] task"], null, registry);
+			const node = tree.byLine.get(0);
+			expect(node).toBeDefined();
+			expect(node!.task).not.toBeNull();
+			expect(node!.indentation).toBe("  ");
+		});
+
+		test("blockquote prefix is recognized", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree(["> - [ ] task"], null, registry);
+			const node = tree.byLine.get(0);
+			expect(node).toBeDefined();
+			expect(node!.task).not.toBeNull();
+			expect(node!.indentation).toBe("> ");
+		});
+
+		test("numbered list marker is recognized", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree(["1) [ ] task"], null, registry);
+			const node = tree.byLine.get(0);
+			expect(node).toBeDefined();
+			expect(node!.task).not.toBeNull();
+			expect(node!.listMarker).toBe("1)");
+		});
+
+		test("numbered list marker with dot is recognized", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree(["1. [ ] task"], null, registry);
+			const node = tree.byLine.get(0);
+			expect(node).toBeDefined();
+			expect(node!.task).not.toBeNull();
+			expect(node!.listMarker).toBe("1.");
+		});
+
+		test("non-list line is not matched", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree(["just text"], null, registry);
+			expect(tree.nodes.length).toBe(0);
+		});
+
+		test("empty line is not matched", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree([""], null, registry);
+			expect(tree.nodes.length).toBe(0);
+		});
+
+		test("list item without checkbox has null statusCharacter", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree(["- plain item"], null, registry);
+			const node = tree.byLine.get(0);
+			expect(node).toBeDefined();
+			expect(node!.statusCharacter).toBeNull();
+			expect(node!.task).toBeNull();
+			expect(node!.description).toBe("plain item");
+		});
+	});
+
+	describe("toggle edge cases", () => {
+		test("toggling a done task unfinishes it", () => {
+			const registry = new StatusRegistry();
+			const result = toggleTaskAtLine({
+				lines: [`- [x] done task ${TASK_SYMBOLS.done} 2026-05-16`],
+				lineNumber: 0,
+				metadata: null,
+				registry,
+				settings,
+			});
+
+			expect(result).not.toBeNull();
+			expect(result?.replacement[0]).toBe("- [ ] done task");
+		});
+
+		test("toggling a cancelled task uncancels it", () => {
+			const registry = new StatusRegistry();
+			const result = toggleTaskAtLine({
+				lines: [`- [-] cancelled ${TASK_SYMBOLS.cancelled} 2026-05-16`],
+				lineNumber: 0,
+				metadata: null,
+				registry,
+				settings,
+			});
+
+			expect(result).not.toBeNull();
+			expect(result?.replacement[0]).toBe("- [ ] cancelled");
+		});
+
+		test("clicking an in-progress task finishes it", () => {
+			const registry = new StatusRegistry();
+			const result = clickTaskCheckboxAtLine({
+				lines: ["- [/] in progress"],
+				lineNumber: 0,
+				metadata: null,
+				registry,
+				settings,
+			});
+
+			expect(result).not.toBeNull();
+			expect(result?.replacement[0]).toContain("- [x] in progress");
+		});
+
+		test("right-clicking a todo task cancels it", () => {
+			const registry = new StatusRegistry();
+			const result = rightClickTaskCheckboxAtLine({
+				lines: ["- [ ] todo"],
+				lineNumber: 0,
+				metadata: null,
+				registry,
+				settings,
+			});
+
+			expect(result).not.toBeNull();
+			expect(result?.replacement[0]).toContain("- [-] todo");
+		});
+
+		test("toggling non-existent line returns null", () => {
+			const registry = new StatusRegistry();
+			const result = toggleTaskAtLine({
+				lines: ["- [ ] task"],
+				lineNumber: 5,
+				metadata: null,
+				registry,
+				settings,
+			});
+
+			expect(result).toBeNull();
+		});
+
+		test("toggling plain text line returns null", () => {
+			const registry = new StatusRegistry();
+			const result = toggleTaskAtLine({
+				lines: ["just text"],
+				lineNumber: 0,
+				metadata: null,
+				registry,
+				settings,
+			});
+
+			expect(result).toBeNull();
+		});
+
+		test("toggling empty file returns null", () => {
+			const registry = new StatusRegistry();
+			const result = toggleTaskAtLine({
+				lines: [],
+				lineNumber: 0,
+				metadata: null,
+				registry,
+				settings,
+			});
+
+			expect(result).toBeNull();
+		});
+	});
+
+	describe("parseTaskBody edge cases", () => {
+		test("empty body produces empty description", () => {
+			const registry = new StatusRegistry();
+			const task = parseTaskLine("- [ ]", registry.get(" "));
+			expect(task).not.toBeNull();
+			expect(task!.metadata.description).toBe("");
+		});
+
+		test("body with only spaces produces empty description", () => {
+			const registry = new StatusRegistry();
+			const task = parseTaskLine("- [ ]   ", registry.get(" "));
+			expect(task).not.toBeNull();
+			expect(task!.metadata.description).toBe("");
+		});
+
+		test("priority emoji is extracted from description", () => {
+			const registry = new StatusRegistry();
+			const task = parseTaskLine(`- [ ] task 🔺`, registry.get(" "));
+			expect(task).not.toBeNull();
+			expect(task!.metadata.description).toBe("task");
+			expect(task!.metadata.priority).toBe("🔺");
+		});
+
+		test("lowest priority emoji is extracted", () => {
+			const registry = new StatusRegistry();
+			const task = parseTaskLine(`- [ ] task ⏬`, registry.get(" "));
+			expect(task).not.toBeNull();
+			expect(task!.metadata.priority).toBe("⏬");
+		});
+
+		test("multiple dates are all extracted", () => {
+			const registry = new StatusRegistry();
+			const task = parseTaskLine(
+				`- [ ] task ${TASK_SYMBOLS.start} 2026-01-01 ${TASK_SYMBOLS.due} 2026-12-31`,
+				registry.get(" "),
+			);
+			expect(task).not.toBeNull();
+			expect(task!.metadata.dates.start).toBe("2026-01-01");
+			expect(task!.metadata.dates.due).toBe("2026-12-31");
+			expect(task!.metadata.description).toBe("task");
+		});
+
+		test("block link is extracted", () => {
+			const registry = new StatusRegistry();
+			const task = parseTaskLine("- [ ] task ^block-id", registry.get(" "));
+			expect(task).not.toBeNull();
+			expect(task!.metadata.blockLink).toBe("^block-id");
+			expect(task!.metadata.description).toBe("task");
+		});
+
+		test("tags are extracted from description", () => {
+			const registry = new StatusRegistry();
+			const task = parseTaskLine("- [ ] task #work #urgent", registry.get(" "));
+			expect(task).not.toBeNull();
+			expect(task!.metadata.tags).toEqual(["#work", "#urgent"]);
+		});
+
+		test("unicode emoji in description is preserved", () => {
+			const registry = new StatusRegistry();
+			const task = parseTaskLine("- [ ] 买菜 🛒", registry.get(" "));
+			expect(task).not.toBeNull();
+			expect(task!.metadata.description).toBe("买菜 🛒");
+		});
+	});
+
+	describe("tree parent-child edge cases", () => {
+		test("indented child is linked to parent", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree(["- [ ] parent", "  - [ ] child"], null, registry);
+			expect(tree.nodes.length).toBe(2);
+			expect(tree.nodes[1]!.parent).toBe(tree.nodes[0]);
+			expect(tree.nodes[0]!.children).toContain(tree.nodes[1]);
+		});
+
+		test("deeply nested children form correct chain", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree(
+				["- [ ] level0", "  - [ ] level1", "    - [ ] level2"],
+				null,
+				registry,
+			);
+			expect(tree.nodes.length).toBe(3);
+			expect(tree.nodes[2]!.parent).toBe(tree.nodes[1]);
+			expect(tree.nodes[1]!.parent).toBe(tree.nodes[0]);
+			expect(tree.nodes[0]!.parent).toBeNull();
+		});
+
+		test("mixed tasks and plain items in tree", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree(
+				["- [ ] task", "- plain note", "- [ ] another task"],
+				null,
+				registry,
+			);
+			expect(tree.nodes.length).toBe(3);
+			expect(tree.nodes[0]!.task).not.toBeNull();
+			expect(tree.nodes[1]!.task).toBeNull();
+			expect(tree.nodes[2]!.task).not.toBeNull();
+		});
+
+		test("child plain item under task parent", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree(
+				["- [ ] parent", "  - plain child"],
+				null,
+				registry,
+			);
+			expect(tree.nodes.length).toBe(2);
+			expect(tree.nodes[0]!.task).not.toBeNull();
+			expect(tree.nodes[1]!.task).toBeNull();
+			expect(tree.nodes[1]!.parent).toBe(tree.nodes[0]);
+		});
+	});
+
+	describe("reconciliation edge cases", () => {
+		test("external completion of task adds done date", () => {
+			const registry = new StatusRegistry();
+			const result = reconcileExternalTaskCompletion({
+				before: ["- [ ] task"],
+				after: ["- [x] task"],
+				registry,
+				settings,
+			});
+
+			expect(result).not.toBeNull();
+			expect(result).toContain(`- [x] task ${TASK_SYMBOLS.done}`);
+		});
+
+		test("external edit with same content returns null", () => {
+			const registry = new StatusRegistry();
+			const result = reconcileExternalTaskCompletion({
+				before: ["- [ ] task"],
+				after: ["- [ ] task"],
+				registry,
+				settings,
+			});
+
+			expect(result).toBeNull();
+		});
+
+		test("external edit changing line count returns null", () => {
+			const registry = new StatusRegistry();
+			const result = reconcileExternalTaskCompletion({
+				before: ["- [ ] task"],
+				after: ["- [ ] task", "extra line"],
+				registry,
+				settings,
+			});
+
+			expect(result).toBeNull();
+		});
+
+		test("external completion of already-done task returns null", () => {
+			const registry = new StatusRegistry();
+			const result = reconcileExternalTaskCompletion({
+				before: [`- [x] task ${TASK_SYMBOLS.done} 2026-05-16`],
+				after: [`- [x] task ${TASK_SYMBOLS.done} 2026-05-16`],
+				registry,
+				settings,
+			});
+
+			expect(result).toBeNull();
+		});
+
+		test("external description change is not treated as completion", () => {
+			const registry = new StatusRegistry();
+			const result = reconcileExternalTaskCompletion({
+				before: ["- [ ] old description"],
+				after: ["- [ ] new description"],
+				registry,
+				settings,
+			});
+
+			expect(result).toBeNull();
+		});
+
+		test("external completion with -[] in description", () => {
+			const registry = new StatusRegistry();
+			const result = reconcileExternalTaskCompletion({
+				before: ["- [ ] task -[]"],
+				after: ["- [x] task -[]"],
+				registry,
+				settings,
+			});
+
+			expect(result).not.toBeNull();
+			expect(result).toContain(`- [x] task -[] ${TASK_SYMBOLS.done}`);
+		});
+	});
+
+	describe("task identity edge cases", () => {
+		test("tasks with same description but different done dates match", () => {
+			const registry = new StatusRegistry();
+			const task1 = parseTaskLine(`- [x] task ${TASK_SYMBOLS.done} 2026-05-16`, registry.get("x"));
+			const task2 = parseTaskLine(`- [x] task ${TASK_SYMBOLS.done} 2026-05-17`, registry.get("x"));
+			expect(task1).not.toBeNull();
+			expect(task2).not.toBeNull();
+			expect(taskIdentityKey(task1!)).toBe(taskIdentityKey(task2!));
+		});
+
+		test("tasks with different descriptions don't match", () => {
+			const registry = new StatusRegistry();
+			const task1 = parseTaskLine("- [ ] task A", registry.get(" "));
+			const task2 = parseTaskLine("- [ ] task B", registry.get(" "));
+			expect(task1).not.toBeNull();
+			expect(task2).not.toBeNull();
+			expect(taskIdentityKey(task1!)).not.toBe(taskIdentityKey(task2!));
+		});
+
+		test("tasks with -[] in description match across states", () => {
+			const registry = new StatusRegistry();
+			const task1 = parseTaskLine("- [ ] thing -[]", registry.get(" "));
+			const task2 = parseTaskLine(`- [x] thing -[] ${TASK_SYMBOLS.done} 2026-05-16`, registry.get("x"));
+			expect(task1).not.toBeNull();
+			expect(task2).not.toBeNull();
+			expect(taskIdentityKey(task1!)).toBe(taskIdentityKey(task2!));
+		});
 	});
 });
 

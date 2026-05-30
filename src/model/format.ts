@@ -49,8 +49,8 @@ export interface TaskLine {
 	original: string;
 }
 
-export const taskLineRegex = /^([\s\t>]*)([-*+]|[0-9]+[.)]) +\[(.?)\] *(.*)$/u;
-export const listItemRegex = /^([\s\t>]*)([-*+]|[0-9]+[.)]) *(?:\[(.?)\] *)?(.*)$/u;
+export const taskLineRegex = /^([\s\t>]*)([-*+]|[0-9]+[.)]) +\[(.)\] *(.*)$/u;
+export const listItemRegex = /^([\s\t>]*)([-*+]|[0-9]+[.)]) *(?:\[(.)\] *)?(.*)$/u;
 const dateRegex = "\\d{4}-\\d{2}-\\d{2}";
 const blockLinkRegex = / \^[a-zA-Z0-9-]+$/u;
 const tagRegex = /(^|\s)#[^ !@#$%^&*(),.?":{}|<>]+/g;
