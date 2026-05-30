@@ -819,6 +819,54 @@ describe("TaskLite core", () => {
 		]);
 	});
 
+	test("deletes non-recurring task when onCompletion is delete", () => {
+		const registry = new StatusRegistry();
+		const result = toggleTaskAtLine({
+			lines: [`- [ ] test delete ${TASK_SYMBOLS.scheduled} 2026-05-30 ${TASK_SYMBOLS.onCompletion} delete`],
+			lineNumber: 0,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.fromLine).toBe(0);
+		expect(result?.toLine).toBe(0);
+		expect(result?.replacement).toEqual([]);
+	});
+
+	test("deletes non-recurring task with subtasks when onCompletion is delete", () => {
+		const registry = new StatusRegistry();
+		const result = toggleTaskAtLine({
+			lines: [
+				`- [ ] Parent ${TASK_SYMBOLS.onCompletion} delete`,
+				"  - [ ] Child",
+				"- [ ] Sibling",
+			],
+			lineNumber: 0,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.fromLine).toBe(0);
+		expect(result?.toLine).toBe(1);
+		expect(result?.replacement).toEqual([]);
+	});
+
+	test("full lifecycle: complete → delete → complete again with delete", () => {
+		const registry = new StatusRegistry();
+
+		const lines1 = [`- [ ] Task ${TASK_SYMBOLS.due} 2026-05-20 ${TASK_SYMBOLS.recurrence} every week ${TASK_SYMBOLS.onCompletion} delete`];
+		const r1 = toggleTaskAtLine({lines: lines1, lineNumber: 0, metadata: null, registry, settings});
+		expect(r1?.replacement.length).toBe(1);
+		expect(r1?.replacement[0]).toContain("2026-05-27");
+
+		const lines2 = [...r1!.replacement];
+		const r2 = toggleTaskAtLine({lines: lines2, lineNumber: 0, metadata: null, registry, settings});
+		expect(r2?.replacement.length).toBe(1);
+		expect(r2?.replacement[0]).toContain("2026-06-03");
+	});
+
 	test("does not duplicate an already-created recurring occurrence", () => {
 		const registry = new StatusRegistry();
 		const result = toggleTaskAtLine({

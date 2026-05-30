@@ -182,6 +182,11 @@ function buildTaskMutationResult({
 		.map((line, index) => replacementByLine.get(replacementRange.from + index) ?? line);
 
 	if (!recurringNode?.task) {
+		const completedNode = findTerminatedNode(node, changedTasks);
+		if (completedNode?.task?.metadata.onCompletion === "delete") {
+			const deleteRange = getSubtreeLineRange(completedNode);
+			return {fromLine: deleteRange.from, toLine: deleteRange.to, replacement: []};
+		}
 		return {fromLine: replacementRange.from, toLine: replacementRange.to, replacement: originalLines};
 	}
 
@@ -351,6 +356,14 @@ function findRecurringTerminatedNode(node: TaskTreeNode, changedTasks: Map<numbe
 			return current;
 		}
 		current = current.parent;
+	}
+	return null;
+}
+
+function findTerminatedNode(node: TaskTreeNode, changedTasks: Map<number, TaskLine>): TaskTreeNode | null {
+	const changedTask = changedTasks.get(node.lineNumber);
+	if (node.task && isTerminalStatus(changedTask?.status.type) && !isTerminalStatus(node.task.status.type)) {
+		return node;
 	}
 	return null;
 }
