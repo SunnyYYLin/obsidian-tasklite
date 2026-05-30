@@ -686,6 +686,78 @@ describe("TaskLite core", () => {
 		]);
 	});
 
+	test("parses onCompletion field in task metadata", () => {
+		const registry = new StatusRegistry();
+		const task = parseTaskLine(
+			`- [ ] Ship ${TASK_SYMBOLS.due} 2026-05-20 ${TASK_SYMBOLS.recurrence} every week ${TASK_SYMBOLS.onCompletion} delete`,
+			registry.get(" "),
+		);
+
+		expect(task?.metadata.recurrence).toBe("every week");
+		expect(task?.metadata.onCompletion).toBe("delete");
+	});
+
+	test("deletes completed recurring task when onCompletion is delete", () => {
+		const registry = new StatusRegistry();
+		const result = toggleTaskAtLine({
+			lines: [
+				`- [ ] Ship ${TASK_SYMBOLS.due} 2026-05-20 ${TASK_SYMBOLS.recurrence} every week ${TASK_SYMBOLS.onCompletion} delete`,
+			],
+			lineNumber: 0,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.replacement).toEqual([
+			`- [ ] Ship ${TASK_SYMBOLS.due} 2026-05-27 ${TASK_SYMBOLS.recurrence} every week ${TASK_SYMBOLS.onCompletion} delete`,
+		]);
+		expect(result?.fromLine).toBe(0);
+		expect(result?.toLine).toBe(0);
+	});
+
+	test("deletes completed recurring parent with subtasks when onCompletion is delete", () => {
+		const registry = new StatusRegistry();
+		const result = toggleTaskAtLine({
+			lines: [
+				`- [ ] Parent ${TASK_SYMBOLS.due} 2026-05-20 ${TASK_SYMBOLS.recurrence} every week ${TASK_SYMBOLS.onCompletion} delete`,
+				`  - [x] Child done ${TASK_SYMBOLS.done} 2026-05-19 ${TASK_SYMBOLS.id} abc`,
+				"  - plain note",
+				"- [ ] Sibling",
+			],
+			lineNumber: 0,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.fromLine).toBe(0);
+		expect(result?.toLine).toBe(2);
+		expect(result?.replacement).toEqual([
+			`- [ ] Parent ${TASK_SYMBOLS.due} 2026-05-27 ${TASK_SYMBOLS.recurrence} every week ${TASK_SYMBOLS.onCompletion} delete`,
+			"  - [ ] Child done",
+			"  - plain note",
+		]);
+	});
+
+	test("keeps completed recurring task when onCompletion is keep", () => {
+		const registry = new StatusRegistry();
+		const result = toggleTaskAtLine({
+			lines: [
+				`- [ ] Ship ${TASK_SYMBOLS.due} 2026-05-20 ${TASK_SYMBOLS.recurrence} every week ${TASK_SYMBOLS.onCompletion} keep`,
+			],
+			lineNumber: 0,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.replacement).toEqual([
+			`- [ ] Ship ${TASK_SYMBOLS.due} 2026-05-27 ${TASK_SYMBOLS.recurrence} every week ${TASK_SYMBOLS.onCompletion} keep`,
+			expect.stringContaining(`- [x] Ship ${TASK_SYMBOLS.due} 2026-05-20`),
+		]);
+	});
+
 	test("does not duplicate an already-created recurring occurrence", () => {
 		const registry = new StatusRegistry();
 		const result = toggleTaskAtLine({

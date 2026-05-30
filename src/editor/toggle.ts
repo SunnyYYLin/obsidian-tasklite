@@ -213,10 +213,12 @@ function buildTaskMutationResult({
 		return {fromLine: replacementRange.from, toLine: replacementRange.to, replacement: originalLines};
 	}
 
+	const onDelete = recurringNode.task.metadata.onCompletion === "delete";
+	const deleteRange = recurringRange!;
 	return {
-		fromLine: replacementRange.from,
-		toLine: replacementRange.to,
-		replacement: [...occurrence.nextLines, ...originalLines],
+		fromLine: onDelete ? deleteRange.from : replacementRange.from,
+		toLine: onDelete ? deleteRange.to : replacementRange.to,
+		replacement: onDelete ? occurrence.nextLines : [...occurrence.nextLines, ...originalLines],
 	};
 }
 

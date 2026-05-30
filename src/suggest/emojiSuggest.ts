@@ -20,6 +20,9 @@ const SUGGESTIONS: EmojiSuggestion[] = [
 	{label: "Low priority / 低优先级", insert: TASK_SYMBOLS.priority.low},
 	{label: "Task id / 任务 ID", insert: `${TASK_SYMBOLS.id} `},
 	{label: "Depends on / 依赖", insert: `${TASK_SYMBOLS.dependsOn} `},
+	{label: "On completion / 完成时", insert: `${TASK_SYMBOLS.onCompletion} `},
+	{label: "On completion: keep / 保留", insert: `${TASK_SYMBOLS.onCompletion} keep`},
+	{label: "On completion: delete / 删除", insert: `${TASK_SYMBOLS.onCompletion} delete`},
 ];
 
 export class TaskLiteEmojiSuggest extends EditorSuggest<EmojiSuggestion> {
