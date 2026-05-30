@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { parseTaskLine, TASK_SYMBOLS } from "../src/model/format";
 import { StatusRegistry } from "../src/model/status";
+import { buildTaskTree } from "../src/model/tree";
 import { TaskDocumentStore } from "../src/model/taskDocumentStore";
 import { cancelTaskAtLine, clickTaskCheckboxAtLine, rightClickTaskCheckboxAtLine, toggleTaskAtLine, unfinishTaskAtLine } from "../src/editor/toggle";
 import { reconcileExternalTaskCompletion } from "../src/editor/externalReconcileCore";
@@ -943,6 +944,21 @@ describe("TaskLite core", () => {
 		await new Promise((resolve) => setTimeout(resolve, 250));
 		expect(await store.listRecords()).toHaveLength(2);
 		expect(readCount).toBe(4);
+	});
+
+	test("recognizes empty bracket as valid checkbox", () => {
+		const registry = new StatusRegistry();
+		const result = toggleTaskAtLine({
+			lines: ["- [] - []"],
+			lineNumber: 0,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result).not.toBeNull();
+		expect(result?.replacement[0]).toContain(`- [x] - []`);
+		expect(result?.replacement[0]).toContain(TASK_SYMBOLS.done);
 	});
 });
 
