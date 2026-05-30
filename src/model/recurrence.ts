@@ -1,38 +1,48 @@
+import { RRule, Frequency, type Options } from "rrule";
 import type { TaskDates } from "./format";
 
-export interface RecurrenceShift {
-	amount: number;
-	unit: "day" | "week" | "month" | "year";
-	whenDone: boolean;
+export interface RecurrenceRule {
+	options: Partial<Options>;
+	baseOnToday: boolean;
 }
 
-export function parseRecurrenceRule(rule: string | null): RecurrenceShift | null {
+export function parseRecurrenceRule(rule: string | null): RecurrenceRule | null {
 	if (!rule) return null;
-	const match = rule.trim().toLowerCase().match(/^every +(?:(\d+) +)?(day|days|week|weeks|month|months|year|years)(?: +when +done)?$/u);
-	if (!match) return null;
-	const amount = match[1] ? Number.parseInt(match[1], 10) : 1;
-	if (!Number.isFinite(amount) || amount < 1) return null;
-	const singular = (match[2] ?? "day").replace(/s$/u, "") as RecurrenceShift["unit"];
-	const whenDone = rule.trim().toLowerCase().endsWith(" when done");
-	return {amount, unit: singular, whenDone};
+	try {
+		const match = rule.trim().match(/^([a-zA-Z0-9, !]+?)( +when +done)?$/i);
+		if (!match) return null;
+
+		const isolatedRuleText = (match[1] ?? "").trim();
+		const baseOnToday = match[2] !== undefined;
+
+		const options = RRule.parseText(isolatedRuleText);
+		if (!options) return null;
+
+		return {options, baseOnToday};
+	} catch {
+		return null;
+	}
 }
 
-export function shiftTaskDates(dates: TaskDates, shift: RecurrenceShift, completedOn: string): TaskDates {
-	const originalReferenceDate = getReferenceDate(dates);
-	if (originalReferenceDate === null && !shift.whenDone) {
-		return {
-			...dates,
-			done: null,
-			cancelled: null,
-		};
+export function nextRecurrenceDates(dates: TaskDates, rule: RecurrenceRule, completedOn: string): TaskDates {
+	const referenceDate = dates.due ?? dates.scheduled ?? dates.start;
+	if (!referenceDate && !rule.baseOnToday) {
+		return {...dates, done: null, cancelled: null};
 	}
-	const baseDate = shift.whenDone ? completedOn : originalReferenceDate ?? completedOn;
-	const nextReferenceDate = shiftDate(baseDate, shift);
+
+	const afterDate = rule.baseOnToday ? completedOn : referenceDate ?? completedOn;
+	const dtstartDate = rule.baseOnToday ? afterDate : referenceDate ?? afterDate;
+	const nextReferenceDate = nextDateAfter(afterDate, rule, dtstartDate);
+
+	if (!nextReferenceDate) {
+		return {...dates, done: null, cancelled: null};
+	}
+
 	return {
 		...dates,
-		start: nextOccurrenceDate(dates.start, originalReferenceDate, nextReferenceDate),
-		scheduled: nextOccurrenceDate(dates.scheduled, originalReferenceDate, nextReferenceDate),
-		due: nextOccurrenceDate(dates.due, originalReferenceDate, nextReferenceDate),
+		start: shiftDateByDelta(dates.start, referenceDate, nextReferenceDate),
+		scheduled: shiftDateByDelta(dates.scheduled, referenceDate, nextReferenceDate),
+		due: shiftDateByDelta(dates.due, referenceDate, nextReferenceDate),
 		done: null,
 		cancelled: null,
 	};
@@ -42,33 +52,80 @@ export function todayString(): string {
 	return window.moment().format("YYYY-MM-DD");
 }
 
-function getReferenceDate(dates: TaskDates): string | null {
-	return dates.due ?? dates.scheduled ?? dates.start;
+function nextDateAfter(afterDate: string, rule: RecurrenceRule, dtstartDate: string): string | null {
+	const after = parseDate(afterDate);
+	const dtstart = parseDate(dtstartDate);
+	if (!after || !dtstart) return null;
+
+	const rrule = new RRule({
+		...rule.options,
+		dtstart: new Date(Date.UTC(dtstart.getUTCFullYear(), dtstart.getUTCMonth(), dtstart.getUTCDate())),
+	});
+
+	const afterEnd = new Date(Date.UTC(after.getUTCFullYear(), after.getUTCMonth(), after.getUTCDate(), 23, 59, 59, 999));
+	const next = rrule.after(afterEnd);
+	if (!next) return null;
+
+	let nextDate = new Date(Date.UTC(next.getUTCFullYear(), next.getUTCMonth(), next.getUTCDate()));
+
+	const isMonthly = rule.options.freq === Frequency.MONTHLY;
+	const isYearly = rule.options.freq === Frequency.YEARLY;
+
+	if (isMonthly && !hasSpecificDate(rule.options)) {
+		const skippingMonths = rule.options.interval ?? 1;
+		let probe = new Date(afterEnd.getTime());
+		while (isSkippingTooManyMonths(after, nextDate, skippingMonths)) {
+			probe.setUTCDate(probe.getUTCDate() - 1);
+			probe.setUTCHours(23, 59, 59, 999);
+			const probeRule = new RRule({...rule.options, dtstart: new Date(Date.UTC(probe.getUTCFullYear(), probe.getUTCMonth(), probe.getUTCDate()))});
+			const adjusted = probeRule.after(probe);
+			if (!adjusted) break;
+			nextDate = new Date(Date.UTC(adjusted.getUTCFullYear(), adjusted.getUTCMonth(), adjusted.getUTCDate()));
+		}
+	}
+
+	if (isYearly) {
+		const skippingYears = rule.options.interval ?? 1;
+		let probe = new Date(afterEnd.getTime());
+		while (isSkippingTooManyYears(after, nextDate, skippingYears)) {
+			probe.setUTCDate(probe.getUTCDate() - 1);
+			probe.setUTCHours(23, 59, 59, 999);
+			const probeRule = new RRule({...rule.options, dtstart: new Date(Date.UTC(probe.getUTCFullYear(), probe.getUTCMonth(), probe.getUTCDate()))});
+			const adjusted = probeRule.after(probe);
+			if (!adjusted) break;
+			nextDate = new Date(Date.UTC(adjusted.getUTCFullYear(), adjusted.getUTCMonth(), adjusted.getUTCDate()));
+		}
+	}
+
+	return formatDate(nextDate);
 }
 
-function nextOccurrenceDate(value: string | null, originalReferenceDate: string | null, nextReferenceDate: string | null): string | null {
-	if (!value || !nextReferenceDate) return null;
-	if (!originalReferenceDate) return nextReferenceDate;
-	const dayOffset = daysBetween(originalReferenceDate, value);
-	return addDays(nextReferenceDate, dayOffset);
+
+function hasSpecificDate(options: Partial<Options>): boolean {
+	return Boolean(options.bymonthday || options.byweekday || options.bynweekday);
 }
 
-function shiftDate(value: string | null, shift: RecurrenceShift): string | null {
+function isSkippingTooManyMonths(after: Date, next: Date, skippingMonths: number): boolean {
+	const diffMonths = (next.getUTCFullYear() - after.getUTCFullYear()) * 12 + (next.getUTCMonth() - after.getUTCMonth());
+	return diffMonths > skippingMonths;
+}
+
+function isSkippingTooManyYears(after: Date, next: Date, skippingYears: number): boolean {
+	return next.getUTCFullYear() - after.getUTCFullYear() > skippingYears;
+}
+
+function shiftDateByDelta(value: string | null, originalReference: string | null, nextReference: string): string | null {
 	if (!value) return null;
-	const date = parseDate(value);
-	if (!date) return value;
-	if (shift.unit === "day") return addDays(value, shift.amount);
-	if (shift.unit === "week") return addDays(value, shift.amount * 7);
-	if (shift.unit === "month") return addMonthsClamped(value, shift.amount);
-	return addYearsClamped(value, shift.amount);
+	if (!originalReference) return nextReference;
+	const dayOffset = daysBetween(originalReference, value);
+	return addDays(nextReference, dayOffset);
 }
 
 function daysBetween(from: string, to: string): number {
 	const fromDate = parseDate(from);
 	const toDate = parseDate(to);
 	if (!fromDate || !toDate) return 0;
-	const millisecondsPerDay = 24 * 60 * 60 * 1000;
-	return Math.round((toDate.getTime() - fromDate.getTime()) / millisecondsPerDay);
+	return Math.round((toDate.getTime() - fromDate.getTime()) / 86400000);
 }
 
 function addDays(value: string, days: number): string {
@@ -78,30 +135,6 @@ function addDays(value: string, days: number): string {
 	return formatDate(date);
 }
 
-function addMonthsClamped(value: string, months: number): string {
-	const date = parseDate(value);
-	if (!date) return value;
-	const day = date.getUTCDate();
-	const targetYear = date.getUTCFullYear();
-	const targetMonth = date.getUTCMonth() + months;
-	const lastDay = lastDayOfMonth(targetYear, targetMonth);
-	return formatDate(new Date(Date.UTC(targetYear, targetMonth, Math.min(day, lastDay))));
-}
-
-function addYearsClamped(value: string, years: number): string {
-	const date = parseDate(value);
-	if (!date) return value;
-	const targetYear = date.getUTCFullYear() + years;
-	const month = date.getUTCMonth();
-	const day = date.getUTCDate();
-	const lastDay = lastDayOfMonth(targetYear, month);
-	return formatDate(new Date(Date.UTC(targetYear, month, Math.min(day, lastDay))));
-}
-
-function lastDayOfMonth(year: number, zeroBasedMonth: number): number {
-	return new Date(Date.UTC(year, zeroBasedMonth + 1, 0)).getUTCDate();
-}
-
 function parseDate(value: string): Date | null {
 	const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/u);
 	if (!match) return null;
@@ -109,9 +142,7 @@ function parseDate(value: string): Date | null {
 	const month = Number.parseInt(match[2] ?? "", 10);
 	const day = Number.parseInt(match[3] ?? "", 10);
 	const date = new Date(Date.UTC(year, month - 1, day));
-	if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
-		return null;
-	}
+	if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
 	return date;
 }
 

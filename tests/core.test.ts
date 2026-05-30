@@ -65,6 +65,48 @@ describe("TaskLite core", () => {
 		expect(task?.metadata.recurrence).toBe("every week");
 	});
 
+	test("supports every weekday recurrence", () => {
+		const registry = new StatusRegistry();
+		// 2026-05-29 is Friday, next weekday is Monday 2026-06-01
+		const result = toggleTaskAtLine({
+			lines: [`- [ ] Daily standup ${TASK_SYMBOLS.due} 2026-05-29 ${TASK_SYMBOLS.recurrence} every weekday`],
+			lineNumber: 0,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.replacement[0]).toContain(`${TASK_SYMBOLS.due} 2026-06-01`);
+	});
+
+	test("supports every week on specific day recurrence", () => {
+		const registry = new StatusRegistry();
+		// 2026-05-25 is Monday, every week on Wednesday → 2026-05-27
+		const result = toggleTaskAtLine({
+			lines: [`- [ ] Meeting ${TASK_SYMBOLS.due} 2026-05-25 ${TASK_SYMBOLS.recurrence} every week on Wednesday`],
+			lineNumber: 0,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.replacement[0]).toContain(`${TASK_SYMBOLS.due} 2026-05-27`);
+	});
+
+	test("supports every month on the Nth recurrence", () => {
+		const registry = new StatusRegistry();
+		// Due on the 15th, every month on the 15th → next is 2026-06-15
+		const result = toggleTaskAtLine({
+			lines: [`- [ ] Report ${TASK_SYMBOLS.due} 2026-05-15 ${TASK_SYMBOLS.recurrence} every month on the 15th`],
+			lineNumber: 0,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.replacement[0]).toContain(`${TASK_SYMBOLS.due} 2026-06-15`);
+	});
+
 	test("toggles status and adds a done date", () => {
 		const registry = new StatusRegistry();
 		const result = toggleTaskAtLine({

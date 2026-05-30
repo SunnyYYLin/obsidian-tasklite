@@ -1,5 +1,5 @@
 import { copyTaskMetadata, serializeTaskBody, serializeTaskLine, type TaskLine } from "../model/format";
-import { parseRecurrenceRule, shiftTaskDates, todayString } from "../model/recurrence";
+import { parseRecurrenceRule, nextRecurrenceDates, todayString, type RecurrenceRule } from "../model/recurrence";
 import type { StatusRegistry } from "../model/status";
 import { getSubtreeLineRange, getSubtreeNodes, type TaskTreeNode } from "../model/tree";
 import type { TaskLiteSettings } from "../settings";
@@ -56,11 +56,11 @@ function makeNextOccurrence(
 	terminated: TaskLine,
 	registry: StatusRegistry,
 	settings: TaskLiteSettings,
-	shift: Parameters<typeof shiftTaskDates>[1],
+	shift: RecurrenceRule,
 ): TaskLine {
 	const metadata = copyTaskMetadata(original.metadata);
 	const terminatedOn = terminated.metadata.dates.done ?? terminated.metadata.dates.cancelled ?? todayString();
-	metadata.dates = shiftTaskDates(metadata.dates, shift, terminatedOn);
+	metadata.dates = nextRecurrenceDates(metadata.dates, shift, terminatedOn);
 	metadata.dates.done = null;
 	metadata.dates.cancelled = null;
 	metadata.blockLink = null;
