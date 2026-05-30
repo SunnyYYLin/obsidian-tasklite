@@ -23,7 +23,7 @@ export interface TaskTree {
 export function buildTaskTree(lines: string[], metadata: CachedMetadata | null | undefined, registry: StatusRegistry): TaskTree {
 	const byLine = new Map<number, TaskTreeNode>();
 	const nodes: TaskTreeNode[] = [];
-	const listItems = metadata?.listItems ?? inferListItems(lines);
+	const listItems = normalizeListItems(metadata?.listItems ?? inferListItems(lines));
 
 	for (const item of listItems) {
 		const lineNumber = item.position.start.line;
@@ -33,10 +33,10 @@ export function buildTaskTree(lines: string[], metadata: CachedMetadata | null |
 		const match = line.match(listItemRegex);
 		if (!match) continue;
 
-		const statusCharacter = match[3] || null;
+		const statusCharacter = match[3] ?? null;
 		const node: TaskTreeNode = {
 			lineNumber,
-			parentLine: typeof item.parent === "number" && item.parent >= 0 ? item.parent : null,
+			parentLine: parentLineFromItem(item, lineNumber),
 			parent: null,
 			children: [],
 			original: line,
@@ -52,7 +52,7 @@ export function buildTaskTree(lines: string[], metadata: CachedMetadata | null |
 
 	for (const node of nodes) {
 		const parent = node.parentLine === null ? null : byLine.get(node.parentLine);
-		if (parent) {
+		if (parent && parent !== node && !wouldCreateCycle(node, parent)) {
 			node.parent = parent;
 			parent.children.push(node);
 		}
@@ -63,7 +63,10 @@ export function buildTaskTree(lines: string[], metadata: CachedMetadata | null |
 
 export function getSubtreeNodes(root: TaskTreeNode): TaskTreeNode[] {
 	const result: TaskTreeNode[] = [];
+	const visited = new Set<TaskTreeNode>();
 	const visit = (node: TaskTreeNode) => {
+		if (visited.has(node)) return;
+		visited.add(node);
 		result.push(node);
 		for (const child of node.children) visit(child);
 	};
@@ -77,6 +80,47 @@ export function getSubtreeLineRange(root: TaskTreeNode): {from: number; to: numb
 		from: nodes[0]?.lineNumber ?? root.lineNumber,
 		to: nodes[nodes.length - 1]?.lineNumber ?? root.lineNumber,
 	};
+}
+
+function normalizeListItems(listItems: ListItemCache[]): ListItemCache[] {
+	const byLine = new Map<number, ListItemCache>();
+	for (const item of listItems) {
+		const lineNumber = item.position.start.line;
+		const existing = byLine.get(lineNumber);
+		if (!existing || isBetterSameLineItem(item, existing, lineNumber)) {
+			byLine.set(lineNumber, item);
+		}
+	}
+	return [...byLine.values()].sort((a, b) => {
+		const lineDelta = a.position.start.line - b.position.start.line;
+		return lineDelta === 0 ? a.position.start.col - b.position.start.col : lineDelta;
+	});
+}
+
+function isBetterSameLineItem(candidate: ListItemCache, existing: ListItemCache, lineNumber: number): boolean {
+	const candidateSelfParent = candidate.parent === lineNumber;
+	const existingSelfParent = existing.parent === lineNumber;
+	if (candidateSelfParent !== existingSelfParent) return !candidateSelfParent;
+
+	const candidateHasTask = typeof candidate.task === "string" && candidate.task.length > 0;
+	const existingHasTask = typeof existing.task === "string" && existing.task.length > 0;
+	if (candidateHasTask !== existingHasTask) return candidateHasTask;
+
+	return candidate.position.start.col < existing.position.start.col;
+}
+
+function parentLineFromItem(item: ListItemCache, lineNumber: number): number | null {
+	if (typeof item.parent !== "number" || item.parent < 0 || item.parent === lineNumber) return null;
+	return item.parent;
+}
+
+function wouldCreateCycle(node: TaskTreeNode, parent: TaskTreeNode): boolean {
+	let current: TaskTreeNode | null = parent;
+	while (current) {
+		if (current === node) return true;
+		current = current.parent;
+	}
+	return false;
 }
 
 function inferListItems(lines: string[]): ListItemCache[] {

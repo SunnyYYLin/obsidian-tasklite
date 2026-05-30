@@ -9,6 +9,7 @@ import { reconcileExternalTaskCompletion } from "../src/editor/externalReconcile
 import { createTaskLiteCoreApi } from "../src/api/taskLiteCoreApi";
 import type TaskLitePlugin from "../src/main";
 import type { TaskLiteSettings } from "../src/settings";
+import type { CachedMetadata, ListItemCache } from "obsidian";
 
 interface FakeMoment {
 	format(format: "YYYY-MM-DD"): string;
@@ -1039,6 +1040,14 @@ describe("TaskLite core", () => {
 			expect(node!.task!.metadata.description).toBe("-[] -[]");
 		});
 
+		test("same-line metadata from bare - in a task description is ignored", () => {
+			expectSameLineMetadataIsIgnored("    - [ ] -", "-");
+		});
+
+		test("same-line metadata from - [] in a task description is ignored", () => {
+			expectSameLineMetadataIsIgnored("    - [ ] - []", "- []");
+		});
+
 		test("- [] no trailing text is a list item without task", () => {
 			const registry = new StatusRegistry();
 			const tree = buildTaskTree(["- []"], null, registry);
@@ -1485,6 +1494,45 @@ function createTestPlugin(app: Record<string, unknown> = {}) {
 
 function createTestFile(path: string, basename: string) {
 	return {path, basename, extension: "md"};
+}
+
+function expectSameLineMetadataIsIgnored(lastLine: string, description: string): void {
+	const registry = new StatusRegistry();
+	const lines = [
+		"- [ ] test-father",
+		"    - [ ] test",
+		lastLine,
+	];
+	const metadata = {
+		listItems: [
+			createListItem(0, -1, 0, " "),
+			createListItem(1, 0, 4, " "),
+			createListItem(2, 1, 4, " "),
+			createListItem(2, 2, 12),
+		],
+	} as CachedMetadata;
+
+	const tree = buildTaskTree(lines, metadata, registry);
+	const node = tree.byLine.get(2);
+
+	expect(tree.nodes).toHaveLength(3);
+	expect(node).toBeDefined();
+	expect(node!.parentLine).toBe(1);
+	expect(node!.parent?.lineNumber).toBe(1);
+	expect(node!.children).toHaveLength(0);
+	expect(node!.task?.metadata.description).toBe(description);
+}
+
+function createListItem(line: number, parent: number, col: number, task?: string): ListItemCache {
+	return {
+		id: `${line}:${col}`,
+		parent,
+		task,
+		position: {
+			start: {line, col, offset: 0},
+			end: {line, col, offset: 0},
+		},
+	} as unknown as ListItemCache;
 }
 
 function parseDate(value: string): Date {

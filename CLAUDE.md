@@ -72,7 +72,7 @@ npm version patch    # 发布版本（会同步更新 manifest.json 和 versions
 
 ## 版本与发布
 
-- 当前版本：`0.3.1-alpha.7`（修复空括号 checkbox `- []` 导致的卡死，正则回退 + 防御性 guard）
+- 当前版本：`0.3.1-alpha.8`（修复任务描述里的 `-` / `- []` 触发同一行 metadata 自环导致卡死）
 - Agent 规则：每次做出用户可见的优化或打磨变更时，递增 prerelease alpha 版本号
 - `npm version` 会运行 `version-bump.mjs` 同步 `manifest.json` 和 `versions.json`
 - 推送匹配 `x.y.z` 格式的 tag 会触发 `.github/workflows/release.yml` 自动构建发布

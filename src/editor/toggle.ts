@@ -240,7 +240,7 @@ function needsMissingStatusDate(task: TaskLine, status: TaskLine["status"]): boo
 }
 
 function togglePlainCheckbox(node: TaskTreeNode, registry: StatusRegistry): ToggleResult | null {
-	if (!node.statusCharacter) return null;
+	if (node.statusCharacter === null) return null;
 	const current = registry.get(node.statusCharacter);
 	const next = registry.next(current);
 	const replacement = node.original.replace(/\[(.)\]/u, `[${next.symbol}]`);
