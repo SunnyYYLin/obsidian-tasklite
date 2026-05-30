@@ -4,7 +4,6 @@ import { registerTasksApiShim } from "./compat/tasksApi";
 import { registerTaskLiteCore } from "./core/registerCore";
 import { StatusRegistry } from "./model/status";
 import { TaskDocumentStore } from "./model/taskDocumentStore";
-import { openTaskLineModal, openTaskLineModalWithTarget } from "./ui/taskLineModal";
 import {
 	DEFAULT_SETTINGS,
 	importTasksStatusSettings,
@@ -17,34 +16,6 @@ export default class TaskLitePlugin extends Plugin {
 	readonly statusRegistry = new StatusRegistry(DEFAULT_SETTINGS.statusSettings);
 	readonly documentStore = new TaskDocumentStore(this.app, this.statusRegistry);
 	api!: TaskLiteCoreApi;
-	readonly modalApi = {
-		openTaskLineModal: (options: {title: string; initialLine: string}) =>
-			openTaskLineModal({
-				app: this.app,
-				title: options.title,
-				initialLine: options.initialLine,
-				registry: this.statusRegistry,
-				settings: this.settings,
-			}),
-		openTaskLineModalWithTarget: (options: {
-			title: string;
-			initialLine: string;
-			targetFile: {basePath: string; defaultValue: string};
-			parentTask?: {
-				options: Array<{label: string; path: string; lineNumber: number}>;
-				initialValue?: {path: string; lineNumber: number};
-			};
-		}) =>
-			openTaskLineModalWithTarget({
-				app: this.app,
-				title: options.title,
-				initialLine: options.initialLine,
-				registry: this.statusRegistry,
-				settings: this.settings,
-				targetFile: options.targetFile,
-				parentTask: options.parentTask,
-			}),
-	};
 	private unregisterTasksApiShim: (() => void) | null = null;
 
 	async onload(): Promise<void> {

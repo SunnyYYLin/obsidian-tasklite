@@ -54,8 +54,18 @@ export function createTasksApiV1FromCore(
 }
 
 async function defaultOpenTaskLineModal(options: OpenTaskLineModalOptions): Promise<string> {
-	const {openTaskLineModal} = await import("../ui/taskLineModal");
-	return openTaskLineModal(options);
+	const plugins = (options.app as any).plugins?.plugins;
+	const taskTodoPlugin = plugins?.["tasktodo"];
+	if (taskTodoPlugin && typeof taskTodoPlugin.openTaskLineModal === "function") {
+		return taskTodoPlugin.openTaskLineModal(options);
+	}
+	const ObsidianNotice = (globalThis as any).Notice;
+	if (ObsidianNotice) {
+		new ObsidianNotice("Please enable TaskTodo plugin to use the create/edit task modal.");
+	} else {
+		console.warn("Please enable TaskTodo plugin to use the create/edit task modal.");
+	}
+	return options.initialLine;
 }
 
 export function registerTasksApiShim(plugin: TaskLitePlugin): () => void {
