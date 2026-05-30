@@ -201,6 +201,8 @@ function buildTaskMutationResult({
 	if (!occurrence) {
 		return {fromLine: replacementRange.from, toLine: replacementRange.to, replacement: originalLines};
 	}
+	const onDelete = recurringNode.task.metadata.onCompletion === "delete";
+
 	if (occurrence.warning) {
 		return {
 			fromLine: replacementRange.from,
@@ -209,16 +211,22 @@ function buildTaskMutationResult({
 			warning: occurrence.warning,
 		};
 	}
-	if (occurrence.skippedBecauseExisting) {
+	if (occurrence.skippedBecauseExisting && !onDelete) {
 		return {fromLine: replacementRange.from, toLine: replacementRange.to, replacement: originalLines};
 	}
 
-	const onDelete = recurringNode.task.metadata.onCompletion === "delete";
-	const deleteRange = recurringRange!;
+	if (onDelete) {
+		return {
+			fromLine: recurringRange!.from,
+			toLine: recurringRange!.to,
+			replacement: occurrence.skippedBecauseExisting ? [] : occurrence.nextLines,
+		};
+	}
+
 	return {
-		fromLine: onDelete ? deleteRange.from : replacementRange.from,
-		toLine: onDelete ? deleteRange.to : replacementRange.to,
-		replacement: onDelete ? occurrence.nextLines : [...occurrence.nextLines, ...originalLines],
+		fromLine: replacementRange.from,
+		toLine: replacementRange.to,
+		replacement: [...occurrence.nextLines, ...originalLines],
 	};
 }
 

@@ -758,6 +758,25 @@ describe("TaskLite core", () => {
 		]);
 	});
 
+	test("deletes old recurring task when completing new occurrence with onCompletion delete", () => {
+		const registry = new StatusRegistry();
+		const result = toggleTaskAtLine({
+			lines: [
+				`- [ ] Ship ${TASK_SYMBOLS.due} 2026-05-27 ${TASK_SYMBOLS.recurrence} every week ${TASK_SYMBOLS.onCompletion} delete`,
+			],
+			lineNumber: 0,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.fromLine).toBe(0);
+		expect(result?.toLine).toBe(0);
+		expect(result?.replacement).toEqual([
+			`- [ ] Ship ${TASK_SYMBOLS.due} 2026-06-03 ${TASK_SYMBOLS.recurrence} every week ${TASK_SYMBOLS.onCompletion} delete`,
+		]);
+	});
+
 	test("does not duplicate an already-created recurring occurrence", () => {
 		const registry = new StatusRegistry();
 		const result = toggleTaskAtLine({
