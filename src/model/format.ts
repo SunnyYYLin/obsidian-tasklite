@@ -108,6 +108,7 @@ export function parseTaskBody(body: string): TaskMetadata {
 		matched = extractString(metadata, "dependsOn", TASK_SYMBOLS.dependsOn, "[a-zA-Z0-9-_, ]+") || matched;
 		matched = extractString(metadata, "id", TASK_SYMBOLS.id, "[a-zA-Z0-9-_]+") || matched;
 	}
+	metadata.description = metadata.description.replace(/ {2,}/gu, " ").trim();
 	metadata.tags = extractTags(metadata.description);
 	return metadata;
 
@@ -158,20 +159,20 @@ export function copyTaskMetadata(metadata: TaskMetadata): TaskMetadata {
 }
 
 function extractDate(metadata: TaskMetadata, key: keyof TaskDates, symbol: string): boolean {
-	const regex = new RegExp(` ?${escapeRegExp(symbol)}\\ufe0f? *(${dateRegex})$`, "u");
+	const regex = new RegExp(`${escapeRegExp(symbol)}\\ufe0f? *(${dateRegex})`, "u");
 	const match = metadata.description.match(regex);
 	if (!match) return false;
 	metadata.dates[key] = match[1] ?? null;
-	metadata.description = metadata.description.replace(regex, "").trim();
+	metadata.description = metadata.description.replace(regex, "").replace(/ {2,}/gu, " ").trim();
 	return true;
 }
 
 function extractString(metadata: TaskMetadata, key: "recurrence" | "onCompletion" | "id" | "dependsOn", symbol: string, valuePattern: string): boolean {
-	const regex = new RegExp(` ?${escapeRegExp(symbol)}\\ufe0f? *(${valuePattern})$`, "u");
+	const regex = new RegExp(`${escapeRegExp(symbol)}\\ufe0f? *(${valuePattern})`, "u");
 	const match = metadata.description.match(regex);
 	if (!match) return false;
 	metadata[key] = (match[1] ?? "").trim();
-	metadata.description = metadata.description.replace(regex, "").trim();
+	metadata.description = metadata.description.replace(regex, "").replace(/ {2,}/gu, " ").trim();
 	return true;
 }
 
