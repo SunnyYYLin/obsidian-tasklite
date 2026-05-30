@@ -1,7 +1,7 @@
 {
 	"id": "taskslite",
 	"name": "TaskLite",
-	"version": "0.3.1-alpha.5",
+	"version": "0.3.1-alpha.6",
 	"minAppVersion": "1.8.0",
 	"description": "A lightweight tree-aware task manager with Tasks-compatible emoji metadata.",
 	"author": "sunnylin",
