@@ -72,7 +72,7 @@ npm version patch    # 发布版本（会同步更新 manifest.json 和 versions
 
 ## 版本与发布
 
-- 当前版本：`0.3.1-alpha.11`（修复日期/字符串字段解析：去掉 `$` 行尾锚定，支持行尾后有其他内容如 `👤 Mary`）
+- 当前版本：`0.3.1-alpha.12`（新增 `👤` 负责人字段支持，修复日期解析行尾锚定问题）
 - Agent 规则：每次做出用户可见的优化或打磨变更时，递增 prerelease alpha 版本号
 - `npm version` 会运行 `version-bump.mjs` 同步 `manifest.json` 和 `versions.json`
 - 推送匹配 `x.y.z` 格式的 tag 会触发 `.github/workflows/release.yml` 自动构建发布

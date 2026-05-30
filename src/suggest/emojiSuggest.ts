@@ -27,6 +27,7 @@ const SUGGESTIONS: EmojiSuggestion[] = [
 	{label: "On completion / 完成时", insert: `${TASK_SYMBOLS.onCompletion} `},
 	{label: "On completion: keep / 保留", insert: `${TASK_SYMBOLS.onCompletion} keep`},
 	{label: "On completion: delete / 删除", insert: `${TASK_SYMBOLS.onCompletion} delete`},
+	{label: "Assignee / 负责人", insert: `${TASK_SYMBOLS.person} `},
 ];
 
 export class TaskLiteEmojiSuggest extends EditorSuggest<EmojiSuggestion> {

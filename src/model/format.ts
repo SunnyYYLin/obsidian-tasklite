@@ -18,6 +18,7 @@ export const TASK_SYMBOLS = {
 	onCompletion: "🏁",
 	dependsOn: "⛔",
 	id: "🆔",
+	person: "👤",
 };
 
 export interface TaskDates {
@@ -35,8 +36,9 @@ export interface TaskMetadata {
 	dates: TaskDates;
 	recurrence: string | null;
 	onCompletion: string | null;
-	id: string | null;
 	dependsOn: string | null;
+	id: string | null;
+	person: string | null;
 	blockLink: string | null;
 	tags: string[];
 }
@@ -85,8 +87,9 @@ export function parseTaskBody(body: string): TaskMetadata {
 		dates: {start: null, created: null, scheduled: null, due: null, done: null, cancelled: null},
 		recurrence: null,
 		onCompletion: null,
-		id: null,
 		dependsOn: null,
+		id: null,
+		person: null,
 		blockLink,
 		tags: [],
 	};
@@ -107,6 +110,7 @@ export function parseTaskBody(body: string): TaskMetadata {
 		matched = extractString(metadata, "onCompletion", TASK_SYMBOLS.onCompletion, "[a-zA-Z]+") || matched;
 		matched = extractString(metadata, "dependsOn", TASK_SYMBOLS.dependsOn, "[a-zA-Z0-9-_, ]+") || matched;
 		matched = extractString(metadata, "id", TASK_SYMBOLS.id, "[a-zA-Z0-9-_]+") || matched;
+		matched = extractString(metadata, "person", TASK_SYMBOLS.person, ".+") || matched;
 	}
 	metadata.description = metadata.description.replace(/ {2,}/gu, " ").trim();
 	metadata.tags = extractTags(metadata.description);
@@ -140,6 +144,7 @@ export function serializeTaskBody(metadata: TaskMetadata): string {
 	if (metadata.onCompletion) parts.push(`${TASK_SYMBOLS.onCompletion} ${metadata.onCompletion}`);
 	if (metadata.dependsOn) parts.push(`${TASK_SYMBOLS.dependsOn} ${metadata.dependsOn}`);
 	if (metadata.id) parts.push(`${TASK_SYMBOLS.id} ${metadata.id}`);
+	if (metadata.person) parts.push(`${TASK_SYMBOLS.person} ${metadata.person}`);
 	if (metadata.blockLink) parts.push(metadata.blockLink);
 	return parts.filter(Boolean).join(" ");
 }
@@ -151,8 +156,9 @@ export function copyTaskMetadata(metadata: TaskMetadata): TaskMetadata {
 		dates: {...metadata.dates},
 		recurrence: metadata.recurrence,
 		onCompletion: metadata.onCompletion,
-		id: metadata.id,
 		dependsOn: metadata.dependsOn,
+		id: metadata.id,
+		person: metadata.person,
 		blockLink: metadata.blockLink,
 		tags: [...metadata.tags],
 	};
@@ -167,7 +173,7 @@ function extractDate(metadata: TaskMetadata, key: keyof TaskDates, symbol: strin
 	return true;
 }
 
-function extractString(metadata: TaskMetadata, key: "recurrence" | "onCompletion" | "id" | "dependsOn", symbol: string, valuePattern: string): boolean {
+function extractString(metadata: TaskMetadata, key: "recurrence" | "onCompletion" | "dependsOn" | "id" | "person", symbol: string, valuePattern: string): boolean {
 	const regex = new RegExp(`${escapeRegExp(symbol)}\\ufe0f? *(${valuePattern})`, "u");
 	const match = metadata.description.match(regex);
 	if (!match) return false;
