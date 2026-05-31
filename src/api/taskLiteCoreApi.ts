@@ -1,4 +1,4 @@
-import type { App, CachedMetadata, Editor, TFile } from "obsidian";
+import type { App, CachedMetadata, TFile } from "obsidian";
 import {
 	cancelTaskAtLine,
 	finishTaskAtLine,
@@ -7,23 +7,17 @@ import {
 	unfinishTaskAtLine,
 	type ToggleResult,
 } from "../editor/toggle";
-import { copyTaskMetadata, parseTaskLine, serializeTaskLine, type TaskLine } from "../model/format";
+import { findOpenMarkdownEditor } from "../editor/editorUtils";
+import { copyTaskMetadata, parseLineWithStatus, serializeTaskLine, type TaskLine } from "../model/format";
 import { taskIdentityKey } from "../model/taskIdentity";
 import { applyTaskStatus } from "../model/taskState";
-import { buildTaskTree, getSubtreeNodes, type TaskTreeNode } from "../model/tree";
-import type { TaskDocumentStore } from "../model/taskDocumentStore";
+import { buildTaskTree, getSubtreeNodes, taskDepth } from "../model/tree";
+import type { TaskDocumentStore, TaskDocumentRecord } from "../model/taskDocumentStore";
 import type { StatusRegistry } from "../model/status";
 import type { TaskLiteSettings } from "../settings";
 
-export interface TaskLiteTaskRecord {
-	path: string;
-	basename: string;
-	lineNumber: number;
-	parentLine: number | null;
-	depth: number;
-	hasChildren: boolean;
-	task: TaskLine;
-}
+/** TaskLiteTaskRecord 与 TaskDocumentRecord 共享同一个形状，此处直接复用，避免类型重复定义 */
+export type TaskLiteTaskRecord = TaskDocumentRecord;
 
 export interface ListTasksOptions {
 	includeCompleted?: boolean;
@@ -91,17 +85,7 @@ interface TaskLiteCoreApiOptions {
 	documentStore?: TaskDocumentStore;
 }
 
-interface AppLike {
-	workspace?: {
-		activeEditor?: unknown;
-		getLeavesOfType?: (viewType: string) => Array<{view: unknown}>;
-	};
-}
 
-interface MarkdownEditorInfoLike {
-	file?: TFile | null;
-	editor?: Editor;
-}
 
 export function createTaskLiteCoreApi({app, registry, getSettings, documentStore}: TaskLiteCoreApiOptions): TaskLiteCoreApi {
 	return {
@@ -114,7 +98,7 @@ export function createTaskLiteCoreApi({app, registry, getSettings, documentStore
 		deleteTask: (path, lineNumber) => deleteFileTask({app, path, lineNumber, registry, documentStore}),
 		editTask: (path, lineNumber, patch) => editFileTask({app, path, lineNumber, registry, documentStore, patch}),
 		executeTasksToggleCommand: (line, path) => {
-			const context = findOpenEditorTaskContext(app, line, path);
+			const context = findOpenEditorTaskContext(app, line, path, registry);
 			if (!context) return executeSingleLineApiToggle(line, registry, getSettings());
 			const result = toggleTaskAtLine({
 				...context,
@@ -150,9 +134,6 @@ async function listTasks({
 		const tree = buildTaskTree(lines, metadata, registry);
 		for (const node of tree.nodes) {
 			if (!node.task) continue;
-			if (!options.includeChildren && node.parent) continue;
-			if (!options.includeCompleted && node.task.status.type === "DONE") continue;
-			if (!options.includeCancelled && node.task.status.type === "CANCELLED") continue;
 			records.push({
 				path: file.path,
 				basename: file.basename,
@@ -208,7 +189,7 @@ async function createTask({
 	};
 	const line = serializeTaskLine(taskLine);
 
-	const inboxPath = normalizePath(input.path || "Tasks/New_Tasks.md");
+	const inboxPath = normalizePathLocal(input.path || "Tasks/New_Tasks.md");
 	let file = app.vault.getAbstractFileByPath(inboxPath);
 	if (!file) {
 		file = await app.vault.create(inboxPath, "");
@@ -219,7 +200,11 @@ async function createTask({
 
 	const content = await app.vault.read(file);
 	const lines = content.length > 0 ? content.split("\n") : [];
-	const insertion = formatCreatedTaskLine(line, lines, input.parentLineNumber);
+	const metadata = app.metadataCache.getFileCache(file);
+	const tree = buildTaskTree(lines, metadata, registry);
+	const parentNode = typeof input.parentLineNumber === "number" ? tree.byLine.get(input.parentLineNumber) : undefined;
+	const parentIndentation = parentNode ? parentNode.indentation : "";
+	const insertion = parentNode ? `${parentIndentation}\t${line.trimStart()}` : line;
 	if (typeof input.parentLineNumber === "number" && input.parentLineNumber >= 0 && input.parentLineNumber < lines.length) {
 		lines.splice(input.parentLineNumber + 1, 0, insertion);
 		const nextContent = lines.join("\n");
@@ -369,25 +354,12 @@ function filterTaskRecords(records: TaskLiteTaskRecord[], options: ListTasksOpti
 	});
 }
 
-function taskDepth(node: TaskTreeNode): number {
-	let depth = 0;
-	let current = node.parent;
-	while (current) {
-		depth++;
-		current = current.parent;
-	}
-	return depth;
-}
 
-function formatCreatedTaskLine(line: string, lines: string[], parentLineNumber: number | undefined): string {
-	if (typeof parentLineNumber !== "number" || parentLineNumber < 0 || parentLineNumber >= lines.length) return line;
-	const parentIndentation = lines[parentLineNumber]?.match(/^([\s\t>]*)/u)?.[1] ?? "";
-	return `${parentIndentation}\t${line.trimStart()}`;
-}
+
+
 
 function executeSingleLineApiToggle(line: string, registry: StatusRegistry, settings: TaskLiteSettings): string {
-	const statusSymbol = line.match(/\[(.)\]/u)?.[1] ?? " ";
-	const task = parseTaskLine(line, registry.get(statusSymbol));
+	const task = parseLineWithStatus(line, registry);
 	if (task?.status.type === "DONE" || task?.status.type === "CANCELLED") {
 		return normalizeApiToggledLine(line, registry, settings);
 	}
@@ -403,8 +375,7 @@ function executeSingleLineApiToggle(line: string, registry: StatusRegistry, sett
 }
 
 function normalizeApiToggledLine(line: string, registry: StatusRegistry, settings: TaskLiteSettings): string {
-	const statusSymbol = line.match(/\[(.)\]/u)?.[1] ?? " ";
-	const task = parseTaskLine(line, registry.get(statusSymbol));
+	const task = parseLineWithStatus(line, registry);
 	if (!task) return line;
 
 	return serializeTaskLine(applyTaskStatus(task, task.status, settings, {fillMissingStatusDate: true}));
@@ -414,62 +385,43 @@ function findOpenEditorTaskContext(
 	app: App,
 	line: string,
 	path: string,
+	registry: StatusRegistry,
 ): {lines: string[]; lineNumber: number; metadata: CachedMetadata | null} | null {
 	const editor = findOpenMarkdownEditor(app, path);
 	if (!editor) return null;
 
 	const lines = editor.getValue().split("\n");
-	const lineNumber = findMatchingTaskLine(lines, line);
+	const lineNumber = findMatchingTaskLine(lines, line, registry);
 	if (lineNumber < 0) return null;
 
 	return {lines, lineNumber, metadata: null};
 }
 
-function findMatchingTaskLine(lines: string[], line: string): number {
+function findMatchingTaskLine(lines: string[], line: string, registry: StatusRegistry): number {
 	const exactLineNumber = lines.findIndex((candidate) => candidate === line);
 	if (exactLineNumber >= 0) return exactLineNumber;
 
-	const incomingTask = parseLineWithStatus(line);
+	const incomingTask = parseLineWithStatus(line, registry);
 	if (!incomingTask) return -1;
 
 	const incomingKey = taskIdentityKey(incomingTask);
 	return lines.findIndex((candidate) => {
-		const candidateTask = parseLineWithStatus(candidate);
+		const candidateTask = parseLineWithStatus(candidate, registry);
 		return candidateTask ? taskIdentityKey(candidateTask) === incomingKey : false;
 	});
 }
 
-function parseLineWithStatus(line: string): TaskLine | null {
-	const statusSymbol = line.match(/\[(.)\]/u)?.[1] ?? " ";
-	return parseTaskLine(line, {symbol: statusSymbol, name: "", nextStatusSymbol: "x", availableAsCommand: false, type: "TODO"});
-}
 
-function findOpenMarkdownEditor(app: App, path: string): Editor | null {
-	const workspace = (app as AppLike | undefined)?.workspace;
-	if (!workspace) return null;
 
-	const activeEditor = getEditorForPath(workspace.activeEditor, path);
-	if (activeEditor) return activeEditor;
 
-	for (const leaf of workspace.getLeavesOfType?.("markdown") ?? []) {
-		const editor = getEditorForPath(leaf.view, path);
-		if (editor) return editor;
-	}
-
-	return null;
-}
-
-function getEditorForPath(value: unknown, path: string): Editor | null {
-	const info = value as MarkdownEditorInfoLike | null | undefined;
-	if (info?.file?.path === path && info.editor) return info.editor;
-	return null;
-}
 
 function isTFile(value: unknown): value is TFile {
 	const file = value as Partial<TFile> | null | undefined;
 	return Boolean(file && typeof file.path === "string" && typeof file.extension === "string");
 }
 
-function normalizePath(path: string): string {
+function normalizePathLocal(path: string): string {
 	return path.replace(/\\/gu, "/").replace(/\/+/gu, "/").replace(/^\/+/u, "");
 }
+
+

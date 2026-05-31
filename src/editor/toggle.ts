@@ -257,7 +257,7 @@ function applyBehaviorToSubtree(
 ): void {
 	for (const current of getSubtreeNodes(node)) {
 		if (!current.task) continue;
-		const nextStatus = statusForSubtreeBehavior(current, behavior, registry, replacementByLine, settings);
+		const nextStatus = statusForSubtreeBehavior(current, behavior, registry, changedTasks, settings);
 		if (!nextStatus) continue;
 		replaceTaskStatus(current, nextStatus, changedTasks, replacementByLine, settings);
 	}
@@ -272,7 +272,7 @@ function applyBehaviorToTarget(
 	settings: TaskLiteSettings,
 ): void {
 	if (!node.task) return;
-	const nextStatus = statusForSubtreeBehavior(node, behavior, registry, replacementByLine, settings);
+	const nextStatus = statusForSubtreeBehavior(node, behavior, registry, changedTasks, settings);
 	if (!nextStatus) return;
 	replaceTaskStatus(node, nextStatus, changedTasks, replacementByLine, settings);
 }
@@ -287,7 +287,7 @@ function applyBehaviorToParents(
 ): void {
 	let parent = node.parent;
 	while (parent?.task) {
-		const nextStatus = statusForParentBehavior(parent, behavior, replacementByLine, registry);
+		const nextStatus = statusForParentBehavior(parent, behavior, changedTasks, registry);
 		if (!nextStatus) break;
 		replaceTaskStatus(parent, nextStatus, changedTasks, replacementByLine, settings);
 		parent = parent.parent;
@@ -298,14 +298,14 @@ function statusForSubtreeBehavior(
 	node: TaskTreeNode,
 	behavior: TaskBehavior,
 	registry: StatusRegistry,
-	replacementByLine: Map<number, string>,
+	changedTasks: Map<number, TaskLine>,
 	settings: TaskLiteSettings,
 ): StatusConfiguration | null {
 	const type = node.task!.status.type;
 	if (behavior === "finish") return type === "CANCELLED" ? null : registry.get("x");
 	if (behavior === "cancel") {
 		if (type === "DONE") return null;
-		if (settings.toggleBehavior.parentOnCancel && node.children.length > 0 && areNonCancelledChildrenDone(node, replacementByLine, registry)) return registry.get("x");
+		if (settings.toggleBehavior.parentOnCancel && node.children.length > 0 && areNonCancelledChildrenDone(node, changedTasks)) return registry.get("x");
 		return registry.get("-");
 	}
 	if (behavior === "unfinish") return registry.get(" ");
@@ -315,17 +315,17 @@ function statusForSubtreeBehavior(
 function statusForParentBehavior(
 	parent: TaskTreeNode,
 	behavior: TaskBehavior,
-	replacementByLine: Map<number, string>,
+	changedTasks: Map<number, TaskLine>,
 	registry: StatusRegistry,
 ): StatusConfiguration | null {
 	if (!parent.task) return null;
 	if (behavior === "finish") {
 		if (parent.task.status.type === "CANCELLED" || parent.task.status.type === "DONE") return null;
-		return areAllTaskChildrenTerminated(parent, replacementByLine, registry) ? registry.get("x") : null;
+		return areAllTaskChildrenTerminated(parent, changedTasks) ? registry.get("x") : null;
 	}
 	if (behavior === "cancel") {
 		if (parent.task.status.type === "DONE" || parent.task.status.type === "CANCELLED") return null;
-		return areNonCancelledChildrenDone(parent, replacementByLine, registry) ? registry.get("x") : null;
+		return areNonCancelledChildrenDone(parent, changedTasks) ? registry.get("x") : null;
 	}
 	if (behavior === "unfinish") {
 		return parent.task.status.type === "DONE" || parent.task.status.type === "CANCELLED" ? registry.get(" ") : null;
@@ -368,15 +368,14 @@ function findTerminatedNode(node: TaskTreeNode, changedTasks: Map<number, TaskLi
 	return null;
 }
 
-function areAllTaskChildrenTerminated(parent: TaskTreeNode, replacementByLine: Map<number, string>, registry: StatusRegistry): boolean {
+function areAllTaskChildrenTerminated(parent: TaskTreeNode, changedTasks: Map<number, TaskLine>): boolean {
 	const taskChildren = parent.children.filter((child) => child.task);
 	if (taskChildren.length === 0) return false;
 	return taskChildren.every((child) => {
 		if (!child.task) return false;
-		const replacement = replacementByLine.get(child.lineNumber);
-		if (!replacement) return isTerminalStatus(child.task.status.type);
-		const statusSymbol = replacement.match(/\[(.)\]/u)?.[1] ?? child.task.status.symbol;
-		return isTerminalStatus(registry.get(statusSymbol).type);
+		const changedTask = changedTasks.get(child.lineNumber);
+		const statusType = changedTask ? changedTask.status.type : child.task.status.type;
+		return isTerminalStatus(statusType);
 	});
 }
 
@@ -398,13 +397,12 @@ function shouldPropagateToParent(behavior: TaskBehavior, settings: TaskLiteSetti
 	return settings.toggleBehavior.parentOnUncancel;
 }
 
-function areNonCancelledChildrenDone(parent: TaskTreeNode, replacementByLine: Map<number, string>, registry: StatusRegistry): boolean {
+function areNonCancelledChildrenDone(parent: TaskTreeNode, changedTasks: Map<number, TaskLine>): boolean {
 	const taskChildren = parent.children.filter((child) => child.task);
 	for (const child of taskChildren) {
 		if (!child.task) continue;
-		const replacement = replacementByLine.get(child.lineNumber);
-		const statusSymbol = replacement ? (replacement.match(/\[(.)\]/u)?.[1] ?? child.task.status.symbol) : child.task.status.symbol;
-		const statusType = registry.get(statusSymbol).type;
+		const changedTask = changedTasks.get(child.lineNumber);
+		const statusType = changedTask ? changedTask.status.type : child.task.status.type;
 		if (statusType === "CANCELLED") continue;
 		if (statusType !== "DONE") return false;
 	}

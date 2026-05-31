@@ -82,6 +82,16 @@ export function getSubtreeLineRange(root: TaskTreeNode): {from: number; to: numb
 	};
 }
 
+export function taskDepth(node: TaskTreeNode): number {
+	let depth = 0;
+	let current = node.parent;
+	while (current) {
+		depth++;
+		current = current.parent;
+	}
+	return depth;
+}
+
 function normalizeListItems(listItems: ListItemCache[]): ListItemCache[] {
 	const byLine = new Map<number, ListItemCache>();
 	for (const item of listItems) {

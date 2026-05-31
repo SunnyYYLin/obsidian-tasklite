@@ -1,4 +1,4 @@
-import type { StatusConfiguration } from "./status";
+import type { StatusConfiguration, StatusRegistry } from "./status";
 
 export const TASK_SYMBOLS = {
 	priority: {
@@ -192,4 +192,9 @@ function extractTags(description: string): string[] {
 
 function escapeRegExp(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export function parseLineWithStatus(line: string, registry: StatusRegistry): TaskLine | null {
+	const statusSymbol = line.match(/\[(.)\]/u)?.[1] ?? " ";
+	return parseTaskLine(line, registry.get(statusSymbol));
 }

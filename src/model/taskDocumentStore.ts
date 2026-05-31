@@ -1,5 +1,5 @@
 import type { App, CachedMetadata, Plugin, TFile } from "obsidian";
-import { buildTaskTree, type TaskTree, type TaskTreeNode } from "./tree";
+import { buildTaskTree, taskDepth, type TaskTree, type TaskTreeNode } from "./tree";
 import type { StatusRegistry } from "./status";
 import type { TaskLine } from "./format";
 
@@ -175,15 +175,7 @@ function taskRecordsFromDocument(document: TaskDocument): TaskDocumentRecord[] {
 	return records;
 }
 
-function taskDepth(node: TaskTreeNode): number {
-	let depth = 0;
-	let current = node.parent;
-	while (current) {
-		depth++;
-		current = current.parent;
-	}
-	return depth;
-}
+
 
 function isMarkdownFile(value: unknown): value is TFile {
 	return Boolean(

@@ -4,6 +4,7 @@ import type { StatusRegistry } from "../model/status";
 import type { TaskDocumentStore } from "../model/taskDocumentStore";
 import type { TaskLiteSettings } from "../settings";
 import { cancelTaskAtLine, clickTaskCheckboxAtLine, rightClickTaskCheckboxAtLine, uncancelTaskAtLine, type ToggleResult } from "./toggle";
+import { findOpenMarkdownEditor } from "./editorUtils";
 
 type EditorTaskMutation = (input: {
 	lines: string[];
@@ -82,10 +83,7 @@ export function toggleEditorTaskCancellation({
 	settings: TaskLiteSettings;
 	documentStore?: TaskDocumentStore;
 }): boolean {
-	const line = editor.getLine(editor.getCursor().line);
-	const statusSymbol = line.match(/\[(.)\]/u)?.[1] ?? "";
-	const mutate = registry.get(statusSymbol).type === "CANCELLED" ? uncancelTaskAtLine : cancelTaskAtLine;
-	return mutateEditorTask({editor, app, path, registry, settings, documentStore, mutate});
+	return mutateEditorTask({editor, app, path, registry, settings, documentStore, mutate: rightClickTaskCheckboxAtLine});
 }
 
 export async function toggleFileTask({
@@ -244,23 +242,4 @@ function getFileCache(app: App, path: string): CachedMetadata | null {
 	return app.metadataCache.getFileCache(file);
 }
 
-function findOpenMarkdownEditor(app: App, path: string): Editor | null {
-	const workspace = app.workspace as {
-		activeEditor?: unknown;
-		getLeavesOfType?: (viewType: string) => Array<{view: unknown}>;
-	};
-	const activeEditor = getEditorForPath(workspace.activeEditor, path);
-	if (activeEditor) return activeEditor;
 
-	for (const leaf of workspace.getLeavesOfType?.("markdown") ?? []) {
-		const editor = getEditorForPath(leaf.view, path);
-		if (editor) return editor;
-	}
-	return null;
-}
-
-function getEditorForPath(value: unknown, path: string): Editor | null {
-	const info = value as {file?: TFile | null; editor?: Editor} | null | undefined;
-	if (info?.file?.path === path && info.editor) return info.editor;
-	return null;
-}
