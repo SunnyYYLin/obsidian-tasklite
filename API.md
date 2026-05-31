@@ -1,0 +1,717 @@
+# TaskLite Plugin API
+
+> **Version**: 0.4.0-alpha.0  
+> **Plugin ID**: `taskslite`
+
+本文档面向希望基于 TaskLite 插件开发新插件的开发者。
+
+---
+
+## 目录
+
+1. [接入方式](#1-接入方式)
+2. [核心 API — `TaskLiteCoreApi`](#2-核心-api--tasklitecoreapi)
+   - [listTasks](#21-listtasks)
+   - [createTask](#22-createtask)
+   - [deleteTask](#23-deletetask)
+   - [editTask](#24-edittask)
+   - [finishTask / unfinishTask](#25-finishtask--unfinishtask)
+   - [cancelTask / uncancelTask](#26-canceltask--uncanceltask)
+   - [executeTasksToggleCommand](#27-executetaskstogglecommand)
+3. [数据结构参考](#3-数据结构参考)
+   - [TaskLiteTaskRecord](#tasklitetaskrecord)
+   - [TaskLine & TaskMetadata](#taskline--taskmetadata)
+   - [EditTaskPatch](#edittaskpatch)
+   - [StatusConfiguration](#statusconfiguration)
+4. [设计约定与注意事项](#4-设计约定与注意事项)
+5. [完整示例](#5-完整示例)
+6. [版本历史与兼容性](#6-版本历史与兼容性)
+
+---
+
+## 1. 接入方式
+
+### 1.1 获取插件实例
+
+在 Obsidian 插件中，通过 `app.plugins.plugins` 获取 TaskLite 插件实例：
+
+```typescript
+import type TaskLitePlugin from "path-to-tasklite/src/main"; // 仅用于类型
+
+function getTaskLiteApi(app: App) {
+  const plugin = (app as any).plugins?.plugins?.["taskslite"] as TaskLitePlugin | undefined;
+  if (!plugin) throw new Error("TaskLite 插件未启用");
+  return plugin.api;
+}
+```
+
+### 1.2 声明依赖
+
+在你的 `manifest.json` 中声明对 TaskLite 的依赖：
+
+```json
+{
+  "id": "my-plugin",
+  "name": "My Plugin",
+  "version": "1.0.0",
+  "minAppVersion": "1.8.0",
+  "dependencies": {
+    "taskslite": "0.4.0-alpha.0"
+  }
+}
+```
+
+### 1.3 防御性获取
+
+建议在插件加载时检测 TaskLite 是否存在，避免在其未启用时崩溃：
+
+```typescript
+export default class MyPlugin extends Plugin {
+  private taskLiteApi: TaskLiteCoreApi | null = null;
+
+  async onload() {
+    // 等待所有插件加载完成后再获取
+    this.app.workspace.onLayoutReady(() => {
+      const tl = (this.app as any).plugins?.plugins?.["taskslite"];
+      this.taskLiteApi = tl?.api ?? null;
+      if (!this.taskLiteApi) {
+        new Notice("需要安装并启用 TaskLite 插件");
+      }
+    });
+  }
+}
+```
+
+---
+
+## 2. 核心 API — `TaskLiteCoreApi`
+
+所有方法均通过 `plugin.api` 访问。接口定义：
+
+```typescript
+interface TaskLiteCoreApi {
+  listTasks(options?: ListTasksOptions): Promise<TaskLiteTaskRecord[]>;
+  createTask(line: string, options?: CreateTaskOptions): Promise<void>;
+  deleteTask(path: string, lineNumber: number): Promise<boolean>;
+  editTask(path: string, lineNumber: number, patch: EditTaskPatch): Promise<boolean>;
+  finishTask(path: string, lineNumber: number): Promise<boolean>;
+  unfinishTask(path: string, lineNumber: number): Promise<boolean>;
+  cancelTask(path: string, lineNumber: number): Promise<boolean>;
+  uncancelTask(path: string, lineNumber: number): Promise<boolean>;
+  executeTasksToggleCommand(line: string, path: string): string;
+}
+```
+
+---
+
+### 2.1 `listTasks`
+
+列出 Vault 中所有满足条件的顶层任务（默认只返回未完成、未取消的非子任务）。
+
+```typescript
+listTasks(options?: ListTasksOptions): Promise<TaskLiteTaskRecord[]>
+
+interface ListTasksOptions {
+  includeCompleted?: boolean;  // 是否包含已完成 (DONE) 的任务，默认 false
+  includeCancelled?: boolean;  // 是否包含已取消 (CANCELLED) 的任务，默认 false
+  includeChildren?: boolean;   // 是否包含子任务，默认 false
+}
+```
+
+**返回**：[`TaskLiteTaskRecord[]`](#tasklitetaskrecord) 数组，每项对应一个任务行。
+
+**示例：**
+
+```typescript
+// 获取所有待办顶层任务
+const todos = await api.listTasks();
+
+// 获取全部任务（包括完成/取消/子任务）
+const all = await api.listTasks({
+  includeCompleted: true,
+  includeCancelled: true,
+  includeChildren: true,
+});
+
+// 按截止日期过滤
+const today = new Date().toISOString().slice(0, 10); // "2026-05-31"
+const dueTodayOrBefore = todos.filter(
+  (r) => r.task.metadata.dates.due && r.task.metadata.dates.due <= today
+);
+```
+
+> **性能提示**：TaskLite 内部维护了一个 `TaskDocumentStore` 缓存，`listTasks` 会优先使用缓存数据。首次调用会遍历整个 Vault，之后的调用非常快。
+
+---
+
+### 2.2 `createTask`
+
+在指定文件末尾（或指定父任务下方）插入一个新任务行。
+
+```typescript
+createTask(line: string, options?: CreateTaskOptions): Promise<void>
+
+interface CreateTaskOptions {
+  path?: string;             // 目标文件路径（Vault 内相对路径），默认 "Tasks/New_Tasks.md"
+  parentLineNumber?: number; // 父任务的行号（0-indexed），新任务将插入到该行正下方并自动缩进
+}
+```
+
+**参数 `line`**：要插入的任务行原始文本，例如 `"- [ ] 买牛奶 📅 2026-06-01"`。
+
+**行为：**
+- 若目标文件不存在，自动创建。
+- 若提供了 `parentLineNumber`，新任务将插入父任务的正下方，并自动继承父任务的缩进加一个 Tab。
+- 若未提供 `parentLineNumber`，任务追加到文件末尾。
+
+**示例：**
+
+```typescript
+// 追加到默认 inbox 文件
+await api.createTask("- [ ] 写周报 📅 2026-06-07");
+
+// 追加到指定文件
+await api.createTask("- [ ] Review PR", { path: "Work/Tasks.md" });
+
+// 创建为某任务的子任务（父任务在第 5 行）
+await api.createTask("- [ ] 子任务", {
+  path: "Work/Tasks.md",
+  parentLineNumber: 5,
+});
+```
+
+> **注意**：`line` 应该是完整的 Markdown 列表行，包含 `- [ ]` 前缀。如果行号因其他操作已改变，请在调用前重新获取最新行号。
+
+---
+
+### 2.3 `deleteTask`
+
+删除指定任务及其**完整子树**（所有后代任务行一并删除）。
+
+```typescript
+deleteTask(path: string, lineNumber: number): Promise<boolean>
+```
+
+**参数：**
+- `path`：文件在 Vault 中的相对路径，如 `"Work/Tasks.md"`。
+- `lineNumber`：任务所在行号（0-indexed）。
+
+**返回**：`true` 表示找到并删除成功；`false` 表示文件不存在或该行没有任务。
+
+**行为：**
+- 递归删除目标任务及其所有子任务（整个子树）。
+- 子任务不会被"升级"或移动，而是随父任务一起被删除。
+- 只影响文件内容，不会弹出任何确认对话框。
+
+**示例：**
+
+```typescript
+const records = await api.listTasks();
+const target = records.find((r) => r.task.metadata.description === "旧项目");
+
+if (target) {
+  const deleted = await api.deleteTask(target.path, target.lineNumber);
+  console.log(deleted ? "已删除" : "未找到");
+}
+```
+
+> ⚠️ **不可撤销**：删除操作直接修改文件，Obsidian 无法通过 Ctrl+Z 撤销。建议在调用前向用户确认。
+
+---
+
+### 2.4 `editTask`
+
+**原子地**修改任务的 metadata 字段。只有 `patch` 中显式传入的字段才会被更新，未提及的字段保持不变。
+
+```typescript
+editTask(path: string, lineNumber: number, patch: EditTaskPatch): Promise<boolean>
+
+type EditTaskPatch = {
+  description?: string;        // 任务描述文本
+  priority?: string | null;    // 优先级 emoji，如 "⏫"，null 表示清除
+  dates?: {
+    start?: string | null;     // 开始日期 "YYYY-MM-DD"，null 表示清除
+    created?: string | null;   // 创建日期
+    scheduled?: string | null; // 计划日期
+    due?: string | null;       // 截止日期
+    done?: string | null;      // 完成日期（一般由 finishTask 自动管理）
+    cancelled?: string | null; // 取消日期
+  };
+  recurrence?: string | null;    // 重复规则，如 "every week"，null 清除
+  onCompletion?: string | null;  // 完成行为："delete" 或 "keep"，null 清除
+  id?: string | null;            // 任务 ID（用于 dependsOn），null 清除
+  dependsOn?: string | null;     // 依赖的任务 ID，null 清除
+}
+```
+
+**返回**：`true` 表示找到并修改成功；`false` 表示文件不存在或该行没有任务。
+
+**关键约定：**
+- `editTask` **不接受 `status` 字段**。状态变更请使用专用的 `finishTask` / `cancelTask` 等方法，它们会处理级联逻辑（子任务、父任务传播、重复任务等）。
+- `patch.dates` 中的每个子字段均独立处理：传 `undefined` = 不变，传 `null` = 清除该日期，传字符串 = 设置新值。
+- 此操作**不触发任何级联逻辑**，只做字段级别的原子修改。
+
+**示例：**
+
+```typescript
+// 仅修改截止日期
+await api.editTask("Work/Tasks.md", 3, {
+  dates: { due: "2026-06-30" },
+});
+
+// 修改描述和优先级
+await api.editTask("Work/Tasks.md", 3, {
+  description: "修改后的任务名称",
+  priority: "⏫",
+});
+
+// 清除截止日期（设为 null）
+await api.editTask("Work/Tasks.md", 3, {
+  dates: { due: null },
+});
+
+// 设置重复规则
+await api.editTask("Work/Tasks.md", 3, {
+  recurrence: "every month on the 1st",
+});
+
+// 给任务设置 ID（用于 dependsOn）
+await api.editTask("Work/Tasks.md", 3, {
+  id: "task-001",
+});
+```
+
+---
+
+### 2.5 `finishTask` / `unfinishTask`
+
+将任务标记为完成，或从完成状态恢复。这是有业务语义的操作，会按用户设置触发级联。
+
+```typescript
+finishTask(path: string, lineNumber: number): Promise<boolean>
+unfinishTask(path: string, lineNumber: number): Promise<boolean>
+```
+
+**`finishTask` 的行为（受用户设置影响）：**
+- 将任务状态改为 `DONE`（symbol `x`）。
+- 若设置了 `setDoneDate: true`，自动填写当天日期到 `✅` 字段。
+- 若 `cascadeFinish: true`，递归地将所有子任务也标记为完成。
+- 若 `parentOnFinish: true`，当所有兄弟子任务都完成后，自动将父任务也标记为完成。
+- 若任务有重复规则（`🔁`），自动在原任务上方生成下一个周期的新任务。
+
+**`unfinishTask` 的行为：**
+- 将任务状态恢复为 `TODO`（symbol ` `），同时清除完成日期。
+- 若 `cascadeUnfinish: true`，递归恢复所有子任务。
+- 若 `parentOnUnfinish: true`，将父任务也恢复为未完成。
+
+**返回**：`true` = 操作成功；`false` = 任务未找到或无需变更。
+
+**示例：**
+
+```typescript
+const record = (await api.listTasks())[0];
+
+// 完成任务（触发完整业务逻辑）
+await api.finishTask(record.path, record.lineNumber);
+
+// 恢复为待办
+await api.unfinishTask(record.path, record.lineNumber);
+```
+
+---
+
+### 2.6 `cancelTask` / `uncancelTask`
+
+将任务标记为取消，或从取消状态恢复。
+
+```typescript
+cancelTask(path: string, lineNumber: number): Promise<boolean>
+uncancelTask(path: string, lineNumber: number): Promise<boolean>
+```
+
+**`cancelTask` 的行为（受用户设置影响）：**
+- 将任务状态改为 `CANCELLED`（symbol `-`）。
+- 若 `setCancelledDate: true`，自动填写 `❌` 取消日期。
+- 若 `cascadeCancel: true`，递归取消所有子任务。
+- 若 `parentOnCancel: true`，当所有非取消子任务都完成后，父任务自动完成。
+
+**`uncancelTask` 的行为：**
+- 将已取消任务恢复为 `TODO`。
+- 若 `cascadeUncancel: true`，递归恢复所有已取消子任务。
+
+**示例：**
+
+```typescript
+// 取消一个任务及其子树
+await api.cancelTask("Work/Tasks.md", 10);
+
+// 重新激活
+await api.uncancelTask("Work/Tasks.md", 10);
+```
+
+---
+
+### 2.7 `executeTasksToggleCommand`
+
+对一个**单独的任务行字符串**执行 Tasks 插件兼容的 toggle 逻辑，返回修改后的行字符串。此方法不直接修改文件，主要供与 Tasks 插件兼容的外部系统（如 Dataview 渲染的任务）调用。
+
+```typescript
+executeTasksToggleCommand(line: string, path: string): string
+```
+
+**参数：**
+- `line`：任务行的完整文本字符串。
+- `path`：任务所在文件的路径（用于查找已打开的编辑器，以获取最新的文件内容）。
+
+**返回**：修改后的行文本（可能是多行，用 `\n` 连接，例如生成了重复任务时）。
+
+**示例：**
+
+```typescript
+const original = "- [ ] 每周报告 🔁 every week 📅 2026-05-31";
+const toggled = api.executeTasksToggleCommand(original, "Work/Tasks.md");
+// 返回：已完成行 + 新的重复任务行
+```
+
+> 这个方法主要用于**兼容 Tasks 插件的 Dataview 渲染场景**。如果你只是想操作 Vault 文件中的任务，请优先使用 `finishTask` / `cancelTask` 等方法。
+
+---
+
+## 3. 数据结构参考
+
+### `TaskLiteTaskRecord`
+
+`listTasks` 返回的任务记录：
+
+```typescript
+interface TaskLiteTaskRecord {
+  path: string;          // 文件路径，如 "Work/Tasks.md"
+  basename: string;      // 文件名（无扩展名），如 "Tasks"
+  lineNumber: number;    // 任务所在行号（0-indexed）
+  parentLine: number | null; // 父任务行号，null 表示顶层任务
+  depth: number;         // 在树中的深度（0 = 顶层）
+  hasChildren: boolean;  // 是否有子任务
+  task: TaskLine;        // 完整解析后的任务对象（见下文）
+}
+```
+
+### `TaskLine & TaskMetadata`
+
+完整的任务数据模型：
+
+```typescript
+interface TaskLine {
+  indentation: string;           // 行首缩进（空格/Tab）
+  listMarker: string;            // 列表标记（"- "、"* "、"1."等）
+  status: StatusConfiguration;   // 当前状态配置
+  metadata: TaskMetadata;        // 任务元数据
+  original: string;              // 原始行文本（未修改）
+}
+
+interface TaskMetadata {
+  description: string;           // 任务描述（已去除所有 emoji 元数据）
+  priority: string | null;       // 优先级 emoji，如 "⏫"、"🔽"
+  dates: {
+    start: string | null;        // 🛫 开始日期
+    created: string | null;      // ➕ 创建日期
+    scheduled: string | null;    // ⏳ 计划日期
+    due: string | null;          // 📅 截止日期
+    done: string | null;         // ✅ 完成日期
+    cancelled: string | null;    // ❌ 取消日期
+  };
+  recurrence: string | null;     // 🔁 重复规则文本
+  onCompletion: string | null;   // 🏁 完成行为（"delete" | "keep"）
+  id: string | null;             // 🆔 任务 ID
+  dependsOn: string | null;      // ⛔ 依赖 ID
+  blockLink: string | null;      // Obsidian 块引用，如 "^abc123"
+  tags: string[];                // 提取的标签列表，如 ["#work", "#urgent"]
+}
+```
+
+**优先级 emoji 对照表：**
+
+| 优先级 | Emoji |
+|--------|-------|
+| 最高   | `🔺`  |
+| 高     | `⏫`  |
+| 中     | `🔼`  |
+| 低     | `🔽`  |
+| 最低   | `⏬`  |
+
+### `EditTaskPatch`
+
+`editTask` 的修改入参，所有字段可选：
+
+```typescript
+type EditTaskPatch = {
+  description?: string;
+  priority?: string | null;
+  dates?: Partial<{
+    start: string | null;
+    created: string | null;
+    scheduled: string | null;
+    due: string | null;
+    done: string | null;
+    cancelled: string | null;
+  }>;
+  recurrence?: string | null;
+  onCompletion?: string | null;
+  id?: string | null;
+  dependsOn?: string | null;
+}
+```
+
+### `StatusConfiguration`
+
+状态的完整描述：
+
+```typescript
+interface StatusConfiguration {
+  symbol: string;            // 状态字符，如 " "、"x"、"/"、"-"
+  name: string;              // 可读名称，如 "Todo"、"Done"
+  nextStatusSymbol: string;  // 切换后的下一状态字符
+  availableAsCommand: boolean;
+  type: StatusType;          // 语义类型（见下）
+}
+
+type StatusType =
+  | "TODO"        // 待办
+  | "DONE"        // 已完成
+  | "IN_PROGRESS" // 进行中
+  | "ON_HOLD"     // 暂停
+  | "CANCELLED"   // 已取消
+  | "NON_TASK"    // 非任务项
+  | "EMPTY";      // 空状态
+```
+
+**默认状态配置：**
+
+| symbol | name        | type         | nextSymbol |
+|--------|-------------|--------------|-----------|
+| ` `    | Todo        | `TODO`       | `x`       |
+| `x`    | Done        | `DONE`       | ` `       |
+| `/`    | In progress | `IN_PROGRESS`| `x`       |
+| `-`    | Cancelled   | `CANCELLED`  | ` `       |
+
+---
+
+## 4. 设计约定与注意事项
+
+### 4.1 行号的稳定性
+
+所有 API 均以**行号（lineNumber）**定位任务，这是一个在文件修改后可能改变的值。
+
+**建议：**
+- 每次操作前通过 `listTasks()` 重新获取最新的行号，不要缓存行号跨操作使用。
+- 如需稳定标识一个任务，使用 `🆔` 字段（`task.metadata.id`）作为逻辑 ID，再通过 `listTasks()` 查找对应的当前行号。
+
+```typescript
+// 推荐：通过 ID 定位任务
+async function findByTaskId(api: TaskLiteCoreApi, taskId: string) {
+  const records = await api.listTasks({ includeCompleted: true, includeChildren: true });
+  return records.find((r) => r.task.metadata.id === taskId);
+}
+```
+
+### 4.2 status 变更的正确姿势
+
+**不要**用 `editTask` 修改 `status`——`EditTaskPatch` 故意没有 `status` 字段。
+
+**原因**：状态变更会触发复杂的业务逻辑（子树级联、父任务传播、重复任务生成），这些逻辑只有专用方法才能正确处理。
+
+```typescript
+// ❌ 错误：editTask 不能改状态
+await api.editTask(path, line, { status: "x" }); // 类型错误
+
+// ✅ 正确：使用专用方法
+await api.finishTask(path, line);   // 完成（含级联）
+await api.cancelTask(path, line);   // 取消（含级联）
+await api.unfinishTask(path, line); // 恢复（含级联）
+```
+
+### 4.3 删除操作的不可逆性
+
+`deleteTask` 直接调用 `app.vault.modify`，Obsidian 不提供文件内容级别的撤销。**务必在删除前向用户确认**：
+
+```typescript
+async function safeDelete(app: App, api: TaskLiteCoreApi, record: TaskLiteTaskRecord) {
+  const confirmed = await new Promise<boolean>((resolve) => {
+    const modal = new ConfirmModal(app, `确定删除"${record.task.metadata.description}"吗？`, resolve);
+    modal.open();
+  });
+  if (confirmed) await api.deleteTask(record.path, record.lineNumber);
+}
+```
+
+### 4.4 并发写入
+
+TaskLite 的每个 API 调用都会读取文件、修改内存、写回文件。**避免并发调用同一文件的写操作**，否则可能出现数据覆盖：
+
+```typescript
+// ❌ 危险：并发修改同一文件
+await Promise.all([
+  api.finishTask("Tasks.md", 3),
+  api.editTask("Tasks.md", 5, { dates: { due: "2026-06-01" } }),
+]);
+
+// ✅ 安全：顺序执行
+await api.finishTask("Tasks.md", 3);
+await api.editTask("Tasks.md", 5, { dates: { due: "2026-06-01" } });
+```
+
+### 4.5 日期格式
+
+所有日期字段均使用 **`YYYY-MM-DD`** 格式的字符串：
+
+```typescript
+const today = new Date().toISOString().slice(0, 10); // "2026-05-31"
+await api.editTask(path, line, { dates: { due: today } });
+```
+
+---
+
+## 5. 完整示例
+
+### 示例 1：待办任务看板面板
+
+```typescript
+import { Plugin, ItemView, WorkspaceLeaf } from "obsidian";
+import type { TaskLiteCoreApi, TaskLiteTaskRecord } from "tasklite-path/api/taskLiteCoreApi";
+
+export default class TaskBoardPlugin extends Plugin {
+  async onload() {
+    this.registerView("task-board", (leaf) => new TaskBoardView(leaf, this.app));
+    this.addRibbonIcon("layout-dashboard", "任务看板", () => {
+      this.app.workspace.getLeaf(true).setViewState({ type: "task-board" });
+    });
+  }
+}
+
+class TaskBoardView extends ItemView {
+  getViewType() { return "task-board"; }
+  getDisplayText() { return "任务看板"; }
+
+  async onOpen() {
+    const api = getTaskLiteApi(this.app);
+    const records = await api.listTasks({ includeChildren: true });
+
+    const today = new Date().toISOString().slice(0, 10);
+    const overdue = records.filter((r) => r.task.metadata.dates.due && r.task.metadata.dates.due < today);
+    const dueToday = records.filter((r) => r.task.metadata.dates.due === today);
+    const upcoming = records.filter((r) => r.task.metadata.dates.due && r.task.metadata.dates.due > today);
+    const noDue = records.filter((r) => !r.task.metadata.dates.due);
+
+    this.renderColumn("逾期", overdue, api);
+    this.renderColumn("今日", dueToday, api);
+    this.renderColumn("即将到来", upcoming, api);
+    this.renderColumn("无截止日期", noDue, api);
+  }
+
+  private renderColumn(title: string, records: TaskLiteTaskRecord[], api: TaskLiteCoreApi) {
+    const col = this.contentEl.createDiv({ cls: "board-column" });
+    col.createEl("h3", { text: `${title} (${records.length})` });
+    for (const r of records) {
+      const card = col.createDiv({ cls: "task-card" });
+      card.createEl("p", { text: r.task.metadata.description });
+
+      const btn = card.createEl("button", { text: "完成" });
+      btn.addEventListener("click", async () => {
+        await api.finishTask(r.path, r.lineNumber);
+        card.remove(); // 乐观 UI 更新
+      });
+    }
+  }
+}
+```
+
+### 示例 2：批量延期所有逾期任务
+
+```typescript
+async function postponeOverdueTasks(api: TaskLiteCoreApi, daysToAdd: number) {
+  const records = await api.listTasks();
+  const today = new Date().toISOString().slice(0, 10);
+
+  for (const r of records) {
+    const due = r.task.metadata.dates.due;
+    if (!due || due >= today) continue;
+
+    // 计算新截止日期
+    const newDue = new Date(due);
+    newDue.setDate(newDue.getDate() + daysToAdd);
+    const newDueStr = newDue.toISOString().slice(0, 10);
+
+    await api.editTask(r.path, r.lineNumber, {
+      dates: { due: newDueStr },
+    });
+    console.log(`延期：${r.task.metadata.description}  ${due} → ${newDueStr}`);
+  }
+}
+
+// 调用：延期 7 天
+await postponeOverdueTasks(api, 7);
+```
+
+### 示例 3：从外部数据创建任务
+
+```typescript
+interface ExternalTodo {
+  title: string;
+  due?: string;
+  priority?: "high" | "medium" | "low";
+}
+
+const PRIORITY_EMOJI: Record<string, string> = {
+  high: "⏫",
+  medium: "🔼",
+  low: "🔽",
+};
+
+async function importExternalTodos(api: TaskLiteCoreApi, todos: ExternalTodo[]) {
+  for (const todo of todos) {
+    const parts = [`- [ ] ${todo.title}`];
+    if (todo.priority) parts.push(PRIORITY_EMOJI[todo.priority]);
+    if (todo.due) parts.push(`📅 ${todo.due}`);
+
+    await api.createTask(parts.join(" "), { path: "Inbox/Imported.md" });
+  }
+}
+```
+
+### 示例 4：任务完成后自动归档
+
+```typescript
+// 监听文件修改，检测新完成的任务并移动到归档文件
+async function archiveCompletedTasks(app: App, api: TaskLiteCoreApi) {
+  const allRecords = await api.listTasks({
+    includeCompleted: true,
+    includeChildren: true,
+  });
+
+  const completed = allRecords.filter(
+    (r) => r.task.status.type === "DONE" && r.path !== "Archive/Done.md"
+  );
+
+  for (const r of completed) {
+    // 1. 在归档文件中创建同样的任务
+    await api.createTask(r.task.original, { path: "Archive/Done.md" });
+    // 2. 删除原文件中的任务（含子树）
+    await api.deleteTask(r.path, r.lineNumber);
+  }
+}
+```
+
+---
+
+## 6. 版本历史与兼容性
+
+| 版本 | 新增 API |
+|------|---------|
+| 0.4.0-alpha.0 | `deleteTask`、`editTask`、`EditTaskPatch` |
+| 0.3.x | `listTasks`、`createTask`、`finishTask`、`unfinishTask`、`cancelTask`、`uncancelTask`、`executeTasksToggleCommand` |
+
+### 兼容性说明
+
+- API 暴露的接口（`TaskLiteCoreApi`）**目前不提供正式的稳定性保证**（alpha 阶段）。
+- 在 `0.4.0` 正式版发布前，接口签名可能还会调整，升级前请关注 [CHANGELOG](https://github.com/SunnyYYLin/obsidian-tasklite/releases)。
+- `editTask` 故意不支持修改 `status`，这是设计决策而非遗漏，未来版本不会改变。
+- `deleteTask` 的子树删除策略（递归删除所有后代）在未来版本中可能通过选项扩展，但默认行为不变。
