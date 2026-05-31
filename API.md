@@ -91,7 +91,7 @@ export default class MyPlugin extends Plugin {
 ```typescript
 interface TaskLiteCoreApi {
   listTasks(options?: ListTasksOptions): Promise<TaskLiteTaskRecord[]>;
-  createTask(line: string, options?: CreateTaskOptions): Promise<void>;
+  createTask(input: CreateTaskInput): Promise<void>;
   deleteTask(path: string, lineNumber: number): Promise<boolean>;
   editTask(path: string, lineNumber: number, patch: EditTaskPatch): Promise<boolean>;
   finishTask(path: string, lineNumber: number): Promise<boolean>;
@@ -149,38 +149,56 @@ const dueTodayOrBefore = todos.filter(
 在指定文件末尾（或指定父任务下方）插入一个新任务行。
 
 ```typescript
-createTask(line: string, options?: CreateTaskOptions): Promise<void>
+createTask(input: CreateTaskInput): Promise<void>
 
-interface CreateTaskOptions {
-  path?: string;             // 目标文件路径（Vault 内相对路径），默认 "Tasks/New_Tasks.md"
-  parentLineNumber?: number; // 父任务的行号（0-indexed），新任务将插入到该行正下方并自动缩进
+interface CreateTaskInput {
+  description: string;         // 任务描述（必填）
+  status?: string;             // 状态符号，默认 " "（待办）
+  priority?: string | null;    // 优先级 emoji，如 "⏫"
+  dates?: {
+    start?: string | null;     // 开始日期 "YYYY-MM-DD"
+    scheduled?: string | null; // 计划日期
+    due?: string | null;       // 截止日期
+  };
+  recurrence?: string | null;    // 重复规则，如 "every week"
+  onCompletion?: string | null;  // 完成行为
+  id?: string | null;            // 任务 ID
+  dependsOn?: string | null;     // 依赖的任务 ID
+  path?: string;                 // 目标文件路径，默认 "Tasks/New_Tasks.md"
+  parentLineNumber?: number;     // 父任务行号（0-indexed），新任务插入到该行正下方并自动缩进
 }
 ```
-
-**参数 `line`**：要插入的任务行原始文本，例如 `"- [ ] 买牛奶 📅 2026-06-01"`。
 
 **行为：**
 - 若目标文件不存在，自动创建。
 - 若提供了 `parentLineNumber`，新任务将插入父任务的正下方，并自动继承父任务的缩进加一个 Tab。
 - 若未提供 `parentLineNumber`，任务追加到文件末尾。
+- 未传的可选字段使用默认值（`null` 或空），不会从文件中推断。
 
 **示例：**
 
 ```typescript
 // 追加到默认 inbox 文件
-await api.createTask("- [ ] 写周报 📅 2026-06-07");
+await api.createTask({ description: "写周报", dates: { due: "2026-06-07" } });
 
 // 追加到指定文件
-await api.createTask("- [ ] Review PR", { path: "Work/Tasks.md" });
+await api.createTask({ description: "Review PR", path: "Work/Tasks.md" });
 
 // 创建为某任务的子任务（父任务在第 5 行）
-await api.createTask("- [ ] 子任务", {
+await api.createTask({
+  description: "子任务",
   path: "Work/Tasks.md",
   parentLineNumber: 5,
 });
-```
 
-> **注意**：`line` 应该是完整的 Markdown 列表行，包含 `- [ ]` 前缀。如果行号因其他操作已改变，请在调用前重新获取最新行号。
+// 创建一个高优先级循环任务
+await api.createTask({
+  description: "站会",
+  priority: "⏫",
+  recurrence: "every weekday",
+  dates: { start: "2026-06-02" },
+});
+```
 
 ---
 
@@ -231,11 +249,8 @@ type EditTaskPatch = {
   priority?: string | null;    // 优先级 emoji，如 "⏫"，null 表示清除
   dates?: {
     start?: string | null;     // 开始日期 "YYYY-MM-DD"，null 表示清除
-    created?: string | null;   // 创建日期
     scheduled?: string | null; // 计划日期
     due?: string | null;       // 截止日期
-    done?: string | null;      // 完成日期（一般由 finishTask 自动管理）
-    cancelled?: string | null; // 取消日期
   };
   recurrence?: string | null;    // 重复规则，如 "every week"，null 清除
   onCompletion?: string | null;  // 完成行为："delete" 或 "keep"，null 清除
@@ -248,6 +263,7 @@ type EditTaskPatch = {
 
 **关键约定：**
 - `editTask` **不接受 `status` 字段**。状态变更请使用专用的 `finishTask` / `cancelTask` 等方法，它们会处理级联逻辑（子任务、父任务传播、重复任务等）。
+- `editTask` **不接受状态事件日期**（`created`、`done`、`cancelled`）。这些日期由状态变更事件自动产生：`created` 随任务创建，`done` 由 `finishTask`/`unfinishTask` 管理，`cancelled` 由 `cancelTask`/`uncancelTask` 管理。只接受"规划类"日期（`start`、`scheduled`、`due`）。
 - `patch.dates` 中的每个子字段均独立处理：传 `undefined` = 不变，传 `null` = 清除该日期，传字符串 = 设置新值。
 - 此操作**不触发任何级联逻辑**，只做字段级别的原子修改。
 
@@ -446,14 +462,11 @@ interface TaskMetadata {
 type EditTaskPatch = {
   description?: string;
   priority?: string | null;
-  dates?: Partial<{
-    start: string | null;
-    created: string | null;
-    scheduled: string | null;
-    due: string | null;
-    done: string | null;
-    cancelled: string | null;
-  }>;
+  dates?: {
+    start?: string | null;
+    scheduled?: string | null;
+    due?: string | null;
+  };
   recurrence?: string | null;
   onCompletion?: string | null;
   id?: string | null;
@@ -668,11 +681,12 @@ const PRIORITY_EMOJI: Record<string, string> = {
 
 async function importExternalTodos(api: TaskLiteCoreApi, todos: ExternalTodo[]) {
   for (const todo of todos) {
-    const parts = [`- [ ] ${todo.title}`];
-    if (todo.priority) parts.push(PRIORITY_EMOJI[todo.priority]);
-    if (todo.due) parts.push(`📅 ${todo.due}`);
-
-    await api.createTask(parts.join(" "), { path: "Inbox/Imported.md" });
+    await api.createTask({
+      description: todo.title,
+      priority: todo.priority ? PRIORITY_EMOJI[todo.priority] : undefined,
+      dates: todo.due ? { due: todo.due } : undefined,
+      path: "Inbox/Imported.md",
+    });
   }
 }
 ```
@@ -693,7 +707,17 @@ async function archiveCompletedTasks(app: App, api: TaskLiteCoreApi) {
 
   for (const r of completed) {
     // 1. 在归档文件中创建同样的任务
-    await api.createTask(r.task.original, { path: "Archive/Done.md" });
+    await api.createTask({
+      description: r.task.metadata.description,
+      status: r.task.status.symbol,
+      priority: r.task.metadata.priority,
+      dates: {
+        start: r.task.metadata.dates.start,
+        scheduled: r.task.metadata.dates.scheduled,
+        due: r.task.metadata.dates.due,
+      },
+      path: "Archive/Done.md",
+    });
     // 2. 删除原文件中的任务（含子树）
     await api.deleteTask(r.path, r.lineNumber);
   }

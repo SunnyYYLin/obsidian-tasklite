@@ -7,7 +7,7 @@ import {
 	unfinishTaskAtLine,
 	type ToggleResult,
 } from "../editor/toggle";
-import { copyTaskMetadata, parseTaskLine, serializeTaskLine, type TaskLine, type TaskDates } from "../model/format";
+import { copyTaskMetadata, parseTaskLine, serializeTaskLine, type TaskLine } from "../model/format";
 import { taskIdentityKey } from "../model/taskIdentity";
 import { applyTaskStatus } from "../model/taskState";
 import { buildTaskTree, getSubtreeNodes, type TaskTreeNode } from "../model/tree";
@@ -31,7 +31,19 @@ export interface ListTasksOptions {
 	includeChildren?: boolean;
 }
 
-export interface CreateTaskOptions {
+export interface CreateTaskInput {
+	description: string;
+	status?: string;
+	priority?: string | null;
+	dates?: {
+		start?: string | null;
+		scheduled?: string | null;
+		due?: string | null;
+	};
+	recurrence?: string | null;
+	onCompletion?: string | null;
+	id?: string | null;
+	dependsOn?: string | null;
 	path?: string;
 	parentLineNumber?: number;
 }
@@ -40,7 +52,11 @@ export interface CreateTaskOptions {
 export type EditTaskPatch = {
 	description?: string;
 	priority?: string | null;
-	dates?: Partial<TaskDates>;
+	dates?: {
+		start?: string | null;
+		scheduled?: string | null;
+		due?: string | null;
+	};
 	recurrence?: string | null;
 	onCompletion?: string | null;
 	id?: string | null;
@@ -53,7 +69,7 @@ export interface TaskLiteCoreApi {
 	unfinishTask(path: string, lineNumber: number): Promise<boolean>;
 	cancelTask(path: string, lineNumber: number): Promise<boolean>;
 	uncancelTask(path: string, lineNumber: number): Promise<boolean>;
-	createTask(line: string, options?: CreateTaskOptions): Promise<void>;
+	createTask(input: CreateTaskInput): Promise<void>;
 	/**
 	 * Delete the task at `lineNumber` and its entire subtree from the file at `path`.
 	 * Returns `true` if the task was found and deleted, `false` otherwise.
@@ -94,7 +110,7 @@ export function createTaskLiteCoreApi({app, registry, getSettings, documentStore
 		unfinishTask: (path, lineNumber) => updateFileTask({app, path, lineNumber, registry, settings: getSettings(), documentStore, mutate: unfinishTaskAtLine}),
 		cancelTask: (path, lineNumber) => updateFileTask({app, path, lineNumber, registry, settings: getSettings(), documentStore, mutate: cancelTaskAtLine}),
 		uncancelTask: (path, lineNumber) => updateFileTask({app, path, lineNumber, registry, settings: getSettings(), documentStore, mutate: uncancelTaskAtLine}),
-		createTask: (line, options) => createTask({app, line, options, settings: getSettings(), documentStore}),
+		createTask: (input) => createTask({app, input, registry, settings: getSettings(), documentStore}),
 		deleteTask: (path, lineNumber) => deleteFileTask({app, path, lineNumber, registry, documentStore}),
 		editTask: (path, lineNumber, patch) => editFileTask({app, path, lineNumber, registry, documentStore, patch}),
 		executeTasksToggleCommand: (line, path) => {
@@ -153,18 +169,46 @@ async function listTasks({
 
 async function createTask({
 	app,
-	line,
-	options,
+	input,
+	registry,
 	settings,
 	documentStore,
 }: {
 	app: App;
-	line: string;
-	options: CreateTaskOptions | undefined;
+	input: CreateTaskInput;
+	registry: StatusRegistry;
 	settings: TaskLiteSettings;
 	documentStore?: TaskDocumentStore;
 }): Promise<void> {
-	const inboxPath = normalizePath(options?.path || "Tasks/New_Tasks.md");
+	const statusSymbol = input.status ?? " ";
+	const taskLine: TaskLine = {
+		indentation: "",
+		listMarker: "-",
+		status: registry.get(statusSymbol),
+		metadata: {
+			description: input.description,
+			priority: input.priority ?? null,
+			dates: {
+				start: input.dates?.start ?? null,
+				created: null,
+				scheduled: input.dates?.scheduled ?? null,
+				due: input.dates?.due ?? null,
+				done: null,
+				cancelled: null,
+			},
+			recurrence: input.recurrence ?? null,
+			onCompletion: input.onCompletion ?? null,
+			dependsOn: input.dependsOn ?? null,
+			id: input.id ?? null,
+			person: null,
+			blockLink: null,
+			tags: [],
+		},
+		original: "",
+	};
+	const line = serializeTaskLine(taskLine);
+
+	const inboxPath = normalizePath(input.path || "Tasks/New_Tasks.md");
 	let file = app.vault.getAbstractFileByPath(inboxPath);
 	if (!file) {
 		file = await app.vault.create(inboxPath, "");
@@ -175,9 +219,9 @@ async function createTask({
 
 	const content = await app.vault.read(file);
 	const lines = content.length > 0 ? content.split("\n") : [];
-	const insertion = formatCreatedTaskLine(line, lines, options?.parentLineNumber);
-	if (typeof options?.parentLineNumber === "number" && options.parentLineNumber >= 0 && options.parentLineNumber < lines.length) {
-		lines.splice(options.parentLineNumber + 1, 0, insertion);
+	const insertion = formatCreatedTaskLine(line, lines, input.parentLineNumber);
+	if (typeof input.parentLineNumber === "number" && input.parentLineNumber >= 0 && input.parentLineNumber < lines.length) {
+		lines.splice(input.parentLineNumber + 1, 0, insertion);
 		const nextContent = lines.join("\n");
 		await app.vault.modify(file, nextContent);
 		await documentStore?.replaceDocumentContent(file, nextContent);
@@ -261,11 +305,8 @@ async function editFileTask({
 	if (patch.dates) {
 		const d = patch.dates;
 		if (d.start !== undefined) metadata.dates.start = d.start;
-		if (d.created !== undefined) metadata.dates.created = d.created;
 		if (d.scheduled !== undefined) metadata.dates.scheduled = d.scheduled;
 		if (d.due !== undefined) metadata.dates.due = d.due;
-		if (d.done !== undefined) metadata.dates.done = d.done;
-		if (d.cancelled !== undefined) metadata.dates.cancelled = d.cancelled;
 	}
 
 	const updatedTask: TaskLine = {...node.task, metadata};
