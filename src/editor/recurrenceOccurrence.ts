@@ -1,4 +1,4 @@
-import { copyTaskMetadata, serializeTaskBody, serializeTaskLine, type TaskLine } from "../model/format";
+import { copyTaskMetadata, serializeTaskLine, type TaskLine } from "../model/format";
 import { parseRecurrenceRule, nextRecurrenceDates, todayString, type RecurrenceRule } from "../model/recurrence";
 import type { StatusRegistry } from "../model/status";
 import { getSubtreeLineRange, getSubtreeNodes, type TaskTreeNode } from "../model/tree";
@@ -96,6 +96,6 @@ function copySubtreeForNextOccurrence(
 		metadata.blockLink = null;
 		metadata.id = null;
 		metadata.dependsOn = null;
-		return `${node.task.indentation}${node.task.listMarker} [${registry.get(" ").symbol}] ${serializeTaskBody(metadata)}`.trimEnd();
+		return serializeTaskLine({...node.task, status: registry.get(" "), metadata});
 	});
 }
