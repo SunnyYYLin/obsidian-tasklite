@@ -7,10 +7,10 @@ import {
 	unfinishTaskAtLine,
 	type ToggleResult,
 } from "../editor/toggle";
-import { parseTaskLine, serializeTaskLine, type TaskLine } from "../model/format";
+import { copyTaskMetadata, parseTaskLine, serializeTaskLine, type TaskLine, type TaskDates } from "../model/format";
 import { taskIdentityKey } from "../model/taskIdentity";
 import { applyTaskStatus } from "../model/taskState";
-import { buildTaskTree, type TaskTreeNode } from "../model/tree";
+import { buildTaskTree, getSubtreeNodes, type TaskTreeNode } from "../model/tree";
 import type { TaskDocumentStore } from "../model/taskDocumentStore";
 import type { StatusRegistry } from "../model/status";
 import type { TaskLiteSettings } from "../settings";
@@ -36,6 +36,17 @@ export interface CreateTaskOptions {
 	parentLineNumber?: number;
 }
 
+/** Partial patch for task metadata fields. Omitted keys are left unchanged. */
+export type EditTaskPatch = {
+	description?: string;
+	priority?: string | null;
+	dates?: Partial<TaskDates>;
+	recurrence?: string | null;
+	onCompletion?: string | null;
+	id?: string | null;
+	dependsOn?: string | null;
+};
+
 export interface TaskLiteCoreApi {
 	listTasks(options?: ListTasksOptions): Promise<TaskLiteTaskRecord[]>;
 	finishTask(path: string, lineNumber: number): Promise<boolean>;
@@ -43,6 +54,17 @@ export interface TaskLiteCoreApi {
 	cancelTask(path: string, lineNumber: number): Promise<boolean>;
 	uncancelTask(path: string, lineNumber: number): Promise<boolean>;
 	createTask(line: string, options?: CreateTaskOptions): Promise<void>;
+	/**
+	 * Delete the task at `lineNumber` and its entire subtree from the file at `path`.
+	 * Returns `true` if the task was found and deleted, `false` otherwise.
+	 */
+	deleteTask(path: string, lineNumber: number): Promise<boolean>;
+	/**
+	 * Atomically patch metadata fields of the task at `lineNumber` in `path`.
+	 * Only the keys present in `patch` are updated; status changes are NOT allowed here.
+	 * Returns `true` if the task was found and patched, `false` otherwise.
+	 */
+	editTask(path: string, lineNumber: number, patch: EditTaskPatch): Promise<boolean>;
 	executeTasksToggleCommand(line: string, path: string): string;
 }
 
@@ -73,6 +95,8 @@ export function createTaskLiteCoreApi({app, registry, getSettings, documentStore
 		cancelTask: (path, lineNumber) => updateFileTask({app, path, lineNumber, registry, settings: getSettings(), documentStore, mutate: cancelTaskAtLine}),
 		uncancelTask: (path, lineNumber) => updateFileTask({app, path, lineNumber, registry, settings: getSettings(), documentStore, mutate: uncancelTaskAtLine}),
 		createTask: (line, options) => createTask({app, line, options, settings: getSettings(), documentStore}),
+		deleteTask: (path, lineNumber) => deleteFileTask({app, path, lineNumber, registry, documentStore}),
+		editTask: (path, lineNumber, patch) => editFileTask({app, path, lineNumber, registry, documentStore, patch}),
 		executeTasksToggleCommand: (line, path) => {
 			const context = findOpenEditorTaskContext(app, line, path);
 			if (!context) return executeSingleLineApiToggle(line, registry, getSettings());
@@ -164,6 +188,92 @@ async function createTask({
 	const nextContent = `${content}${separator}${insertion}\n`;
 	await app.vault.modify(file, nextContent);
 	await documentStore?.replaceDocumentContent(file, nextContent);
+}
+
+async function deleteFileTask({
+	app,
+	path,
+	lineNumber,
+	registry,
+	documentStore,
+}: {
+	app: App;
+	path: string;
+	lineNumber: number;
+	registry: StatusRegistry;
+	documentStore?: TaskDocumentStore;
+}): Promise<boolean> {
+	const file = app.vault.getAbstractFileByPath(path);
+	if (!isTFile(file)) return false;
+
+	const document = await documentStore?.getDocumentByPath(path);
+	const lines = document ? [...document.lines] : (await app.vault.read(file)).split("\n");
+	const tree = buildTaskTree(lines, app.metadataCache.getFileCache(file), registry);
+	const node = tree.byLine.get(lineNumber);
+	if (!node) return false;
+
+	const subtreeLines = getSubtreeNodes(node)
+		.map((n) => n.lineNumber)
+		.sort((a, b) => b - a);
+
+	for (const ln of subtreeLines) {
+		lines.splice(ln, 1);
+	}
+
+	const nextContent = lines.join("\n");
+	await app.vault.modify(file, nextContent);
+	await documentStore?.replaceDocumentContent(file, nextContent);
+	return true;
+}
+
+async function editFileTask({
+	app,
+	path,
+	lineNumber,
+	registry,
+	documentStore,
+	patch,
+}: {
+	app: App;
+	path: string;
+	lineNumber: number;
+	registry: StatusRegistry;
+	documentStore?: TaskDocumentStore;
+	patch: EditTaskPatch;
+}): Promise<boolean> {
+	const file = app.vault.getAbstractFileByPath(path);
+	if (!isTFile(file)) return false;
+
+	const document = await documentStore?.getDocumentByPath(path);
+	const lines = document ? [...document.lines] : (await app.vault.read(file)).split("\n");
+	const tree = buildTaskTree(lines, app.metadataCache.getFileCache(file), registry);
+	const node = tree.byLine.get(lineNumber);
+	if (!node?.task) return false;
+
+	const metadata = copyTaskMetadata(node.task.metadata);
+
+	if (patch.description !== undefined) metadata.description = patch.description;
+	if (patch.priority !== undefined) metadata.priority = patch.priority;
+	if (patch.recurrence !== undefined) metadata.recurrence = patch.recurrence;
+	if (patch.onCompletion !== undefined) metadata.onCompletion = patch.onCompletion;
+	if (patch.id !== undefined) metadata.id = patch.id;
+	if (patch.dependsOn !== undefined) metadata.dependsOn = patch.dependsOn;
+	if (patch.dates) {
+		const d = patch.dates;
+		if (d.start !== undefined) metadata.dates.start = d.start;
+		if (d.created !== undefined) metadata.dates.created = d.created;
+		if (d.scheduled !== undefined) metadata.dates.scheduled = d.scheduled;
+		if (d.due !== undefined) metadata.dates.due = d.due;
+		if (d.done !== undefined) metadata.dates.done = d.done;
+		if (d.cancelled !== undefined) metadata.dates.cancelled = d.cancelled;
+	}
+
+	const updatedTask: TaskLine = {...node.task, metadata};
+	lines[lineNumber] = serializeTaskLine(updatedTask);
+	const nextContent = lines.join("\n");
+	await app.vault.modify(file, nextContent);
+	await documentStore?.replaceDocumentContent(file, nextContent);
+	return true;
 }
 
 async function updateFileTask({
