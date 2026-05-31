@@ -44,6 +44,7 @@ npm version patch    # 发布版本（会同步更新 manifest.json 和 versions
 
 - **`src/api/`** — 对外 API
   - `taskLiteCoreApi.ts` — `TaskLiteCoreApi` 接口，供外部插件调用（listTasks/finishTask/createTask 等）
+  - ⚠️ **任何对 `TaskLiteCoreApi` 接口的增删改（方法签名、类型、行为）都必须同步更新 `API.md`**
 
 - **`src/suggest/`** — 编辑器建议
   - `emojiSuggest.ts` — 在任务行输入 `@` 时弹出 emoji 字段建议
@@ -77,6 +78,7 @@ npm version patch    # 发布版本（会同步更新 manifest.json 和 versions
 - `npm version` 会运行 `version-bump.mjs` 同步 `manifest.json` 和 `versions.json`
 - 推送匹配 `x.y.z` 格式的 tag 会触发 `.github/workflows/release.yml` 自动构建发布
 - **发布流程**：`npm version` 之后必须立即 `git push && git push --tags`，确保 alpha 版本自动发布
+- **API 文档同步**：任何对 `TaskLiteCoreApi`（`src/api/taskLiteCoreApi.ts`）的变更，都必须同步更新 `API.md`，包括：新增方法、删除方法、修改参数/返回值/行为说明、新增或修改导出类型
 
 ## 测试
 
