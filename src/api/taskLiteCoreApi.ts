@@ -46,6 +46,7 @@ export interface CreateTaskInput {
 export type EditTaskPatch = {
 	description?: string;
 	priority?: string | null;
+	statusSymbol?: string;
 	dates?: {
 		start?: string | null;
 		scheduled?: string | null;
@@ -294,7 +295,12 @@ async function editFileTask({
 		if (d.due !== undefined) metadata.dates.due = d.due;
 	}
 
-	const updatedTask: TaskLine = {...node.task, metadata};
+	let status = node.task.status;
+	if (patch.statusSymbol !== undefined) {
+		status = registry.get(patch.statusSymbol);
+	}
+
+	const updatedTask: TaskLine = {...node.task, status, metadata};
 	lines[lineNumber] = serializeTaskLine(updatedTask);
 	const nextContent = lines.join("\n");
 	await app.vault.modify(file, nextContent);
