@@ -2,6 +2,9 @@ import type { App, CachedMetadata, Plugin, TFile } from "obsidian";
 import { buildTaskTree, taskDepth, type TaskTree, type TaskTreeNode } from "./tree";
 import type { StatusRegistry } from "./status";
 import type { TaskLine } from "./format";
+import { parseFrontmatterTask, type FrontmatterTaskRecord } from "./frontmatterTask";
+
+export type { FrontmatterTaskRecord };
 
 export interface TaskDocument {
 	path: string;
@@ -10,6 +13,8 @@ export interface TaskDocument {
 	lines: string[];
 	tree: TaskTree;
 	content: string;
+	/** File-level task encoded in frontmatter, or null if not present. */
+	frontmatterTask: FrontmatterTaskRecord | null;
 }
 
 export interface TaskDocumentRecord {
@@ -143,6 +148,8 @@ export class TaskDocumentStore {
 		}
 		const lines = content.split("\n");
 		const tree = buildTaskTree(lines, metadata, this.registry);
+		const hasBodyTasks = tree.nodes.some((n) => n.task);
+		const frontmatterTask = parseFrontmatterTask(file, metadata, this.registry, hasBodyTasks);
 		const document: TaskDocument = {
 			path: file.path,
 			basename: file.basename,
@@ -150,6 +157,7 @@ export class TaskDocumentStore {
 			lines,
 			tree,
 			content,
+			frontmatterTask,
 		};
 		this.documents.set(file.path, document);
 		this.recordsByPath.set(file.path, taskRecordsFromDocument(document));

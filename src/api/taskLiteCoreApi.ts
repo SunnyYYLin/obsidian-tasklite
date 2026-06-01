@@ -8,11 +8,13 @@ import {
 	type ToggleResult,
 } from "../editor/toggle";
 import { findOpenMarkdownEditor } from "../editor/editorUtils";
-import { copyTaskMetadata, parseLineWithStatus, serializeTaskLine, type TaskLine } from "../model/format";
+import { copyTaskMetadata, parseLineWithStatus, serializeTaskLine, type TaskLine, type TaskPriority, type OnCompletionAction } from "../model/format";
 import { taskIdentityKey } from "../model/taskIdentity";
 import { applyTaskStatus } from "../model/taskState";
 import { buildTaskTree, getSubtreeNodes, taskDepth } from "../model/tree";
 import type { TaskDocumentStore, TaskDocumentRecord } from "../model/taskDocumentStore";
+import type { FrontmatterTaskRecord } from "../model/frontmatterTask";
+import { parseFrontmatterTask } from "../model/frontmatterTask";
 import type { StatusRegistry } from "../model/status";
 import type { TaskLiteSettings } from "../settings";
 
@@ -28,14 +30,14 @@ export interface ListTasksOptions {
 export interface CreateTaskInput {
 	description: string;
 	status?: string;
-	priority?: string | null;
+	priority?: TaskPriority | null;
 	dates?: {
 		start?: string | null;
 		scheduled?: string | null;
 		due?: string | null;
 	};
 	recurrence?: string | null;
-	onCompletion?: string | null;
+	onCompletion?: OnCompletionAction | null;
 	id?: string | null;
 	dependsOn?: string | null;
 	path?: string;
@@ -45,7 +47,7 @@ export interface CreateTaskInput {
 /** Partial patch for task metadata fields. Omitted keys are left unchanged. */
 export type EditTaskPatch = {
 	description?: string;
-	priority?: string | null;
+	priority?: TaskPriority | null;
 	statusSymbol?: string;
 	dates?: {
 		start?: string | null;
@@ -53,13 +55,18 @@ export type EditTaskPatch = {
 		due?: string | null;
 	};
 	recurrence?: string | null;
-	onCompletion?: string | null;
+	onCompletion?: OnCompletionAction | null;
 	id?: string | null;
 	dependsOn?: string | null;
 };
 
 export interface TaskLiteCoreApi {
 	listTasks(options?: ListTasksOptions): Promise<TaskLiteTaskRecord[]>;
+	/**
+	 * Return all file-level tasks (encoded in YAML frontmatter with `task: true`).
+	 * These are distinct from line tasks and are NOT included in `listTasks`.
+	 */
+	listFrontmatterTasks(): Promise<FrontmatterTaskRecord[]>;
 	finishTask(path: string, lineNumber: number): Promise<boolean>;
 	unfinishTask(path: string, lineNumber: number): Promise<boolean>;
 	cancelTask(path: string, lineNumber: number): Promise<boolean>;
@@ -76,6 +83,18 @@ export interface TaskLiteCoreApi {
 	 * Returns `true` if the task was found and patched, `false` otherwise.
 	 */
 	editTask(path: string, lineNumber: number, patch: EditTaskPatch): Promise<boolean>;
+	/**
+	 * Perform a Tasks-plugin-compatible toggle on a **single task line string** and return
+	 * the resulting line(s) as a string (multi-line when a recurrence occurrence is generated).
+	 *
+	 * When the file is currently open in an editor, the full TaskLite toggle logic is used,
+	 * including cascade (children/parents) and recurrence.
+	 *
+	 * When **no editor is open** for the given `path`, only the single supplied `line` is
+	 * toggled — **cascade and parent-propagation are NOT applied**. If you need full cascade
+	 * without an open editor, use the async `finishTask` / `cancelTask` / `unfinishTask` /
+	 * `uncancelTask` methods instead.
+	 */
 	executeTasksToggleCommand(line: string, path: string): string;
 }
 
@@ -91,6 +110,7 @@ interface TaskLiteCoreApiOptions {
 export function createTaskLiteCoreApi({app, registry, getSettings, documentStore}: TaskLiteCoreApiOptions): TaskLiteCoreApi {
 	return {
 		listTasks: (options) => listTasks({app, registry, documentStore, options}),
+		listFrontmatterTasks: () => listFrontmatterTasks({app, registry, documentStore}),
 		finishTask: (path, lineNumber) => updateFileTask({app, path, lineNumber, registry, settings: getSettings(), documentStore, mutate: finishTaskAtLine}),
 		unfinishTask: (path, lineNumber) => updateFileTask({app, path, lineNumber, registry, settings: getSettings(), documentStore, mutate: unfinishTaskAtLine}),
 		cancelTask: (path, lineNumber) => updateFileTask({app, path, lineNumber, registry, settings: getSettings(), documentStore, mutate: cancelTaskAtLine}),
@@ -430,4 +450,34 @@ function normalizePathLocal(path: string): string {
 	return path.replace(/\\/gu, "/").replace(/\/+/gu, "/").replace(/^\/+/u, "");
 }
 
+async function listFrontmatterTasks({
+	app,
+	registry,
+	documentStore,
+}: {
+	app: App;
+	registry: StatusRegistry;
+	documentStore?: TaskDocumentStore;
+}): Promise<FrontmatterTaskRecord[]> {
+	const records: FrontmatterTaskRecord[] = [];
+	for (const file of app.vault.getMarkdownFiles()) {
+		// Use cached document if available
+		if (documentStore) {
+			const doc = await documentStore.getDocument(file);
+			if (doc?.frontmatterTask) {
+				records.push(doc.frontmatterTask);
+			}
+			continue;
+		}
+		const metadata = app.metadataCache.getFileCache(file);
+		if (metadata?.frontmatter?.tasks === "ignore") continue;
+		const content = await app.vault.cachedRead(file);
+		const lines = content.split("\n");
+		const tree = buildTaskTree(lines, metadata, registry);
+		const hasBodyTasks = tree.nodes.some((n) => n.task);
+		const record = parseFrontmatterTask(file, metadata, registry, hasBodyTasks);
+		if (record) records.push(record);
+	}
+	return records;
+}
 

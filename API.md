@@ -1,6 +1,6 @@
 # TaskLite Plugin API
 
-> **Version**: 0.4.0-alpha.0  
+> **Version**: 0.4.1-alpha.0  
 > **Plugin ID**: `taskslite`
 
 本文档面向希望基于 TaskLite 插件开发新插件的开发者。
@@ -12,14 +12,16 @@
 1. [接入方式](#1-接入方式)
 2. [核心 API — `TaskLiteCoreApi`](#2-核心-api--tasklitecoreapi)
    - [listTasks](#21-listtasks)
-   - [createTask](#22-createtask)
-   - [deleteTask](#23-deletetask)
-   - [editTask](#24-edittask)
-   - [finishTask / unfinishTask](#25-finishtask--unfinishtask)
-   - [cancelTask / uncancelTask](#26-canceltask--uncanceltask)
-   - [executeTasksToggleCommand](#27-executetaskstogglecommand)
+   - [listFrontmatterTasks](#22-listfrontmattertasks)
+   - [createTask](#23-createtask)
+   - [deleteTask](#24-deletetask)
+   - [editTask](#25-edittask)
+   - [finishTask / unfinishTask](#26-finishtask--unfinishtask)
+   - [cancelTask / uncancelTask](#27-canceltask--uncanceltask)
+   - [executeTasksToggleCommand](#28-executetaskstogglecommand)
 3. [数据结构参考](#3-数据结构参考)
    - [TaskLiteTaskRecord](#tasklitetaskrecord)
+   - [FrontmatterTaskRecord](#frontmattertaskrecord)
    - [TaskLine & TaskMetadata](#taskline--taskmetadata)
    - [EditTaskPatch](#edittaskpatch)
    - [StatusConfiguration](#statusconfiguration)
@@ -91,6 +93,7 @@ export default class MyPlugin extends Plugin {
 ```typescript
 interface TaskLiteCoreApi {
   listTasks(options?: ListTasksOptions): Promise<TaskLiteTaskRecord[]>;
+  listFrontmatterTasks(): Promise<FrontmatterTaskRecord[]>;
   createTask(input: CreateTaskInput): Promise<void>;
   deleteTask(path: string, lineNumber: number): Promise<boolean>;
   editTask(path: string, lineNumber: number, patch: EditTaskPatch): Promise<boolean>;
@@ -409,6 +412,49 @@ interface TaskLiteTaskRecord {
   hasChildren: boolean;  // 是否有子任务
   task: TaskLine;        // 完整解析后的任务对象（见下文）
 }
+```
+
+### `FrontmatterTaskRecord`
+
+`listFrontmatterTasks` 返回的文件级任务记录。文件级任务通过 YAML frontmatter 中的 `task: true` 字段声明，文件本身即为任务。
+
+```typescript
+interface FrontmatterTaskRecord {
+  path: string;          // 文件路径
+  basename: string;      // 文件名（无扩展名）
+  lineNumber: -1;        // 固定为 -1，区别于行任务
+  parentLine: null;      // 文件级任务无父任务
+  depth: 0;              // 文件级任务始终为顶层
+  hasChildren: boolean;  // 文件正文中是否含有行任务
+  task: FrontmatterTaskData;
+}
+
+interface FrontmatterTaskData {
+  status: string;              // 状态符号，如 " "、"x"
+  statusType: string;          // 语义类型，如 "TODO"、"DONE"
+  description: string;         // 描述（默认为文件名）
+  priority: TaskPriority | null;
+  dates: { start, created, scheduled, due, done, cancelled };
+  recurrence: string | null;
+  onCompletion: OnCompletionAction | null;
+  id: string | null;
+  dependsOn: string | null;
+  person: string | null;
+}
+```
+
+**frontmatter 字段格式示意：**
+
+```yaml
+---
+task: true
+status: " "
+description: "项目 Alpha"
+due: "2026-06-30"
+priority: "⏫"
+recurrence: "every month"
+onCompletion: "delete"
+---
 ```
 
 ### `TaskLine & TaskMetadata`
@@ -730,6 +776,7 @@ async function archiveCompletedTasks(app: App, api: TaskLiteCoreApi) {
 
 | 版本 | 新增 API |
 |------|---------|
+| 0.4.1-alpha.0 | `listFrontmatterTasks`、`FrontmatterTaskRecord`；`TaskPriority`/`OnCompletionAction` 类型规范化 |
 | 0.4.0-alpha.0 | `deleteTask`、`editTask`、`EditTaskPatch` |
 | 0.3.x | `listTasks`、`createTask`、`finishTask`、`unfinishTask`、`cancelTask`、`uncancelTask`、`executeTasksToggleCommand` |
 

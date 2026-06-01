@@ -1,5 +1,11 @@
 import type { StatusConfiguration, StatusRegistry } from "./status";
 
+/** Priority levels, ordered from highest to lowest. */
+export type TaskPriority = "🔺" | "⏫" | "🔼" | "🔽" | "⏬";
+
+/** Behaviour to apply when a task is finished. */
+export type OnCompletionAction = "delete" | "keep";
+
 export const TASK_SYMBOLS = {
 	priority: {
 		highest: "🔺",
@@ -32,10 +38,10 @@ export interface TaskDates {
 
 export interface TaskMetadata {
 	description: string;
-	priority: string | null;
+	priority: TaskPriority | null;
 	dates: TaskDates;
 	recurrence: string | null;
-	onCompletion: string | null;
+	onCompletion: OnCompletionAction | null;
 	dependsOn: string | null;
 	id: string | null;
 	person: string | null;
@@ -107,7 +113,7 @@ export function parseTaskBody(body: string): TaskMetadata {
 		matched = extractDate(metadata, "start", TASK_SYMBOLS.start) || matched;
 		matched = extractDate(metadata, "created", TASK_SYMBOLS.created) || matched;
 		matched = extractString(metadata, "recurrence", TASK_SYMBOLS.recurrence, "[a-zA-Z0-9, !]+") || matched;
-		matched = extractString(metadata, "onCompletion", TASK_SYMBOLS.onCompletion, "[a-zA-Z]+") || matched;
+		matched = extractString(metadata, "onCompletion", TASK_SYMBOLS.onCompletion, "delete|keep") || matched;
 		matched = extractString(metadata, "dependsOn", TASK_SYMBOLS.dependsOn, "[a-zA-Z0-9-_, ]+") || matched;
 		matched = extractString(metadata, "id", TASK_SYMBOLS.id, "[a-zA-Z0-9-_]+") || matched;
 		matched = extractString(metadata, "person", TASK_SYMBOLS.person, ".+") || matched;
@@ -121,7 +127,7 @@ export function parseTaskBody(body: string): TaskMetadata {
 		const regex = new RegExp(` ?(${priorities})$`, "u");
 		const match = target.description.match(regex);
 		if (!match) return false;
-		target.priority = match[1] ?? null;
+		target.priority = (match[1] ?? null) as TaskPriority | null;
 		target.description = target.description.replace(regex, "").trim();
 		return true;
 	}
@@ -173,11 +179,12 @@ function extractDate(metadata: TaskMetadata, key: keyof TaskDates, symbol: strin
 	return true;
 }
 
-function extractString(metadata: TaskMetadata, key: "recurrence" | "onCompletion" | "dependsOn" | "id" | "person", symbol: string, valuePattern: string): boolean {
+function extractString<K extends "recurrence" | "onCompletion" | "dependsOn" | "id" | "person">(metadata: TaskMetadata, key: K, symbol: string, valuePattern: string): boolean {
 	const regex = new RegExp(`${escapeRegExp(symbol)}\\ufe0f? *(${valuePattern})`, "u");
 	const match = metadata.description.match(regex);
 	if (!match) return false;
-	metadata[key] = (match[1] ?? "").trim();
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	(metadata as unknown as Record<string, unknown>)[key] = (match[1] ?? "").trim();
 	metadata.description = metadata.description.replace(regex, "").replace(/ {2,}/gu, " ").trim();
 	return true;
 }
