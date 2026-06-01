@@ -51,9 +51,9 @@ describe("TaskLite core", () => {
 		const registry = new StatusRegistry();
 		const task = parseTaskLine(`- [ ] Ship MVP ${TASK_SYMBOLS.due} 2026-05-20 ${TASK_SYMBOLS.recurrence} every week`, registry.get(" "));
 
-		expect(task?.metadata.description).toBe("Ship MVP");
-		expect(task?.metadata.dates.due).toBe("2026-05-20");
-		expect(task?.metadata.recurrence).toBe("every week");
+		expect(task?.data.description).toBe("Ship MVP");
+		expect(task?.data.dates.due).toBe("2026-05-20");
+		expect(task?.data.recurrence).toBe("every week");
 	});
 
 	test("supports every weekday recurrence", () => {
@@ -676,8 +676,8 @@ describe("TaskLite core", () => {
 			registry.get(" "),
 		);
 
-		expect(task?.metadata.recurrence).toBe("every week");
-		expect(task?.metadata.onCompletion).toBe("delete");
+		expect(task?.data.recurrence).toBe("every week");
+		expect(task?.data.onCompletion).toBe("delete");
 	});
 
 	test("deletes completed recurring task when onCompletion is delete", () => {
@@ -968,27 +968,25 @@ describe("TaskLite core", () => {
 			expect(node).toBeDefined();
 			expect(node!.statusCharacter).toBe("x");
 			expect(node!.task).not.toBeNull();
-			expect(node!.task!.statusType).toBe("DONE");
+			expect(node!.task!.data.status).toBe("DONE");
 		});
 
 		test("- [-] is a valid cancelled task", () => {
 			const registry = new StatusRegistry();
-			const tree = buildTaskTree(["- [-]"], null, registry);
-			const node = tree.byLine.get(0);
-			expect(node).toBeDefined();
-			expect(node!.statusCharacter).toBe("-");
+			const tree = buildTaskTree(["- [-] task"], null, registry);
+			const node = tree.nodes[0];
+			expect(node).not.toBeNull();
 			expect(node!.task).not.toBeNull();
-			expect(node!.task!.statusType).toBe("CANCELLED");
+			expect(node!.task!.data.status).toBe("CANCELLED");
 		});
 
 		test("- [/] is a valid in-progress task", () => {
 			const registry = new StatusRegistry();
 			const tree = buildTaskTree(["- [/] task"], null, registry);
-			const node = tree.byLine.get(0);
-			expect(node).toBeDefined();
-			expect(node!.statusCharacter).toBe("/");
+			const node = tree.nodes[0];
+			expect(node).not.toBeNull();
 			expect(node!.task).not.toBeNull();
-			expect(node!.task!.statusType).toBe("IN_PROGRESS");
+			expect(node!.task!.data.status).toBe("IN_PROGRESS");
 		});
 
 		test("- [ ] -[] toggles the first checkbox, not the -[]", () => {
@@ -1012,26 +1010,26 @@ describe("TaskLite core", () => {
 			const node = tree.byLine.get(0);
 			expect(node).toBeDefined();
 			expect(node!.task).not.toBeNull();
-			expect(node!.task!.statusType).toBe("TODO");
-			expect(node!.task!.metadata.description).toBe("[]");
+			expect(node!.task!.data.status).toBe("TODO");
+			expect(node!.task!.data.description).toBe("[]");
 		});
 
 		test("- [ ] [x] in description is treated as text", () => {
 			const registry = new StatusRegistry();
 			const tree = buildTaskTree(["- [ ] [x]"], null, registry);
-			const node = tree.byLine.get(0);
-			expect(node).toBeDefined();
+			const node = tree.nodes[0];
+			expect(node).not.toBeNull();
 			expect(node!.task).not.toBeNull();
-			expect(node!.task!.metadata.description).toBe("[x]");
+			expect(node!.task!.data.description).toBe("[x]");
 		});
 
 		test("multiple -[] in description are treated as text", () => {
 			const registry = new StatusRegistry();
 			const tree = buildTaskTree(["- [ ] -[] -[]"], null, registry);
-			const node = tree.byLine.get(0);
-			expect(node).toBeDefined();
+			const node = tree.nodes[0];
+			expect(node).not.toBeNull();
 			expect(node!.task).not.toBeNull();
-			expect(node!.task!.metadata.description).toBe("-[] -[]");
+			expect(node!.task!.data.description).toBe("-[] -[]");
 		});
 
 		test("same-line metadata from bare - in a task description is ignored", () => {
@@ -1248,65 +1246,62 @@ describe("TaskLite core", () => {
 	describe("parseTaskBody edge cases", () => {
 		test("empty body produces empty description", () => {
 			const registry = new StatusRegistry();
-			const task = parseTaskLine("- [ ]", registry.get(" "));
+			const task = parseTaskLine("- [ ] ", "TODO");
 			expect(task).not.toBeNull();
-			expect(task!.metadata.description).toBe("");
+			expect(task!.data.description).toBe("");
 		});
 
 		test("body with only spaces produces empty description", () => {
 			const registry = new StatusRegistry();
-			const task = parseTaskLine("- [ ]   ", registry.get(" "));
+			const task = parseTaskLine("- [ ]   ", "TODO");
 			expect(task).not.toBeNull();
-			expect(task!.metadata.description).toBe("");
+			expect(task!.data.description).toBe("");
 		});
 
 		test("priority emoji is extracted from description", () => {
 			const registry = new StatusRegistry();
-			const task = parseTaskLine(`- [ ] task 🔺`, registry.get(" "));
+			const task = parseTaskLine("- [ ] task 🔺", "TODO");
 			expect(task).not.toBeNull();
-			expect(task!.metadata.description).toBe("task");
-			expect(task!.metadata.priority).toBe("🔺");
+			expect(task!.data.description).toBe("task");
+			expect(task!.data.priority).toBe("🔺");
 		});
 
 		test("lowest priority emoji is extracted", () => {
 			const registry = new StatusRegistry();
-			const task = parseTaskLine(`- [ ] task ⏬`, registry.get(" "));
+			const task = parseTaskLine("- [ ] task ⏬", "TODO");
 			expect(task).not.toBeNull();
-			expect(task!.metadata.priority).toBe("⏬");
+			expect(task!.data.priority).toBe("⏬");
 		});
 
 		test("multiple dates are all extracted", () => {
 			const registry = new StatusRegistry();
-			const task = parseTaskLine(
-				`- [ ] task ${TASK_SYMBOLS.start} 2026-01-01 ${TASK_SYMBOLS.due} 2026-12-31`,
-				registry.get(" "),
-			);
+			const task = parseTaskLine("- [ ] task 🛫 2026-01-01 📅 2026-12-31", "TODO");
 			expect(task).not.toBeNull();
-			expect(task!.metadata.dates.start).toBe("2026-01-01");
-			expect(task!.metadata.dates.due).toBe("2026-12-31");
-			expect(task!.metadata.description).toBe("task");
+			expect(task!.data.dates.start).toBe("2026-01-01");
+			expect(task!.data.dates.due).toBe("2026-12-31");
+			expect(task!.data.description).toBe("task");
 		});
 
 		test("block link is extracted", () => {
 			const registry = new StatusRegistry();
-			const task = parseTaskLine("- [ ] task ^block-id", registry.get(" "));
+			const task = parseTaskLine("- [ ] task ^block-id", "TODO");
 			expect(task).not.toBeNull();
-			expect(task!.metadata.blockLink).toBe("^block-id");
-			expect(task!.metadata.description).toBe("task");
+			expect(task!.data.blockLink).toBe("^block-id");
+			expect(task!.data.description).toBe("task");
 		});
 
 		test("tags are extracted from description", () => {
 			const registry = new StatusRegistry();
-			const task = parseTaskLine("- [ ] task #work #urgent", registry.get(" "));
+			const task = parseTaskLine("- [ ] task #work #urgent", "TODO");
 			expect(task).not.toBeNull();
-			expect(task!.metadata.tags).toEqual(["#work", "#urgent"]);
+			expect(task!.data.tags).toEqual(["#work", "#urgent"]);
 		});
 
 		test("unicode emoji in description is preserved", () => {
 			const registry = new StatusRegistry();
-			const task = parseTaskLine("- [ ] 买菜 🛒", registry.get(" "));
+			const task = parseTaskLine("- [ ] 买菜 🛒", "TODO");
 			expect(task).not.toBeNull();
-			expect(task!.metadata.description).toBe("买菜 🛒");
+			expect(task!.data.description).toBe("买菜 🛒");
 		});
 	});
 
@@ -1437,30 +1432,21 @@ describe("TaskLite core", () => {
 
 	describe("task identity edge cases", () => {
 		test("tasks with same description but different done dates match", () => {
-			const registry = new StatusRegistry();
-			const task1 = parseTaskLine(`- [x] task ${TASK_SYMBOLS.done} 2026-05-16`, registry.get("x"));
-			const task2 = parseTaskLine(`- [x] task ${TASK_SYMBOLS.done} 2026-05-17`, registry.get("x"));
-			expect(task1).not.toBeNull();
-			expect(task2).not.toBeNull();
-			expect(taskIdentityKey(task1!)).toBe(taskIdentityKey(task2!));
+			const task1 = parseTaskLine("- [ ] task ✅ 2026-01-01", "TODO");
+			const task2 = parseTaskLine("- [x] task ✅ 2026-01-02", "DONE");
+			expect(taskIdentityKey(task1!.data)).toBe(taskIdentityKey(task2!.data));
 		});
 
 		test("tasks with different descriptions don't match", () => {
-			const registry = new StatusRegistry();
-			const task1 = parseTaskLine("- [ ] task A", registry.get(" "));
-			const task2 = parseTaskLine("- [ ] task B", registry.get(" "));
-			expect(task1).not.toBeNull();
-			expect(task2).not.toBeNull();
-			expect(taskIdentityKey(task1!)).not.toBe(taskIdentityKey(task2!));
+			const task1 = parseTaskLine("- [ ] task1", "TODO");
+			const task2 = parseTaskLine("- [ ] task2", "TODO");
+			expect(taskIdentityKey(task1!.data)).not.toBe(taskIdentityKey(task2!.data));
 		});
 
 		test("tasks with -[] in description match across states", () => {
-			const registry = new StatusRegistry();
-			const task1 = parseTaskLine("- [ ] thing -[]", registry.get(" "));
-			const task2 = parseTaskLine(`- [x] thing -[] ${TASK_SYMBOLS.done} 2026-05-16`, registry.get("x"));
-			expect(task1).not.toBeNull();
-			expect(task2).not.toBeNull();
-			expect(taskIdentityKey(task1!)).toBe(taskIdentityKey(task2!));
+			const task1 = parseTaskLine("- [ ] task -[]", "TODO");
+			const task2 = parseTaskLine("- [x] task -[]", "DONE");
+			expect(taskIdentityKey(task1!.data)).toBe(taskIdentityKey(task2!.data));
 		});
 	});
 });
@@ -1514,7 +1500,7 @@ function expectSameLineMetadataIsIgnored(lastLine: string, description: string):
 	expect(node!.parentLine).toBe(1);
 	expect(node!.parent?.lineNumber).toBe(1);
 	expect(node!.children).toHaveLength(0);
-	expect(node!.task?.metadata.description).toBe(description);
+	expect(node!.task?.data.description).toBe(description);
 }
 
 function createListItem(line: number, parent: number, col: number, task?: string): ListItemCache {

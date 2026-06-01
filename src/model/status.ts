@@ -30,6 +30,16 @@ export class StatusRegistry {
 		return this.get(status.nextStatusSymbol);
 	}
 
+	getByType(type: StatusType): StatusConfiguration {
+		for (const config of this.bySymbol.values()) {
+			if (config.type === type) return config;
+		}
+		if (type === "DONE") return this.get("x");
+		if (type === "IN_PROGRESS") return this.get("/");
+		if (type === "CANCELLED") return this.get("-");
+		return this.get(" ");
+	}
+
 	recurrenceStatus(afterCompletedStatusSymbol: string): StatusConfiguration {
 		let candidate = this.next(this.get(afterCompletedStatusSymbol));
 		for (let index = 0; index < this.bySymbol.size + 1; index++) {

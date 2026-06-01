@@ -9,6 +9,7 @@ type CheckboxMutation = (input: {
 	lines: string[];
 	lineNumber: number;
 	metadata: ReturnType<App["metadataCache"]["getFileCache"]> | null;
+	app: App;
 	registry: StatusRegistry;
 	settings: TaskLiteSettings;
 }) => ToggleResult | null;
@@ -52,6 +53,7 @@ export function createLivePreviewExtension(
 					lines,
 					lineNumber: line.number - 1,
 					metadata: activeFile ? app.metadataCache.getFileCache(activeFile) : null,
+					app,
 					registry,
 					settings: getSettings(),
 				});

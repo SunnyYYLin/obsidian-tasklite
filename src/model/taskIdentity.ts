@@ -1,8 +1,8 @@
-import { copyTaskMetadata, serializeTaskBody, type TaskLine } from "./format";
+import { copyTaskData, serializeTaskBody, type TaskData } from "./format";
 
-export function taskIdentityKey(task: TaskLine): string {
-	const metadata = copyTaskMetadata(task.metadata);
-	metadata.dates.done = null;
-	metadata.dates.cancelled = null;
-	return serializeTaskBody(metadata);
+export function taskIdentityKey(task: TaskData): string {
+	const data = copyTaskData(task);
+	data.dates.done = null;
+	data.dates.cancelled = null;
+	return serializeTaskBody(data);
 }

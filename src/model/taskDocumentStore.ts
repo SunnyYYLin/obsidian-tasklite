@@ -1,7 +1,7 @@
 import type { App, CachedMetadata, Plugin, TFile } from "obsidian";
 import { buildTaskTree, taskDepth, type TaskTree, type TaskTreeNode } from "./tree";
 import type { StatusRegistry } from "./status";
-import type { TaskLine } from "./format";
+import type { TaskData, TaskLine } from "./format";
 import { parseFrontmatterTask, type FrontmatterTaskRecord } from "./frontmatterTask";
 
 export type { FrontmatterTaskRecord };
@@ -24,7 +24,7 @@ export interface TaskDocumentRecord {
 	parentLine: number | null;
 	depth: number;
 	hasChildren: boolean;
-	task: TaskLine;
+	task: TaskData;
 }
 
 export class TaskDocumentStore {
@@ -177,7 +177,7 @@ function taskRecordsFromDocument(document: TaskDocument): TaskDocumentRecord[] {
 			parentLine: node.parentLine,
 			depth: taskDepth(node),
 			hasChildren: node.children.some((child) => child.task),
-			task: node.task,
+			task: node.task.data,
 		});
 	}
 	return records;

@@ -10,6 +10,7 @@ type EditorTaskMutation = (input: {
 	lines: string[];
 	lineNumber: number;
 	metadata: CachedMetadata | null;
+	app: App;
 	registry: StatusRegistry;
 	settings: TaskLiteSettings;
 }) => ToggleResult | null;
@@ -148,7 +149,7 @@ async function mutateFileTask({
 	if (!(file instanceof TFile)) return false;
 	const content = await app.vault.read(file);
 	const lines = content.split("\n");
-	const result = mutate({lines, lineNumber, metadata: app.metadataCache.getFileCache(file), registry, settings});
+	const result = mutate({lines, lineNumber, metadata: app.metadataCache.getFileCache(file), app, registry, settings});
 	if (!result) return false;
 
 	lines.splice(result.fromLine, result.toLine - result.fromLine + 1, ...result.replacement);
@@ -178,7 +179,7 @@ function mutateOpenEditorTask({
 }): boolean {
 	const cursor = editor.getCursor();
 	const lines = Array.from({length: editor.lineCount()}, (_value, index) => editor.getLine(index));
-	const result = mutate({lines, lineNumber, metadata: getFileCache(app, path), registry, settings});
+	const result = mutate({lines, lineNumber, metadata: getFileCache(app, path), app, registry, settings});
 	if (!result) return false;
 
 	const from = {line: result.fromLine, ch: 0};
@@ -216,7 +217,7 @@ function mutateEditorTask({
 	const cursor = editor.getCursor();
 	const lines = Array.from({length: editor.lineCount()}, (_value, index) => editor.getLine(index));
 	const metadata = getFileCache(app, path);
-	const result = mutate({lines, lineNumber: cursor.line, metadata, registry, settings});
+	const result = mutate({lines, lineNumber: cursor.line, metadata, app, registry, settings});
 	if (!result) return false;
 
 	const from = {line: result.fromLine, ch: 0};

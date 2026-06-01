@@ -21,8 +21,7 @@
    - [executeTasksToggleCommand](#28-executetaskstogglecommand)
 3. [数据结构参考](#3-数据结构参考)
    - [TaskLiteTaskRecord](#tasklitetaskrecord)
-   - [FrontmatterTaskRecord](#frontmattertaskrecord)
-   - [TaskLine & TaskMetadata](#taskline--taskmetadata)
+   - [TaskData](#taskdata)
    - [EditTaskPatch](#edittaskpatch)
    - [StatusConfiguration](#statusconfiguration)
 4. [设计约定与注意事项](#4-设计约定与注意事项)
@@ -93,7 +92,7 @@ export default class MyPlugin extends Plugin {
 ```typescript
 interface TaskLiteCoreApi {
   listTasks(options?: ListTasksOptions): Promise<TaskLiteTaskRecord[]>;
-  listFrontmatterTasks(): Promise<FrontmatterTaskRecord[]>;
+  listFrontmatterTasks(): Promise<TaskLiteTaskRecord[]>;
   createTask(input: CreateTaskInput): Promise<void>;
   deleteTask(path: string, lineNumber: number): Promise<boolean>;
   editTask(path: string, lineNumber: number, patch: EditTaskPatch): Promise<boolean>;
@@ -139,7 +138,7 @@ const all = await api.listTasks({
 // 按截止日期过滤
 const today = new Date().toISOString().slice(0, 10); // "2026-05-31"
 const dueTodayOrBefore = todos.filter(
-  (r) => r.task.metadata.dates.due && r.task.metadata.dates.due <= today
+  (r) => r.task.dates.due && r.task.dates.due <= today
 );
 ```
 
@@ -400,50 +399,21 @@ const toggled = api.executeTasksToggleCommand(original, "Work/Tasks.md");
 
 ### `TaskLiteTaskRecord`
 
-`listTasks` 返回的任务记录：
+`listTasks` 和 `listFrontmatterTasks` 返回的统一任务记录：
 
 ```typescript
 interface TaskLiteTaskRecord {
   path: string;          // 文件路径，如 "Work/Tasks.md"
   basename: string;      // 文件名（无扩展名），如 "Tasks"
-  lineNumber: number;    // 任务所在行号（0-indexed）
-  parentLine: number | null; // 父任务行号，null 表示顶层任务
-  depth: number;         // 在树中的深度（0 = 顶层）
-  hasChildren: boolean;  // 是否有子任务
-  task: TaskLine;        // 完整解析后的任务对象（见下文）
+  lineNumber: number;    // 任务所在行号（0-indexed），若为文件级 Frontmatter 任务则固定为 -1
+  parentLine: number | null; // 父任务行号，null 表示顶层任务（文件级任务恒为 null）
+  depth: number;         // 在树中的深度（0 = 顶层列表项，-1 = 文件级 Frontmatter 任务）
+  hasChildren: boolean;  // 是否有子级（文件级任务表示正文中是否含行任务）
+  task: TaskData;        // 任务逻辑数据对象（见下文）
 }
 ```
 
-### `FrontmatterTaskRecord`
-
-`listFrontmatterTasks` 返回的文件级任务记录。文件级任务通过 YAML frontmatter 中的 `task: true` 字段声明，文件本身即为任务。
-
-```typescript
-interface FrontmatterTaskRecord {
-  path: string;          // 文件路径
-  basename: string;      // 文件名（无扩展名）
-  lineNumber: -1;        // 固定为 -1，区别于行任务
-  parentLine: null;      // 文件级任务无父任务
-  depth: 0;              // 文件级任务始终为顶层
-  hasChildren: boolean;  // 文件正文中是否含有行任务
-  task: FrontmatterTaskData;
-}
-
-interface FrontmatterTaskData {
-  status: string;              // 状态符号，如 " "、"x"
-  statusType: string;          // 语义类型，如 "TODO"、"DONE"
-  description: string;         // 描述（默认为文件名）
-  priority: TaskPriority | null;
-  dates: { start, created, scheduled, due, done, cancelled };
-  recurrence: string | null;
-  onCompletion: OnCompletionAction | null;
-  id: string | null;
-  dependsOn: string | null;
-  person: string | null;
-}
-```
-
-**frontmatter 字段格式示意：**
+**YAML Frontmatter 字段格式示意：**
 
 ```yaml
 ---
@@ -457,22 +427,15 @@ onCompletion: "delete"
 ---
 ```
 
-### `TaskLine & TaskMetadata`
+### `TaskData`
 
 完整的任务数据模型：
 
 ```typescript
-interface TaskLine {
-  indentation: string;           // 行首缩进（空格/Tab）
-  listMarker: string;            // 列表标记（"- "、"* "、"1."等）
-  status: StatusConfiguration;   // 当前状态配置
-  metadata: TaskMetadata;        // 任务元数据
-  original: string;              // 原始行文本（未修改）
-}
-
-interface TaskMetadata {
+interface TaskData {
+  status: StatusType;            // 语义状态类型，如 "TODO"、"DONE"、"CANCELLED"、"IN_PROGRESS"
   description: string;           // 任务描述（已去除所有 emoji 元数据）
-  priority: string | null;       // 优先级 emoji，如 "⏫"、"🔽"
+  priority: string | null;       // 优先级 emoji，如 "🔺"、"⏫"、"🔼"、"🔽"、"⏬"
   dates: {
     start: string | null;        // 🛫 开始日期
     created: string | null;      // ➕ 创建日期
@@ -485,7 +448,8 @@ interface TaskMetadata {
   onCompletion: string | null;   // 🏁 完成行为（"delete" | "keep"）
   id: string | null;             // 🆔 任务 ID
   dependsOn: string | null;      // ⛔ 依赖 ID
-  blockLink: string | null;      // Obsidian 块引用，如 "^abc123"
+  person: string | null;         // 👤 负责人
+  blockLink: string | null;      // Obsidian 块引用，如 "^abc123"（仅行任务，文件任务为 null）
   tags: string[];                // 提取的标签列表，如 ["#work", "#urgent"]
 }
 ```
@@ -776,7 +740,7 @@ async function archiveCompletedTasks(app: App, api: TaskLiteCoreApi) {
 
 | 版本 | 新增 API |
 |------|---------|
-| 0.4.1-alpha.0 | `listFrontmatterTasks`、`FrontmatterTaskRecord`；`TaskPriority`/`OnCompletionAction` 类型规范化 |
+| 0.4.1-alpha.0 | 统一任务数据模型：合并行任务和文件级任务的数据结构与接口 (TaskData/TaskLiteTaskRecord)，移除了冗余的 metadata 嵌套与 FrontmatterTaskRecord 类型，frontmatter 任务的 depth 调整为 -1 |
 | 0.4.0-alpha.0 | `deleteTask`、`editTask`、`EditTaskPatch` |
 | 0.3.x | `listTasks`、`createTask`、`finishTask`、`unfinishTask`、`cancelTask`、`uncancelTask`、`executeTasksToggleCommand` |
 

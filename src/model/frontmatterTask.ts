@@ -1,6 +1,6 @@
 import type { CachedMetadata, TFile } from "obsidian";
-import type { StatusRegistry, StatusType } from "./status";
-import type { TaskPriority, OnCompletionAction } from "./format";
+import type { StatusRegistry } from "./status";
+import type { TaskPriority, OnCompletionAction, TaskData } from "./format";
 
 /**
  * A task encoded entirely in a file's YAML frontmatter rather than as a
@@ -31,32 +31,12 @@ export interface FrontmatterTaskRecord {
 	lineNumber: -1;
 	/** Always null – file-level tasks have no parent. */
 	parentLine: null;
-	/** Always 0 – file-level tasks are top-level by definition. */
-	depth: 0;
+	/** Always -1 – file-level tasks have depth -1. */
+	depth: -1;
 	/** Whether the file contains child list-item tasks in its body. */
 	hasChildren: boolean;
 	/** Parsed task data built from frontmatter fields. */
-	task: FrontmatterTaskData;
-}
-
-export interface FrontmatterTaskData {
-	statusSymbol: string;
-	statusType: StatusType;
-	description: string;
-	priority: TaskPriority | null;
-	dates: {
-		start: string | null;
-		created: string | null;
-		scheduled: string | null;
-		due: string | null;
-		done: string | null;
-		cancelled: string | null;
-	};
-	recurrence: string | null;
-	onCompletion: OnCompletionAction | null;
-	id: string | null;
-	dependsOn: string | null;
-	person: string | null;
+	task: TaskData;
 }
 
 const PRIORITY_SYMBOLS = new Set(["🔺", "⏫", "🔼", "🔽", "⏬"]);
@@ -91,9 +71,8 @@ export function parseFrontmatterTask(
 			? rawOnCompletion
 			: null;
 
-	const task: FrontmatterTaskData = {
-		statusSymbol: statusConfig.symbol,
-		statusType: statusConfig.type,
+	const task: TaskData = {
+		status: statusConfig.type,
 		description: typeof fm["description"] === "string" ? fm["description"] : file.basename,
 		priority,
 		dates: {
@@ -109,6 +88,8 @@ export function parseFrontmatterTask(
 		id: typeof fm["id"] === "string" ? fm["id"] : null,
 		dependsOn: typeof fm["dependsOn"] === "string" ? fm["dependsOn"] : null,
 		person: typeof fm["person"] === "string" ? fm["person"] : null,
+		blockLink: null,
+		tags: Array.isArray(fm["tags"]) ? fm["tags"].map(String) : [],
 	};
 
 	return {
@@ -116,7 +97,7 @@ export function parseFrontmatterTask(
 		basename: file.basename,
 		lineNumber: -1,
 		parentLine: null,
-		depth: 0,
+		depth: -1,
 		hasChildren,
 		task,
 	};
@@ -128,12 +109,15 @@ export function parseFrontmatterTask(
  * frontmatter.
  */
 export function buildFrontmatterPatch(
-	current: FrontmatterTaskData,
-	updates: Partial<FrontmatterTaskData>,
+	current: TaskData,
+	updates: Partial<TaskData>,
+	registry: StatusRegistry,
 ): Record<string, unknown> {
 	const patch: Record<string, unknown> = {};
 
-	if (updates.statusSymbol !== undefined) patch["status"] = updates.statusSymbol;
+	if (updates.status !== undefined) {
+		patch["status"] = registry.getByType(updates.status).symbol;
+	}
 	if (updates.priority !== undefined) patch["priority"] = updates.priority;
 	if (updates.description !== undefined) patch["description"] = updates.description;
 	if (updates.recurrence !== undefined) patch["recurrence"] = updates.recurrence;
@@ -153,7 +137,9 @@ export function buildFrontmatterPatch(
 	}
 
 	// Carry over fields that are not being updated
-	if (!("status" in patch)) patch["status"] = current.statusSymbol;
+	if (!("status" in patch)) {
+		patch["status"] = registry.getByType(current.status).symbol;
+	}
 
 	return patch;
 }

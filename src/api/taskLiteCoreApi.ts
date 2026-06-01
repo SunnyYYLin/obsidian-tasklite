@@ -5,15 +5,15 @@ import {
 	toggleTaskAtLine,
 	uncancelTaskAtLine,
 	unfinishTaskAtLine,
+	getIndentPrefix,
 	type ToggleResult,
 } from "../editor/toggle";
 import { findOpenMarkdownEditor } from "../editor/editorUtils";
-import { copyTaskMetadata, parseLineWithStatus, serializeTaskLine, type TaskLine, type TaskPriority, type OnCompletionAction } from "../model/format";
+import { copyTaskData, parseLineWithStatus, serializeTaskLine, type TaskLine, type TaskPriority, type OnCompletionAction, type TaskData } from "../model/format";
 import { taskIdentityKey } from "../model/taskIdentity";
 import { applyTaskStatus } from "../model/taskState";
 import { buildTaskTree, getSubtreeNodes, taskDepth } from "../model/tree";
 import type { TaskDocumentStore, TaskDocumentRecord } from "../model/taskDocumentStore";
-import type { FrontmatterTaskRecord } from "../model/frontmatterTask";
 import { parseFrontmatterTask } from "../model/frontmatterTask";
 import type { StatusRegistry } from "../model/status";
 import type { TaskLiteSettings } from "../settings";
@@ -66,7 +66,7 @@ export interface TaskLiteCoreApi {
 	 * Return all file-level tasks (encoded in YAML frontmatter with `task: true`).
 	 * These are distinct from line tasks and are NOT included in `listTasks`.
 	 */
-	listFrontmatterTasks(): Promise<FrontmatterTaskRecord[]>;
+	listFrontmatterTasks(): Promise<TaskLiteTaskRecord[]>;
 	finishTask(path: string, lineNumber: number): Promise<boolean>;
 	unfinishTask(path: string, lineNumber: number): Promise<boolean>;
 	cancelTask(path: string, lineNumber: number): Promise<boolean>;
@@ -105,8 +105,6 @@ interface TaskLiteCoreApiOptions {
 	documentStore?: TaskDocumentStore;
 }
 
-
-
 export function createTaskLiteCoreApi({app, registry, getSettings, documentStore}: TaskLiteCoreApiOptions): TaskLiteCoreApi {
 	return {
 		listTasks: (options) => listTasks({app, registry, documentStore, options}),
@@ -120,9 +118,10 @@ export function createTaskLiteCoreApi({app, registry, getSettings, documentStore
 		editTask: (path, lineNumber, patch) => editFileTask({app, path, lineNumber, registry, documentStore, patch}),
 		executeTasksToggleCommand: (line, path) => {
 			const context = findOpenEditorTaskContext(app, line, path, registry);
-			if (!context) return executeSingleLineApiToggle(line, registry, getSettings());
+			if (!context) return executeSingleLineApiToggle(line, app, registry, getSettings());
 			const result = toggleTaskAtLine({
 				...context,
+				app,
 				registry,
 				settings: getSettings(),
 			});
@@ -162,7 +161,7 @@ async function listTasks({
 				parentLine: node.parentLine,
 				depth: taskDepth(node),
 				hasChildren: node.children.some((child) => child.task),
-				task: node.task,
+				task: node.task.data,
 			});
 		}
 	}
@@ -185,11 +184,9 @@ async function createTask({
 	const statusSymbol = input.status ?? " ";
 	const statusConfig = registry.get(statusSymbol);
 	const taskLine: TaskLine = {
-		indentation: "",
 		listMarker: "-",
-		statusSymbol: statusConfig.symbol,
-		statusType: statusConfig.type,
-		metadata: {
+		data: {
+			status: statusConfig.type,
 			description: input.description,
 			priority: input.priority ?? null,
 			dates: {
@@ -210,7 +207,6 @@ async function createTask({
 		},
 		original: "",
 	};
-	const line = serializeTaskLine(taskLine);
 
 	const inboxPath = normalizePathLocal(input.path || "Tasks/New_Tasks.md");
 	let file = app.vault.getAbstractFileByPath(inboxPath);
@@ -226,8 +222,17 @@ async function createTask({
 	const metadata = app.metadataCache.getFileCache(file);
 	const tree = buildTaskTree(lines, metadata, registry);
 	const parentNode = typeof input.parentLineNumber === "number" ? tree.byLine.get(input.parentLineNumber) : undefined;
-	const parentIndentation = parentNode ? parentNode.indentation : "";
-	const insertion = parentNode ? `${parentIndentation}\t${line.trimStart()}` : line;
+	
+	const vaultConfig = (app.vault as any).config || {};
+	const useTab = vaultConfig.useTab ?? true;
+	const tabSize = vaultConfig.tabSize ?? 4;
+	const oneLevelIndent = useTab ? "\t" : " ".repeat(tabSize);
+
+	const parentPrefix = parentNode ? parentNode.indentation : "";
+	const indentPrefix = parentNode ? `${parentPrefix}${oneLevelIndent}` : "";
+	const line = serializeTaskLine(taskLine, indentPrefix, registry);
+
+	const insertion = parentNode ? `${parentPrefix}${oneLevelIndent}${line.trimStart()}` : line;
 	if (typeof input.parentLineNumber === "number" && input.parentLineNumber >= 0 && input.parentLineNumber < lines.length) {
 		lines.splice(input.parentLineNumber + 1, 0, insertion);
 		const nextContent = lines.join("\n");
@@ -302,31 +307,30 @@ async function editFileTask({
 	const node = tree.byLine.get(lineNumber);
 	if (!node?.task) return false;
 
-	const metadata = copyTaskMetadata(node.task.metadata);
+	const data = copyTaskData(node.task.data);
 
-	if (patch.description !== undefined) metadata.description = patch.description;
-	if (patch.priority !== undefined) metadata.priority = patch.priority;
-	if (patch.recurrence !== undefined) metadata.recurrence = patch.recurrence;
-	if (patch.onCompletion !== undefined) metadata.onCompletion = patch.onCompletion;
-	if (patch.id !== undefined) metadata.id = patch.id;
-	if (patch.dependsOn !== undefined) metadata.dependsOn = patch.dependsOn;
+	if (patch.description !== undefined) data.description = patch.description;
+	if (patch.priority !== undefined) data.priority = patch.priority;
+	if (patch.recurrence !== undefined) data.recurrence = patch.recurrence;
+	if (patch.onCompletion !== undefined) data.onCompletion = patch.onCompletion;
+	if (patch.id !== undefined) data.id = patch.id;
+	if (patch.dependsOn !== undefined) data.dependsOn = patch.dependsOn;
 	if (patch.dates) {
 		const d = patch.dates;
-		if (d.start !== undefined) metadata.dates.start = d.start;
-		if (d.scheduled !== undefined) metadata.dates.scheduled = d.scheduled;
-		if (d.due !== undefined) metadata.dates.due = d.due;
+		if (d.start !== undefined) data.dates.start = d.start;
+		if (d.scheduled !== undefined) data.dates.scheduled = d.scheduled;
+		if (d.due !== undefined) data.dates.due = d.due;
 	}
 
-	let statusSymbol = node.task.statusSymbol;
-	let statusType = node.task.statusType;
 	if (patch.statusSymbol !== undefined) {
 		const statusConfig = registry.get(patch.statusSymbol);
-		statusSymbol = statusConfig.symbol;
-		statusType = statusConfig.type;
+		data.status = statusConfig.type;
 	}
 
-	const updatedTask: TaskLine = {...node.task, statusSymbol, statusType, metadata};
-	lines[lineNumber] = serializeTaskLine(updatedTask);
+	const updatedTask: TaskLine = {...node.task, data};
+	const depth = taskDepth(node);
+	const indent = getIndentPrefix(depth, app);
+	lines[lineNumber] = serializeTaskLine(updatedTask, indent, registry);
 	const nextContent = lines.join("\n");
 	await app.vault.modify(file, nextContent);
 	await documentStore?.replaceDocumentContent(file, nextContent);
@@ -352,6 +356,7 @@ async function updateFileTask({
 		lines: string[];
 		lineNumber: number;
 		metadata: CachedMetadata | null | undefined;
+		app: App;
 		registry: StatusRegistry;
 		settings: TaskLiteSettings;
 	}) => ToggleResult | null;
@@ -364,6 +369,7 @@ async function updateFileTask({
 		lines,
 		lineNumber,
 		metadata: app.metadataCache.getFileCache(file),
+		app,
 		registry,
 		settings,
 	});
@@ -379,37 +385,36 @@ async function updateFileTask({
 function filterTaskRecords(records: TaskLiteTaskRecord[], options: ListTasksOptions): TaskLiteTaskRecord[] {
 	return records.filter((record) => {
 		if (!options.includeChildren && record.parentLine !== null) return false;
-		if (!options.includeCompleted && record.task.statusType === "DONE") return false;
-		if (!options.includeCancelled && record.task.statusType === "CANCELLED") return false;
+		if (!options.includeCompleted && record.task.status === "DONE") return false;
+		if (!options.includeCancelled && record.task.status === "CANCELLED") return false;
 		return true;
 	});
 }
 
-
-
-
-
-function executeSingleLineApiToggle(line: string, registry: StatusRegistry, settings: TaskLiteSettings): string {
+function executeSingleLineApiToggle(line: string, app: App, registry: StatusRegistry, settings: TaskLiteSettings): string {
 	const task = parseLineWithStatus(line, registry);
-	if (task?.statusType === "DONE" || task?.statusType === "CANCELLED") {
-		return normalizeApiToggledLine(line, registry, settings);
+	if (task?.data.status === "DONE" || task?.data.status === "CANCELLED") {
+		return normalizeApiToggledLine(line, app, registry, settings);
 	}
 
 	const result = toggleTaskAtLine({
 		lines: [line],
 		lineNumber: 0,
 		metadata: null,
+		app,
 		registry,
 		settings,
 	});
 	return result?.replacement.join("\n") ?? line;
 }
 
-function normalizeApiToggledLine(line: string, registry: StatusRegistry, settings: TaskLiteSettings): string {
+function normalizeApiToggledLine(line: string, app: App, registry: StatusRegistry, settings: TaskLiteSettings): string {
 	const task = parseLineWithStatus(line, registry);
 	if (!task) return line;
 
-	return serializeTaskLine(applyTaskStatus(task, { symbol: task.statusSymbol, type: task.statusType }, settings, {fillMissingStatusDate: true}));
+	const updatedData = applyTaskStatus(task.data, task.data.status, settings, {fillMissingStatusDate: true});
+	const indentPrefix = line.match(/^([\s\t>]*)/)?.[0] ?? "";
+	return serializeTaskLine({...task, data: updatedData}, indentPrefix, registry);
 }
 
 function findOpenEditorTaskContext(
@@ -435,16 +440,12 @@ function findMatchingTaskLine(lines: string[], line: string, registry: StatusReg
 	const incomingTask = parseLineWithStatus(line, registry);
 	if (!incomingTask) return -1;
 
-	const incomingKey = taskIdentityKey(incomingTask);
+	const incomingKey = taskIdentityKey(incomingTask.data);
 	return lines.findIndex((candidate) => {
 		const candidateTask = parseLineWithStatus(candidate, registry);
-		return candidateTask ? taskIdentityKey(candidateTask) === incomingKey : false;
+		return candidateTask ? taskIdentityKey(candidateTask.data) === incomingKey : false;
 	});
 }
-
-
-
-
 
 function isTFile(value: unknown): value is TFile {
 	const file = value as Partial<TFile> | null | undefined;
@@ -463,8 +464,8 @@ async function listFrontmatterTasks({
 	app: App;
 	registry: StatusRegistry;
 	documentStore?: TaskDocumentStore;
-}): Promise<FrontmatterTaskRecord[]> {
-	const records: FrontmatterTaskRecord[] = [];
+}): Promise<TaskLiteTaskRecord[]> {
+	const records: TaskLiteTaskRecord[] = [];
 	for (const file of app.vault.getMarkdownFiles()) {
 		// Use cached document if available
 		if (documentStore) {
@@ -485,4 +486,3 @@ async function listFrontmatterTasks({
 	}
 	return records;
 }
-

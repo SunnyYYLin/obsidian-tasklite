@@ -1,8 +1,10 @@
-import { copyTaskMetadata, serializeTaskLine, type TaskLine } from "../model/format";
+import type { App } from "obsidian";
+import { copyTaskData, serializeTaskLine, type TaskLine, type TaskData } from "../model/format";
 import { parseRecurrenceRule, nextRecurrenceDates, todayString, type RecurrenceRule } from "../model/recurrence";
 import type { StatusRegistry } from "../model/status";
-import { getSubtreeLineRange, getSubtreeNodes, type TaskTreeNode } from "../model/tree";
+import { getSubtreeLineRange, getSubtreeNodes, taskDepth, type TaskTreeNode } from "../model/tree";
 import type { TaskLiteSettings } from "../settings";
+import { getIndentPrefix } from "./toggle";
 
 export interface RecurrenceOccurrenceResult {
 	nextLines: string[];
@@ -14,18 +16,20 @@ export function buildRecurringTaskOccurrence({
 	lines,
 	recurringNode,
 	terminatedTask,
+	app,
 	registry,
 	settings,
 	unsupportedWarning,
 }: {
 	lines: string[];
 	recurringNode: TaskTreeNode;
-	terminatedTask: TaskLine;
+	terminatedTask: TaskData;
+	app?: App;
 	registry: StatusRegistry;
 	settings: TaskLiteSettings;
 	unsupportedWarning: string;
 }): RecurrenceOccurrenceResult | null {
-	const recurrence = recurringNode.task?.metadata.recurrence;
+	const recurrence = recurringNode.task?.data.recurrence;
 	const shift = parseRecurrenceRule(recurrence ?? null);
 	if (!recurrence || !recurringNode.task) return null;
 	if (!shift) {
@@ -35,8 +39,8 @@ export function buildRecurringTaskOccurrence({
 	const recurringSubtree = getSubtreeNodes(recurringNode);
 	const nextTask = makeNextOccurrence(recurringNode.task, terminatedTask, registry, settings, shift);
 	const nextLines = settings.copySubtasksOnRecurrence
-		? copySubtreeForNextOccurrence(recurringSubtree, recurringNode, nextTask, registry)
-		: [serializeTaskLine(nextTask)];
+		? copySubtreeForNextOccurrence(recurringSubtree, recurringNode, nextTask, registry, app, lines)
+		: [serializeTaskLine(nextTask, getIndentPrefix(taskDepth(recurringNode), app, lines), registry)];
 
 	const insertionLine = getSubtreeLineRange(recurringNode).from;
 	return {
@@ -53,28 +57,27 @@ function hasExistingOccurrence(lines: string[], insertionLine: number, nextLines
 
 function makeNextOccurrence(
 	original: TaskLine,
-	terminated: TaskLine,
+	terminated: TaskData,
 	registry: StatusRegistry,
 	settings: TaskLiteSettings,
 	shift: RecurrenceRule,
 ): TaskLine {
-	const metadata = copyTaskMetadata(original.metadata);
-	const terminatedOn = terminated.metadata.dates.done ?? terminated.metadata.dates.cancelled ?? todayString();
-	metadata.dates = nextRecurrenceDates(metadata.dates, shift, terminatedOn);
-	metadata.dates.done = null;
-	metadata.dates.cancelled = null;
-	metadata.blockLink = null;
-	metadata.id = null;
-	metadata.dependsOn = null;
+	const data = copyTaskData(original.data);
+	const terminatedOn = terminated.dates.done ?? terminated.dates.cancelled ?? todayString();
+	data.dates = nextRecurrenceDates(data.dates, shift, terminatedOn);
+	data.dates.done = null;
+	data.dates.cancelled = null;
+	data.blockLink = null;
+	data.id = null;
+	data.dependsOn = null;
 	if (settings.setCreatedDate) {
-		metadata.dates.created = todayString();
+		data.dates.created = todayString();
 	}
-	const nextStatus = registry.recurrenceStatus(terminated.statusSymbol);
+	const nextStatus = registry.recurrenceStatus(registry.getByType(terminated.status).symbol);
+	data.status = nextStatus.type;
 	return {
 		...original,
-		statusSymbol: nextStatus.symbol,
-		statusType: nextStatus.type,
-		metadata,
+		data,
 		original: "",
 	};
 }
@@ -84,26 +87,29 @@ function copySubtreeForNextOccurrence(
 	root: TaskTreeNode,
 	nextTask: TaskLine,
 	registry: StatusRegistry,
+	app: App | undefined,
+	lines: string[],
 ): string[] {
 	return subtree.map((node) => {
+		const depth = taskDepth(node);
+		const indent = getIndentPrefix(depth, app, lines);
 		if (node.lineNumber === root.lineNumber) {
-			return serializeTaskLine(nextTask);
+			return serializeTaskLine(nextTask, indent, registry);
 		}
 		if (!node.task) {
 			return node.original;
 		}
-		const metadata = copyTaskMetadata(node.task.metadata);
-		metadata.dates.done = null;
-		metadata.dates.cancelled = null;
-		metadata.blockLink = null;
-		metadata.id = null;
-		metadata.dependsOn = null;
+		const data = copyTaskData(node.task.data);
+		data.dates.done = null;
+		data.dates.cancelled = null;
+		data.blockLink = null;
+		data.id = null;
+		data.dependsOn = null;
 		const todoStatus = registry.get(" ");
+		data.status = todoStatus.type;
 		return serializeTaskLine({
 			...node.task,
-			statusSymbol: todoStatus.symbol,
-			statusType: todoStatus.type,
-			metadata,
-		});
+			data,
+		}, indent, registry);
 	});
 }

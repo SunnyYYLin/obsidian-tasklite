@@ -44,7 +44,7 @@ export function buildTaskTree(lines: string[], metadata: CachedMetadata | null |
 			listMarker: match[2] ?? "-",
 			statusCharacter,
 			description: (match[4] ?? "").trim(),
-			task: statusCharacter === null ? null : parseTaskLine(line, registry.get(statusCharacter)),
+			task: statusCharacter === null ? null : parseTaskLine(line, registry.get(statusCharacter).type),
 		};
 		nodes.push(node);
 		byLine.set(lineNumber, node);
