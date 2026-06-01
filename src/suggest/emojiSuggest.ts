@@ -53,12 +53,6 @@ const DATE_FIELD_SYMBOLS = [
 	TASK_SYMBOLS.cancelled,
 ];
 
-// Regex that matches a date emoji symbol (with optional variation selector) followed by a space and the typed query
-const DATE_FIELD_PATTERN = new RegExp(
-	`(${DATE_FIELD_SYMBOLS.map(escapeRegex).join("|")})\\ufe0f? ([^\\s]*)$`,
-	"u",
-);
-
 export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 	constructor(private readonly plugin: TaskLitePlugin) {
 		super(plugin.app);
@@ -70,35 +64,46 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 		if (!taskLineRegex.test(line)) return null;
 		const beforeCursor = line.slice(0, cursor.ch);
 
-		// ----------------------------------------------------------------
-		// Mode 1: @ triggers emoji field menu
-		// ----------------------------------------------------------------
+		// Find the last index of '@' or '＠'
 		const atIndex = Math.max(beforeCursor.lastIndexOf("@"), beforeCursor.lastIndexOf("＠"));
-		if (atIndex >= 0) {
-			return {
-				start: {line: cursor.line, ch: atIndex},
-				end: cursor,
-				query: `@:${beforeCursor.slice(atIndex + 1).toLowerCase()}`,
-			};
+
+		// Find the last index of any date symbol
+		let lastDateSymbol: string | null = null;
+		let lastDateSymbolIdx = -1;
+		for (const symbol of DATE_FIELD_SYMBOLS) {
+			const idx = beforeCursor.lastIndexOf(symbol);
+			if (idx > lastDateSymbolIdx) {
+				lastDateSymbolIdx = idx;
+				lastDateSymbol = symbol;
+			}
 		}
 
-		// ----------------------------------------------------------------
-		// Mode 2: date emoji followed by text (or just a space) → date shorthand
-		// ----------------------------------------------------------------
-		const dateMatch = beforeCursor.match(DATE_FIELD_PATTERN);
-		if (dateMatch) {
-			const query = dateMatch[2] ?? "";
-			const symbolStr = dateMatch[1] ?? "";
-			const symbolEnd = beforeCursor.lastIndexOf(symbolStr);
-			// queryStart = right after the space that follows the emoji
-			const queryStart = symbolEnd + [...symbolStr].length + 1; // handle multi-codepoint emoji
-			// Only trigger when cursor is right after the space or into the typed text
-			if (cursor.ch >= queryStart) {
+		// Determine which trigger is closer to the cursor
+		if (atIndex >= 0 && atIndex > lastDateSymbolIdx) {
+			// Mode 1: @ triggers emoji field menu
+			const queryText = beforeCursor.slice(atIndex + 1);
+			if (!containsDelimiter(queryText)) {
 				return {
-					start: {line: cursor.line, ch: queryStart},
+					start: {line: cursor.line, ch: atIndex},
 					end: cursor,
-					query: `date:${query.toLowerCase()}`,
+					query: `@:${queryText.toLowerCase()}`,
 				};
+			}
+		} else if (lastDateSymbol !== null && lastDateSymbolIdx >= 0) {
+			// Mode 2: date emoji followed by space -> date shorthand
+			const afterSymbolIdx = lastDateSymbolIdx + lastDateSymbol.length;
+			if (beforeCursor.charAt(afterSymbolIdx) === " ") {
+				const queryStart = afterSymbolIdx + 1;
+				if (cursor.ch >= queryStart) {
+					const queryText = beforeCursor.slice(queryStart);
+					if (!containsDelimiter(queryText)) {
+						return {
+							start: {line: cursor.line, ch: queryStart},
+							end: cursor,
+							query: `date:${queryText.toLowerCase()}`,
+						};
+					}
+				}
 			}
 		}
 
@@ -111,7 +116,7 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 		// ---- emoji mode (@) ----
 		if (query.startsWith("@:")) {
 			const q = query.slice(2).trim();
-			if (!q) return [];
+			if (!q) return EMOJI_SUGGESTIONS.slice(0, 8);
 			return EMOJI_SUGGESTIONS.filter((s) => s.label.toLowerCase().includes(q)).slice(0, 8);
 		}
 
@@ -132,8 +137,7 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 			el.createSpan({text: value.insert.trim() || "…", cls: "taskslite-suggest-token"});
 			el.createSpan({text: value.label});
 		} else {
-			// Show the resolved date prominently, then the human label
-			el.createSpan({text: value.entry.resolved, cls: "taskslite-suggest-token"});
+			// Only show "text -> replacement text"
 			el.createSpan({text: value.entry.localLabel});
 		}
 	}
@@ -147,6 +151,34 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 			this.context.editor.replaceRange(value.entry.resolved, this.context.start, this.context.end);
 		}
 	}
+}
+
+function containsDelimiter(text: string): boolean {
+	if (text.includes("#") || text.includes("@") || text.includes("＠")) {
+		return true;
+	}
+	const symbols = [
+		TASK_SYMBOLS.due,
+		TASK_SYMBOLS.scheduled,
+		TASK_SYMBOLS.start,
+		TASK_SYMBOLS.created,
+		TASK_SYMBOLS.done,
+		TASK_SYMBOLS.cancelled,
+		TASK_SYMBOLS.recurrence,
+		TASK_SYMBOLS.onCompletion,
+		TASK_SYMBOLS.dependsOn,
+		TASK_SYMBOLS.id,
+		TASK_SYMBOLS.person,
+		TASK_SYMBOLS.priority.highest,
+		TASK_SYMBOLS.priority.high,
+		TASK_SYMBOLS.priority.medium,
+		TASK_SYMBOLS.priority.low,
+		TASK_SYMBOLS.priority.lowest,
+	];
+	for (const sym of symbols) {
+		if (text.includes(sym)) return true;
+	}
+	return false;
 }
 
 function escapeRegex(s: string): string {
