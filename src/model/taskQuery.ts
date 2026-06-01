@@ -212,8 +212,20 @@ function evaluateExpression(expression: Expression, record: TaskDocumentRecord):
 				: evaluateExpression(expression.left, record) || evaluateExpression(expression.right, record);
 		case "not":
 			return !evaluateExpression(expression.expression, record);
-		case "comparison":
-			return evaluateComparison(getFieldValue(record, expression.field), expression.operator, expression.value);
+		case "comparison": {
+			const fieldValue = getFieldValue(record, expression.field);
+			if (expression.field === "person" && fieldValue !== null && typeof fieldValue === "string" && fieldValue.includes("&")) {
+				const persons = fieldValue.split("&").map((p) => p.trim());
+				const target = expression.value === null ? "" : String(expression.value).trim();
+				if (expression.operator === "=") {
+					return persons.includes(target);
+				}
+				if (expression.operator === "!=") {
+					return !persons.includes(target);
+				}
+			}
+			return evaluateComparison(fieldValue, expression.operator, expression.value);
+		}
 	}
 }
 

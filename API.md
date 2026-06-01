@@ -174,6 +174,7 @@ AND / OR / NOT / 括号
 - `=~` 执行字符串包含匹配。
 - `contains` 执行字符串包含匹配，适合 `tags`、`description` 等字段。
 - 缺失日期字段按 `null` 处理，因此 `due <= date(today)` 不会匹配没有截止日期的任务。
+- `person` 字段支持使用 `&` 作为分隔符标记多位负责人（如 `👤 Alice & Bob`）。在过滤时，`person = "Alice"` 或 `person = "Bob"` 都能精准匹配到该任务，而 `person != "Alice"` 则会在包含 "Alice" 时返回不匹配。
 
 ---
 

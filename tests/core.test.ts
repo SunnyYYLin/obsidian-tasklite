@@ -1530,6 +1530,49 @@ describe("TaskLite core", () => {
 			expect(listed.map((record) => record.task.description)).toEqual(["Ship dashboard #work"]);
 			expect(filtered.map((record) => record.task.description)).toEqual(["Child task"]);
 		});
+
+		test("supports multi-person assignment query using &", () => {
+			const records = [
+				createQueryRecord({
+					path: "Work/tasks.md",
+					lineNumber: 0,
+					parentLine: null,
+					description: "Task A",
+					status: "TODO",
+					person: "Alice & Bob",
+				}),
+				createQueryRecord({
+					path: "Work/tasks.md",
+					lineNumber: 1,
+					parentLine: null,
+					description: "Task B",
+					status: "TODO",
+					person: "Alice",
+				}),
+				createQueryRecord({
+					path: "Work/tasks.md",
+					lineNumber: 2,
+					parentLine: null,
+					description: "Task C",
+					status: "TODO",
+					person: "Charlie",
+				}),
+			];
+
+			expect(filterTaskRecordsByQuery(records, 'person = "Alice"').map((record) => record.task.description)).toEqual([
+				"Task A",
+				"Task B",
+			]);
+			expect(filterTaskRecordsByQuery(records, 'person = "Bob"').map((record) => record.task.description)).toEqual([
+				"Task A",
+			]);
+			expect(filterTaskRecordsByQuery(records, 'person = "Charlie"').map((record) => record.task.description)).toEqual([
+				"Task C",
+			]);
+			expect(filterTaskRecordsByQuery(records, 'person != "Alice"').map((record) => record.task.description)).toEqual([
+				"Task C",
+			]);
+		});
 	});
 });
 
