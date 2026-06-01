@@ -1,10 +1,7 @@
 import type { App, CachedMetadata, TFile } from "obsidian";
 import {
-	cancelTaskAtLine,
-	finishTaskAtLine,
+	changeTaskStatusAtLine,
 	toggleTaskAtLine,
-	uncancelTaskAtLine,
-	unfinishTaskAtLine,
 	getIndentPrefix,
 	type ToggleResult,
 } from "../editor/toggle";
@@ -48,7 +45,6 @@ export interface CreateTaskInput {
 export type EditTaskPatch = {
 	description?: string;
 	priority?: TaskPriority | null;
-	statusSymbol?: string;
 	dates?: {
 		start?: string | null;
 		scheduled?: string | null;
@@ -67,10 +63,13 @@ export interface TaskLiteCoreApi {
 	 * These are distinct from line tasks and are NOT included in `listTasks`.
 	 */
 	listFrontmatterTasks(): Promise<TaskLiteTaskRecord[]>;
-	finishTask(path: string, lineNumber: number): Promise<boolean>;
-	unfinishTask(path: string, lineNumber: number): Promise<boolean>;
-	cancelTask(path: string, lineNumber: number): Promise<boolean>;
-	uncancelTask(path: string, lineNumber: number): Promise<boolean>;
+	/**
+	 * Transition the status of the task at `lineNumber` in `path` to the target status symbol.
+	 * This triggers appropriate tree cascades (e.g. finishing subtasks when set to DONE,
+	 * unfinishing parents when set to TODO) and recurrence rules.
+	 * Returns `true` if the task was found and updated, `false` otherwise.
+	 */
+	updateTaskStatus(path: string, lineNumber: number, statusSymbol: string): Promise<boolean>;
 	createTask(input: CreateTaskInput): Promise<void>;
 	/**
 	 * Delete the task at `lineNumber` and its entire subtree from the file at `path`.
@@ -92,8 +91,7 @@ export interface TaskLiteCoreApi {
 	 *
 	 * When **no editor is open** for the given `path`, only the single supplied `line` is
 	 * toggled — **cascade and parent-propagation are NOT applied**. If you need full cascade
-	 * without an open editor, use the async `finishTask` / `cancelTask` / `unfinishTask` /
-	 * `uncancelTask` methods instead.
+	 * without an open editor, use the async `updateTaskStatus` method instead.
 	 */
 	executeTasksToggleCommand(line: string, path: string): string;
 }
@@ -109,10 +107,15 @@ export function createTaskLiteCoreApi({app, registry, getSettings, documentStore
 	return {
 		listTasks: (options) => listTasks({app, registry, documentStore, options}),
 		listFrontmatterTasks: () => listFrontmatterTasks({app, registry, documentStore}),
-		finishTask: (path, lineNumber) => updateFileTask({app, path, lineNumber, registry, settings: getSettings(), documentStore, mutate: finishTaskAtLine}),
-		unfinishTask: (path, lineNumber) => updateFileTask({app, path, lineNumber, registry, settings: getSettings(), documentStore, mutate: unfinishTaskAtLine}),
-		cancelTask: (path, lineNumber) => updateFileTask({app, path, lineNumber, registry, settings: getSettings(), documentStore, mutate: cancelTaskAtLine}),
-		uncancelTask: (path, lineNumber) => updateFileTask({app, path, lineNumber, registry, settings: getSettings(), documentStore, mutate: uncancelTaskAtLine}),
+		updateTaskStatus: (path, lineNumber, statusSymbol) => updateFileTask({
+			app,
+			path,
+			lineNumber,
+			registry,
+			settings: getSettings(),
+			documentStore,
+			mutate: (input) => changeTaskStatusAtLine({ ...input, targetStatusSymbol: statusSymbol }),
+		}),
 		createTask: (input) => createTask({app, input, registry, settings: getSettings(), documentStore}),
 		deleteTask: (path, lineNumber) => deleteFileTask({app, path, lineNumber, registry, documentStore}),
 		editTask: (path, lineNumber, patch) => editFileTask({app, path, lineNumber, registry, documentStore, patch}),
@@ -320,11 +323,6 @@ async function editFileTask({
 		if (d.start !== undefined) data.dates.start = d.start;
 		if (d.scheduled !== undefined) data.dates.scheduled = d.scheduled;
 		if (d.due !== undefined) data.dates.due = d.due;
-	}
-
-	if (patch.statusSymbol !== undefined) {
-		const statusConfig = registry.get(patch.statusSymbol);
-		data.status = statusConfig.type;
 	}
 
 	const updatedTask: TaskLine = {...node.task, data};

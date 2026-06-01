@@ -16,9 +16,8 @@
    - [createTask](#23-createtask)
    - [deleteTask](#24-deletetask)
    - [editTask](#25-edittask)
-   - [finishTask / unfinishTask](#26-finishtask--unfinishtask)
-   - [cancelTask / uncancelTask](#27-canceltask--uncanceltask)
-   - [executeTasksToggleCommand](#28-executetaskstogglecommand)
+   - [updateTaskStatus](#26-updatetaskstatus)
+   - [executeTasksToggleCommand](#27-executetaskstogglecommand)
 3. [数据结构参考](#3-数据结构参考)
    - [TaskLiteTaskRecord](#tasklitetaskrecord)
    - [TaskData](#taskdata)
@@ -96,10 +95,7 @@ interface TaskLiteCoreApi {
   createTask(input: CreateTaskInput): Promise<void>;
   deleteTask(path: string, lineNumber: number): Promise<boolean>;
   editTask(path: string, lineNumber: number, patch: EditTaskPatch): Promise<boolean>;
-  finishTask(path: string, lineNumber: number): Promise<boolean>;
-  unfinishTask(path: string, lineNumber: number): Promise<boolean>;
-  cancelTask(path: string, lineNumber: number): Promise<boolean>;
-  uncancelTask(path: string, lineNumber: number): Promise<boolean>;
+  updateTaskStatus(path: string, lineNumber: number, statusSymbol: string): Promise<boolean>;
   executeTasksToggleCommand(line: string, path: string): string;
 }
 ```
@@ -239,7 +235,7 @@ if (target) {
 
 ---
 
-### 2.4 `editTask`
+### 2.5 `editTask`
 
 **原子地**修改任务的 metadata 字段。只有 `patch` 中显式传入的字段才会被更新，未提及的字段保持不变。
 
@@ -264,8 +260,8 @@ type EditTaskPatch = {
 **返回**：`true` 表示找到并修改成功；`false` 表示文件不存在或该行没有任务。
 
 **关键约定：**
-- `editTask` **不接受 `status` 字段**。状态变更请使用专用的 `finishTask` / `cancelTask` 等方法，它们会处理级联逻辑（子任务、父任务传播、重复任务等）。
-- `editTask` **不接受状态事件日期**（`created`、`done`、`cancelled`）。这些日期由状态变更事件自动产生：`created` 随任务创建，`done` 由 `finishTask`/`unfinishTask` 管理，`cancelled` 由 `cancelTask`/`uncancelTask` 管理。只接受"规划类"日期（`start`、`scheduled`、`due`）。
+- `editTask` **不接受 `status` 或 `statusSymbol` 字段**。状态变更请使用专用的 `updateTaskStatus` 方法，它会正确处理级联逻辑（子任务、父任务传播、重复任务等）。
+- `editTask` **不接受状态事件日期**（`created`、`done`、`cancelled`）。这些日期由状态变更事件自动产生：`created` 随任务创建，`done` 和 `cancelled` 由 `updateTaskStatus` 自动维护。只接受"规划类"日期（`start`、`scheduled`、`due`）。
 - `patch.dates` 中的每个子字段均独立处理：传 `undefined` = 不变，传 `null` = 清除该日期，传字符串 = 设置新值。
 - 此操作**不触发任何级联逻辑**，只做字段级别的原子修改。
 
@@ -301,26 +297,32 @@ await api.editTask("Work/Tasks.md", 3, {
 
 ---
 
-### 2.5 `finishTask` / `unfinishTask`
+### 2.6 `updateTaskStatus`
 
-将任务标记为完成，或从完成状态恢复。这是有业务语义的操作，会按用户设置触发级联。
+将任务状态更改为指定的复选框符号字符，触发相应的级联流转逻辑与循环逻辑。
 
 ```typescript
-finishTask(path: string, lineNumber: number): Promise<boolean>
-unfinishTask(path: string, lineNumber: number): Promise<boolean>
+updateTaskStatus(path: string, lineNumber: number, statusSymbol: string): Promise<boolean>
 ```
 
-**`finishTask` 的行为（受用户设置影响）：**
-- 将任务状态改为 `DONE`（symbol `x`）。
-- 若设置了 `setDoneDate: true`，自动填写当天日期到 `✅` 字段。
-- 若 `cascadeFinish: true`，递归地将所有子任务也标记为完成。
-- 若 `parentOnFinish: true`，当所有兄弟子任务都完成后，自动将父任务也标记为完成。
-- 若任务有重复规则（`🔁`），自动在原任务上方生成下一个周期的新任务。
-
-**`unfinishTask` 的行为：**
-- 将任务状态恢复为 `TODO`（symbol ` `），同时清除完成日期。
-- 若 `cascadeUnfinish: true`，递归恢复所有子任务。
-- 若 `parentOnUnfinish: true`，将父任务也恢复为未完成。
+**不同状态符号的行为（受用户设置影响）：**
+* **`"x"` (完成状态)**:
+  - 将任务状态改为 `DONE`。
+  - 若设置了 `setDoneDate: true`，自动填写当天日期到 `✅` 字段。
+  - 若 `cascadeFinish: true`，递归地将所有子任务也标记为完成。
+  - 若 `parentOnFinish: true`，当所有兄弟子任务都完成后，自动将父任务也标记为完成。
+  - 若任务有重复规则（`🔁`），自动生成下一个周期的新任务。
+* **`"-"` (取消状态)**:
+  - 将任务状态改为 `CANCELLED`。
+  - 若 `setCancelledDate: true`，自动填写 `❌` 取消日期。
+  - 若 `cascadeCancel: true`，递归取消所有子任务。
+  - 若 `parentOnCancel: true`，当所有非取消子任务都完成后，父任务自动完成。
+* **`" "` (未完成/待办状态)**:
+  - 清除任务的完成或取消日期。
+  - 如果原状态是完成，触发未完成级联逻辑（若 `cascadeUnfinish: true` 递归恢复子任务；若 `parentOnUnfinish: true` 递归恢复父任务）。
+  - 如果原状态是取消，触发恢复级联逻辑（若 `cascadeUncancel: true` 递归恢复子任务）。
+* **`"/"` (进行中) 或其他字符**:
+  - 精准修改该行的状态字符，不触发任何级联逻辑。
 
 **返回**：`true` = 操作成功；`false` = 任务未找到或无需变更。
 
@@ -329,42 +331,14 @@ unfinishTask(path: string, lineNumber: number): Promise<boolean>
 ```typescript
 const record = (await api.listTasks())[0];
 
-// 完成任务（触发完整业务逻辑）
-await api.finishTask(record.path, record.lineNumber);
+// 标记为完成（触发级联与循环逻辑）
+await api.updateTaskStatus(record.path, record.lineNumber, "x");
 
-// 恢复为待办
-await api.unfinishTask(record.path, record.lineNumber);
-```
+// 标记为进行中（仅更新本行复选框符号）
+await api.updateTaskStatus(record.path, record.lineNumber, "/");
 
----
-
-### 2.6 `cancelTask` / `uncancelTask`
-
-将任务标记为取消，或从取消状态恢复。
-
-```typescript
-cancelTask(path: string, lineNumber: number): Promise<boolean>
-uncancelTask(path: string, lineNumber: number): Promise<boolean>
-```
-
-**`cancelTask` 的行为（受用户设置影响）：**
-- 将任务状态改为 `CANCELLED`（symbol `-`）。
-- 若 `setCancelledDate: true`，自动填写 `❌` 取消日期。
-- 若 `cascadeCancel: true`，递归取消所有子任务。
-- 若 `parentOnCancel: true`，当所有非取消子任务都完成后，父任务自动完成。
-
-**`uncancelTask` 的行为：**
-- 将已取消任务恢复为 `TODO`。
-- 若 `cascadeUncancel: true`，递归恢复所有已取消子任务。
-
-**示例：**
-
-```typescript
-// 取消一个任务及其子树
-await api.cancelTask("Work/Tasks.md", 10);
-
-// 重新激活
-await api.uncancelTask("Work/Tasks.md", 10);
+// 恢复为待办（触发恢复或恢复待办级联逻辑）
+await api.updateTaskStatus(record.path, record.lineNumber, " ");
 ```
 
 ---
@@ -391,7 +365,7 @@ const toggled = api.executeTasksToggleCommand(original, "Work/Tasks.md");
 // 返回：已完成行 + 新的重复任务行
 ```
 
-> 这个方法主要用于**兼容 Tasks 插件的 Dataview 渲染场景**。如果你只是想操作 Vault 文件中的任务，请优先使用 `finishTask` / `cancelTask` 等方法。
+> 这个方法主要用于**兼容 Tasks 插件的 Dataview 渲染场景**。如果你只是想操作 Vault 文件中的任务，请优先使用 `updateTaskStatus` 方法。
 
 ---
 
@@ -546,10 +520,10 @@ async function findByTaskId(api: TaskLiteCoreApi, taskId: string) {
 // ❌ 错误：editTask 不能改状态
 await api.editTask(path, line, { status: "x" }); // 类型错误
 
-// ✅ 正确：使用专用方法
-await api.finishTask(path, line);   // 完成（含级联）
-await api.cancelTask(path, line);   // 取消（含级联）
-await api.unfinishTask(path, line); // 恢复（含级联）
+// ✅ 正确：使用专用状态转换方法
+await api.updateTaskStatus(path, line, "x"); // 完成（含级联）
+await api.updateTaskStatus(path, line, "-"); // 取消（含级联）
+await api.updateTaskStatus(path, line, " "); // 恢复（含级联）
 ```
 
 ### 4.3 删除操作的不可逆性
@@ -573,12 +547,12 @@ TaskLite 的每个 API 调用都会读取文件、修改内存、写回文件。
 ```typescript
 // ❌ 危险：并发修改同一文件
 await Promise.all([
-  api.finishTask("Tasks.md", 3),
+  api.updateTaskStatus("Tasks.md", 3, "x"),
   api.editTask("Tasks.md", 5, { dates: { due: "2026-06-01" } }),
 ]);
 
 // ✅ 安全：顺序执行
-await api.finishTask("Tasks.md", 3);
+await api.updateTaskStatus("Tasks.md", 3, "x");
 await api.editTask("Tasks.md", 5, { dates: { due: "2026-06-01" } });
 ```
 
@@ -637,9 +611,9 @@ class TaskBoardView extends ItemView {
       const card = col.createDiv({ cls: "task-card" });
       card.createEl("p", { text: r.task.metadata.description });
 
-      const btn = card.createEl("button", { text: "完成" });
+       const btn = card.createEl("button", { text: "完成" });
       btn.addEventListener("click", async () => {
-        await api.finishTask(r.path, r.lineNumber);
+        await api.updateTaskStatus(r.path, r.lineNumber, "x");
         card.remove(); // 乐观 UI 更新
       });
     }
@@ -740,9 +714,10 @@ async function archiveCompletedTasks(app: App, api: TaskLiteCoreApi) {
 
 | 版本 | 新增 API |
 |------|---------|
+| 0.4.1-alpha.4 | 状态管理重构：统一状态变更 API 接口为 `updateTaskStatus` 并支持传入状态符号（包含级联逻辑及循环功能），移除冗余的 `finishTask`/`unfinishTask`/`cancelTask`/`uncancelTask` 方法，且从 `editTask` 中去除了临时状态修改属性 |
 | 0.4.1-alpha.0 | 统一任务数据模型：合并行任务和文件级任务的数据结构与接口 (TaskData/TaskLiteTaskRecord)，移除了冗余的 metadata 嵌套与 FrontmatterTaskRecord 类型，frontmatter 任务的 depth 调整为 -1 |
 | 0.4.0-alpha.0 | `deleteTask`、`editTask`、`EditTaskPatch` |
-| 0.3.x | `listTasks`、`createTask`、`finishTask`、`unfinishTask`、`cancelTask`、`uncancelTask`、`executeTasksToggleCommand` |
+| 0.3.x | `listTasks`、`createTask`、`executeTasksToggleCommand` |
 
 ### 兼容性说明
 

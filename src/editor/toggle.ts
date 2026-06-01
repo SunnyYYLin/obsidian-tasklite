@@ -91,27 +91,66 @@ export function toggleTaskAtLine({
 
 	const symbol = registry.getByType(node.task.data.status).symbol;
 	const targetStatus = registry.next(registry.get(symbol));
-	if (targetStatus.type === "DONE") return finishTaskAtLine({lines, lineNumber, metadata, app, registry, settings});
-	if (targetStatus.type === "CANCELLED") return cancelTaskAtLine({lines, lineNumber, metadata, app, registry, settings});
-	if (node.task.data.status === "DONE") return unfinishTaskAtLine({lines, lineNumber, metadata, app, registry, settings});
-	if (node.task.data.status === "CANCELLED") return uncancelTaskAtLine({lines, lineNumber, metadata, app, registry, settings});
-	return updateSingleTaskStatusAtLine({lines, lineNumber, metadata, app, registry, settings, status: targetStatus});
+	return changeTaskStatusAtLine({
+		lines,
+		lineNumber,
+		metadata,
+		app,
+		registry,
+		settings,
+		targetStatusSymbol: targetStatus.symbol,
+	});
+}
+
+export function changeTaskStatusAtLine(
+	input: TaskStatusMutationInput & { targetStatusSymbol: string }
+): ToggleResult | null {
+	const tree = buildTaskTree(input.lines, input.metadata, input.registry);
+	const node = tree.byLine.get(input.lineNumber);
+	if (!node) return null;
+
+	if (!node.task) {
+		if (node.statusCharacter === null) return null;
+		const nextSymbol = input.targetStatusSymbol;
+		const replacement = node.original.replace(/\[(.)\]/u, `[${nextSymbol}]`);
+		return {fromLine: node.lineNumber, toLine: node.lineNumber, replacement: [replacement]};
+	}
+
+	const targetStatus = input.registry.get(input.targetStatusSymbol);
+	if (node.task.data.status === targetStatus.type && !needsMissingStatusDate(node.task.data, targetStatus)) {
+		return null;
+	}
+
+	if (targetStatus.type === "DONE") {
+		return applyTaskBehaviorAtLine({...input, behavior: "finish"});
+	}
+	if (targetStatus.type === "CANCELLED") {
+		return applyTaskBehaviorAtLine({...input, behavior: "cancel"});
+	}
+	if (targetStatus.type === "TODO") {
+		if (node.task.data.status === "CANCELLED") {
+			return applyTaskBehaviorAtLine({...input, behavior: "uncancel"});
+		}
+		return applyTaskBehaviorAtLine({...input, behavior: "unfinish"});
+	}
+
+	return updateSingleTaskStatusAtLine({...input, status: targetStatus});
 }
 
 export function finishTaskAtLine(input: TaskStatusMutationInput): ToggleResult | null {
-	return applyTaskBehaviorAtLine({...input, behavior: "finish"});
+	return changeTaskStatusAtLine({...input, targetStatusSymbol: "x"});
 }
 
 export function unfinishTaskAtLine(input: TaskStatusMutationInput): ToggleResult | null {
-	return applyTaskBehaviorAtLine({...input, behavior: "unfinish"});
+	return changeTaskStatusAtLine({...input, targetStatusSymbol: " "});
 }
 
 export function cancelTaskAtLine(input: TaskStatusMutationInput): ToggleResult | null {
-	return applyTaskBehaviorAtLine({...input, behavior: "cancel"});
+	return changeTaskStatusAtLine({...input, targetStatusSymbol: "-"});
 }
 
 export function uncancelTaskAtLine(input: TaskStatusMutationInput): ToggleResult | null {
-	return applyTaskBehaviorAtLine({...input, behavior: "uncancel"});
+	return changeTaskStatusAtLine({...input, targetStatusSymbol: " "});
 }
 
 export function clickTaskCheckboxAtLine(input: TaskStatusMutationInput): ToggleResult | null {

@@ -299,7 +299,7 @@ describe("TaskLite core", () => {
 		});
 
 		expect("toggleTask" in api).toBe(false);
-		expect(await api.finishTask("tasks.md", 2)).toBe(true);
+		expect(await api.updateTaskStatus("tasks.md", 2, "x")).toBe(true);
 		expect(content.split("\n")).toEqual([
 			expect.stringContaining(`- [x] Parent ${TASK_SYMBOLS.done} 2026-05-16`),
 			"  - [x] First child",
@@ -330,7 +330,7 @@ describe("TaskLite core", () => {
 			getSettings: () => settings,
 		});
 
-		expect(await api.cancelTask("tasks.md", 2)).toBe(true);
+		expect(await api.updateTaskStatus("tasks.md", 2, "-")).toBe(true);
 		expect(content.split("\n")).toEqual([
 			expect.stringContaining(`- [x] Parent ${TASK_SYMBOLS.done} 2026-05-16`),
 			"  - [x] First child",
@@ -366,7 +366,7 @@ describe("TaskLite core", () => {
 			getSettings: () => settings,
 		});
 
-		expect(await api.cancelTask("tasks.md", 0)).toBe(true);
+		expect(await api.updateTaskStatus("tasks.md", 0, "-")).toBe(true);
 		expect(content.split("\n")).toEqual([
 			`- [ ] Parent ${TASK_SYMBOLS.due} 2026-05-27 ${TASK_SYMBOLS.recurrence} every week`,
 			"  - [ ] Done child",
