@@ -73,40 +73,55 @@ export class TaskLiteSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName(t("settings.normalizeIndents.name"))
-			.setDesc(t("settings.normalizeIndents.desc"))
+			.setName(t("settings.normalizeIndentsAll.name"))
+			.setDesc(t("settings.normalizeIndentsAll.desc"))
 			.addButton((button) =>
 				button
-					.setButtonText(t("settings.normalizeIndents.button"))
+					.setButtonText(t("settings.normalizeIndentsAll.button"))
 					.setCta()
 					.onClick(async () => {
-						const activeFile = this.app.workspace.getActiveFile();
-						if (!activeFile) {
-							new Notice(t("notice.noActiveFile"));
-							return;
-						}
-						const content = await this.app.vault.read(activeFile);
-						const lines = content.length > 0 ? content.split("\n") : [];
+						const markdownFiles = this.app.vault.getMarkdownFiles();
+						let totalUpdatedFiles = 0;
+						let totalUpdatedLines = 0;
 
 						const vaultConfig = (this.app.vault as any).config || {};
 						const useTab = vaultConfig.useTab ?? true;
 						const tabSize = vaultConfig.tabSize ?? 4;
 
-						let changed = false;
-						const newLines = lines.map((line) => {
-							const newLine = normalizeLineIndentation(line, useTab, tabSize);
-							if (newLine !== line) {
-								changed = true;
-							}
-							return newLine;
-						});
+						new Notice(t("notice.normalizingIndentsAllStarted"));
 
-						if (changed) {
-							const newContent = newLines.join("\n");
-							await this.app.vault.modify(activeFile, newContent);
-							await this.plugin.documentStore.replaceDocumentContent(activeFile, newContent);
+						for (const file of markdownFiles) {
+							const metadata = this.app.metadataCache.getFileCache(file);
+							if (metadata?.frontmatter?.tasks === "ignore") continue;
+
+							const content = await this.app.vault.read(file);
+							const lines = content.length > 0 ? content.split("\n") : [];
+
+							let fileChanged = false;
+							let fileUpdatedLines = 0;
+							const newLines = lines.map((line) => {
+								const newLine = normalizeLineIndentation(line, useTab, tabSize);
+								if (newLine !== line) {
+									fileChanged = true;
+									fileUpdatedLines++;
+								}
+								return newLine;
+							});
+
+							if (fileChanged) {
+								const newContent = newLines.join("\n");
+								await this.app.vault.modify(file, newContent);
+								await this.plugin.documentStore.replaceDocumentContent(file, newContent);
+								totalUpdatedFiles++;
+								totalUpdatedLines += fileUpdatedLines;
+							}
 						}
-						new Notice(t("notice.normalizedIndents"));
+
+						new Notice(
+							t("notice.normalizedIndentsAllFinished")
+								.replace("{files}", totalUpdatedFiles.toString())
+								.replace("{lines}", totalUpdatedLines.toString()),
+						);
 					}),
 			);
 

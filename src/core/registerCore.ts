@@ -1,5 +1,6 @@
 import { MarkdownView, Notice, TFile, type Editor } from "obsidian";
 import type TaskLitePlugin from "../main";
+import { normalizeLineIndentation } from "../model/format";
 import { cancelEditorTask, toggleEditorTask, toggleEditorTaskCancellation, uncancelEditorTask } from "../editor/apply";
 import { ExternalTaskReconciler } from "../editor/externalReconcile";
 import { createLivePreviewExtension } from "../rendering/livePreview";
@@ -81,6 +82,44 @@ export function registerTaskLiteCore(plugin: TaskLitePlugin): void {
 				settings: plugin.settings,
 				documentStore: plugin.documentStore,
 			});
+		},
+	});
+
+	plugin.addCommand({
+		id: "normalize-indentation",
+		name: t("command.normalizeIndentation"),
+		checkCallback: (checking: boolean) => {
+			const activeFile = plugin.app.workspace.getActiveFile();
+			if (!activeFile) return false;
+			if (checking) return true;
+
+			(async () => {
+				const content = await plugin.app.vault.read(activeFile);
+				const lines = content.length > 0 ? content.split("\n") : [];
+
+				const vaultConfig = (plugin.app.vault as any).config || {};
+				const useTab = vaultConfig.useTab ?? true;
+				const tabSize = vaultConfig.tabSize ?? 4;
+
+				let changed = false;
+				const newLines = lines.map((line) => {
+					const newLine = normalizeLineIndentation(line, useTab, tabSize);
+					if (newLine !== line) {
+						changed = true;
+					}
+					return newLine;
+				});
+
+				if (changed) {
+					const newContent = newLines.join("\n");
+					await plugin.app.vault.modify(activeFile, newContent);
+					await plugin.documentStore.replaceDocumentContent(activeFile, newContent);
+				}
+				new Notice(t("notice.normalizedIndents"));
+			})().catch((err) => {
+				console.error(err);
+			});
+			return true;
 		},
 	});
 
