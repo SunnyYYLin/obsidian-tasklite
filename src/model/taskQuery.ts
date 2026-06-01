@@ -212,24 +212,25 @@ function evaluateExpression(expression: Expression, record: TaskDocumentRecord):
 				: evaluateExpression(expression.left, record) || evaluateExpression(expression.right, record);
 		case "not":
 			return !evaluateExpression(expression.expression, record);
-		case "comparison": {
-			const fieldValue = getFieldValue(record, expression.field);
-			if (expression.field === "person" && fieldValue !== null && typeof fieldValue === "string" && fieldValue.includes("&")) {
-				const persons = fieldValue.split("&").map((p) => p.trim());
-				const target = expression.value === null ? "" : String(expression.value).trim();
-				if (expression.operator === "=") {
-					return persons.includes(target);
-				}
-				if (expression.operator === "!=") {
-					return !persons.includes(target);
-				}
-			}
-			return evaluateComparison(fieldValue, expression.operator, expression.value);
-		}
+		case "comparison":
+			return evaluateComparison(getFieldValue(record, expression.field), expression.operator, expression.value);
 	}
 }
 
-function evaluateComparison(left: LiteralValue, operator: ComparisonOperator, right: LiteralValue): boolean {
+function evaluateComparison(left: LiteralValue | string[], operator: ComparisonOperator, right: LiteralValue): boolean {
+	if (Array.isArray(left)) {
+		const target = right === null ? "" : String(right).trim();
+		if (operator === "=") {
+			return left.includes(target);
+		}
+		if (operator === "!=") {
+			return !left.includes(target);
+		}
+		if (operator === "contains" || operator === "=~") {
+			return left.some((item) => item.includes(target));
+		}
+		return false;
+	}
 	if (operator === "contains") {
 		if (left === null || right === null) return false;
 		return String(left).includes(String(right));
@@ -262,7 +263,7 @@ function compareValues(left: LiteralValue, right: LiteralValue): number {
 	return String(left).localeCompare(String(right));
 }
 
-function getFieldValue(record: TaskDocumentRecord, field: string): LiteralValue {
+function getFieldValue(record: TaskDocumentRecord, field: string): LiteralValue | string[] {
 	switch (field) {
 		case "status":
 			return record.task.status;
@@ -277,7 +278,7 @@ function getFieldValue(record: TaskDocumentRecord, field: string): LiteralValue 
 		case "tags":
 			return record.task.tags.join(" ");
 		case "person":
-			return record.task.person ?? "";
+			return record.task.person;
 		case "hasChildren":
 			return record.hasChildren;
 		case "parentLine":

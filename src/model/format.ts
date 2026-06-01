@@ -45,7 +45,7 @@ export interface TaskData {
 	onCompletion: OnCompletionAction | null;
 	dependsOn: string | null;
 	id: string | null;
-	person: string | null;
+	person: string[];
 	blockLink: string | null;
 	tags: string[];
 }
@@ -92,7 +92,7 @@ export function parseTaskBody(body: string, status: StatusType): TaskData {
 		onCompletion: null,
 		dependsOn: null,
 		id: null,
-		person: null,
+		person: [],
 		blockLink,
 		tags: [],
 	};
@@ -113,7 +113,7 @@ export function parseTaskBody(body: string, status: StatusType): TaskData {
 		matched = extractString(data, "onCompletion", TASK_SYMBOLS.onCompletion, "delete|keep") || matched;
 		matched = extractString(data, "dependsOn", TASK_SYMBOLS.dependsOn, "[a-zA-Z0-9-_, ]+") || matched;
 		matched = extractString(data, "id", TASK_SYMBOLS.id, "[a-zA-Z0-9-_]+") || matched;
-		matched = extractString(data, "person", TASK_SYMBOLS.person, ".+") || matched;
+		matched = extractPerson(data) || matched;
 	}
 	data.description = data.description.replace(/ {2,}/gu, " ").trim();
 	data.tags = extractTags(data.description);
@@ -126,6 +126,17 @@ export function parseTaskBody(body: string, status: StatusType): TaskData {
 		if (!match) return false;
 		target.priority = (match[1] ?? null) as TaskPriority | null;
 		target.description = target.description.replace(regex, "").trim();
+		return true;
+	}
+
+	function extractPerson(target: TaskData): boolean {
+		const symbol = TASK_SYMBOLS.person;
+		const regex = new RegExp(`${escapeRegExp(symbol)}\\ufe0f? *(.+)`, "u");
+		const match = target.description.match(regex);
+		if (!match) return false;
+		const raw = (match[1] ?? "").trim();
+		target.person = raw ? raw.split("&").map((p) => p.trim()).filter(Boolean) : [];
+		target.description = target.description.replace(regex, "").replace(/ {2,}/gu, " ").trim();
 		return true;
 	}
 }
@@ -148,7 +159,7 @@ export function serializeTaskBody(data: TaskData): string {
 	if (data.onCompletion) parts.push(`${TASK_SYMBOLS.onCompletion} ${data.onCompletion}`);
 	if (data.dependsOn) parts.push(`${TASK_SYMBOLS.dependsOn} ${data.dependsOn}`);
 	if (data.id) parts.push(`${TASK_SYMBOLS.id} ${data.id}`);
-	if (data.person) parts.push(`${TASK_SYMBOLS.person} ${data.person}`);
+	if (data.person && data.person.length > 0) parts.push(`${TASK_SYMBOLS.person} ${data.person.join(" & ")}`);
 	if (data.blockLink) parts.push(data.blockLink);
 	return parts.filter(Boolean).join(" ");
 }
@@ -163,7 +174,7 @@ export function copyTaskData(data: TaskData): TaskData {
 		onCompletion: data.onCompletion ?? null,
 		dependsOn: data.dependsOn ?? null,
 		id: data.id ?? null,
-		person: data.person ?? null,
+		person: data.person ? [...data.person] : [],
 		blockLink: data.blockLink ?? null,
 		tags: data.tags ? [...data.tags] : [],
 	};
@@ -178,11 +189,10 @@ function extractDate(data: TaskData, key: keyof TaskDates, symbol: string): bool
 	return true;
 }
 
-function extractString<K extends "recurrence" | "onCompletion" | "dependsOn" | "id" | "person">(data: TaskData, key: K, symbol: string, valuePattern: string): boolean {
+function extractString<K extends "recurrence" | "onCompletion" | "dependsOn" | "id">(data: TaskData, key: K, symbol: string, valuePattern: string): boolean {
 	const regex = new RegExp(`${escapeRegExp(symbol)}\\ufe0f? *(${valuePattern})`, "u");
 	const match = data.description.match(regex);
 	if (!match) return false;
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	(data as unknown as Record<string, unknown>)[key] = (match[1] ?? "").trim();
 	data.description = data.description.replace(regex, "").replace(/ {2,}/gu, " ").trim();
 	return true;

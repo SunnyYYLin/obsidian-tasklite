@@ -458,7 +458,7 @@ interface TaskData {
   onCompletion: string | null;   // 🏁 完成行为（"delete" | "keep"）
   id: string | null;             // 🆔 任务 ID
   dependsOn: string | null;      // ⛔ 依赖 ID
-  person: string | null;         // 👤 负责人
+  person: string[];              // 👤 负责人
   blockLink: string | null;      // Obsidian 块引用，如 "^abc123"（仅行任务，文件任务为 null）
   tags: string[];                // 提取的标签列表，如 ["#work", "#urgent"]
 }

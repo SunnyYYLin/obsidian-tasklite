@@ -71,6 +71,14 @@ export function parseFrontmatterTask(
 			? rawOnCompletion
 			: null;
 
+	const rawPerson: unknown = (fm as Record<string, unknown>)["person"];
+	let person: string[] = [];
+	if (Array.isArray(rawPerson)) {
+		person = rawPerson.map(String).map((p) => p.trim()).filter(Boolean);
+	} else if (typeof rawPerson === "string") {
+		person = rawPerson.split("&").map((p) => p.trim()).filter(Boolean);
+	}
+
 	const task: TaskData = {
 		status: statusConfig.type,
 		description: typeof fm["description"] === "string" ? fm["description"] : file.basename,
@@ -87,7 +95,7 @@ export function parseFrontmatterTask(
 		onCompletion,
 		id: typeof fm["id"] === "string" ? fm["id"] : null,
 		dependsOn: typeof fm["dependsOn"] === "string" ? fm["dependsOn"] : null,
-		person: typeof fm["person"] === "string" ? fm["person"] : null,
+		person,
 		blockLink: null,
 		tags: Array.isArray(fm["tags"]) ? fm["tags"].map(String) : [],
 	};

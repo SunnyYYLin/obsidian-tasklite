@@ -208,7 +208,7 @@ async function createTask({
 			onCompletion: input.onCompletion ?? null,
 			dependsOn: input.dependsOn ?? null,
 			id: input.id ?? null,
-			person: null,
+			person: [],
 			blockLink: null,
 			tags: [],
 		},

@@ -1653,7 +1653,7 @@ function createQueryRecord(input: {
 	due?: string | null;
 	scheduled?: string | null;
 	tags?: string[];
-	person?: string | null;
+	person?: string | string[] | null;
 }): TaskDocumentRecord {
 	return {
 		path: input.path,
@@ -1678,7 +1678,9 @@ function createQueryRecord(input: {
 			onCompletion: null,
 			dependsOn: null,
 			id: null,
-			person: input.person ?? null,
+			person: typeof input.person === "string"
+				? input.person.split("&").map((p) => p.trim()).filter(Boolean)
+				: (Array.isArray(input.person) ? input.person : []),
 			blockLink: null,
 			tags: input.tags ?? [],
 		},
