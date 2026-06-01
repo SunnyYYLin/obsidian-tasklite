@@ -12,8 +12,9 @@
 1. [接入方式](#1-接入方式)
 2. [核心 API — `TaskLiteCoreApi`](#2-核心-api--tasklitecoreapi)
    - [listTasks](#21-listtasks)
-   - [listFrontmatterTasks](#22-listfrontmattertasks)
-   - [createTask](#23-createtask)
+   - [filterTasks](#22-filtertasks)
+   - [listFrontmatterTasks](#23-listfrontmattertasks)
+   - [createTask](#24-createtask)
    - [deleteTask](#24-deletetask)
    - [editTask](#25-edittask)
    - [updateTaskStatus](#26-updatetaskstatus)
@@ -91,6 +92,7 @@ export default class MyPlugin extends Plugin {
 ```typescript
 interface TaskLiteCoreApi {
   listTasks(options?: ListTasksOptions): Promise<TaskLiteTaskRecord[]>;
+  filterTasks(records: TaskLiteTaskRecord[], query: string): TaskLiteTaskRecord[];
   listFrontmatterTasks(): Promise<TaskLiteTaskRecord[]>;
   createTask(input: CreateTaskInput): Promise<void>;
   deleteTask(path: string, lineNumber: number): Promise<boolean>;
@@ -113,6 +115,7 @@ interface ListTasksOptions {
   includeCompleted?: boolean;  // 是否包含已完成 (DONE) 的任务，默认 false
   includeCancelled?: boolean;  // 是否包含已取消 (CANCELLED) 的任务，默认 false
   includeChildren?: boolean;   // 是否包含子任务，默认 false
+  query?: string;              // DQL-like 查询字符串，在 include* 选项之后应用
 }
 ```
 
@@ -142,7 +145,39 @@ const dueTodayOrBefore = todos.filter(
 
 ---
 
-### 2.2 `createTask`
+### 2.2 `filterTasks`
+
+对已获取的任务列表执行 DQL-like 过滤。适合外部插件已经拿到 `listTasks()` 结果后继续筛选，避免重复扫描 Vault。
+
+```typescript
+filterTasks(records: TaskLiteTaskRecord[], query: string): TaskLiteTaskRecord[]
+```
+
+支持的常用表达式：
+
+```typescript
+status = "TODO"
+due <= date(today)
+scheduled <= date(today)
+priority = ""
+path =~ "Work/"
+tags contains "#work"
+person = "Alice"
+hasChildren = true
+parentLine = null
+description contains "xxx"
+AND / OR / NOT / 括号
+```
+
+**说明**：
+- `date(today)` 按当前日期求值，返回 `YYYY-MM-DD`。
+- `=~` 执行字符串包含匹配。
+- `contains` 执行字符串包含匹配，适合 `tags`、`description` 等字段。
+- 缺失日期字段按 `null` 处理，因此 `due <= date(today)` 不会匹配没有截止日期的任务。
+
+---
+
+### 2.4 `createTask`
 
 在指定文件末尾（或指定父任务下方）插入一个新任务行。
 
@@ -714,6 +749,7 @@ async function archiveCompletedTasks(app: App, api: TaskLiteCoreApi) {
 
 | 版本 | 新增 API |
 |------|---------|
+| 0.4.2-alpha.0 | 新增 DQL-like 查询过滤：`listTasks({ query })` 和 `filterTasks(records, query)`，支持常用字段比较、`contains`、`=~`、`AND`/`OR`/`NOT` 与括号 |
 | 0.4.1-alpha.4 | 状态管理重构：统一状态变更 API 接口为 `updateTaskStatus` 并支持传入状态符号（包含级联逻辑及循环功能），移除冗余的 `finishTask`/`unfinishTask`/`cancelTask`/`uncancelTask` 方法，且从 `editTask` 中去除了临时状态修改属性 |
 | 0.4.1-alpha.0 | 统一任务数据模型：合并行任务和文件级任务的数据结构与接口 (TaskData/TaskLiteTaskRecord)，移除了冗余的 metadata 嵌套与 FrontmatterTaskRecord 类型，frontmatter 任务的 depth 调整为 -1 |
 | 0.4.0-alpha.0 | `deleteTask`、`editTask`、`EditTaskPatch` |

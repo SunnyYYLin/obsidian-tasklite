@@ -12,6 +12,7 @@ import { applyTaskStatus } from "../model/taskState";
 import { buildTaskTree, getSubtreeNodes, taskDepth } from "../model/tree";
 import type { TaskDocumentStore, TaskDocumentRecord } from "../model/taskDocumentStore";
 import { parseFrontmatterTask } from "../model/frontmatterTask";
+import { filterTaskRecordsByQuery } from "../model/taskQuery";
 import type { StatusRegistry } from "../model/status";
 import type { TaskLiteSettings } from "../settings";
 
@@ -22,6 +23,7 @@ export interface ListTasksOptions {
 	includeCompleted?: boolean;
 	includeCancelled?: boolean;
 	includeChildren?: boolean;
+	query?: string;
 }
 
 export interface CreateTaskInput {
@@ -58,6 +60,7 @@ export type EditTaskPatch = {
 
 export interface TaskLiteCoreApi {
 	listTasks(options?: ListTasksOptions): Promise<TaskLiteTaskRecord[]>;
+	filterTasks(records: TaskLiteTaskRecord[], query: string): TaskLiteTaskRecord[];
 	/**
 	 * Return all file-level tasks (encoded in YAML frontmatter with `task: true`).
 	 * These are distinct from line tasks and are NOT included in `listTasks`.
@@ -106,6 +109,7 @@ interface TaskLiteCoreApiOptions {
 export function createTaskLiteCoreApi({app, registry, getSettings, documentStore}: TaskLiteCoreApiOptions): TaskLiteCoreApi {
 	return {
 		listTasks: (options) => listTasks({app, registry, documentStore, options}),
+		filterTasks: (records, query) => filterTaskRecordsByQuery(records, query),
 		listFrontmatterTasks: () => listFrontmatterTasks({app, registry, documentStore}),
 		updateTaskStatus: (path, lineNumber, statusSymbol) => updateFileTask({
 			app,
@@ -381,12 +385,13 @@ async function updateFileTask({
 }
 
 function filterTaskRecords(records: TaskLiteTaskRecord[], options: ListTasksOptions): TaskLiteTaskRecord[] {
-	return records.filter((record) => {
+	const filtered = records.filter((record) => {
 		if (!options.includeChildren && record.parentLine !== null) return false;
 		if (!options.includeCompleted && record.task.status === "DONE") return false;
 		if (!options.includeCancelled && record.task.status === "CANCELLED") return false;
 		return true;
 	});
+	return options.query ? filterTaskRecordsByQuery(filtered, options.query) : filtered;
 }
 
 function executeSingleLineApiToggle(line: string, app: App, registry: StatusRegistry, settings: TaskLiteSettings): string {

@@ -3,7 +3,8 @@ import { parseTaskLine, TASK_SYMBOLS } from "../src/model/format";
 import { StatusRegistry } from "../src/model/status";
 import { buildTaskTree } from "../src/model/tree";
 import { taskIdentityKey } from "../src/model/taskIdentity";
-import { TaskDocumentStore } from "../src/model/taskDocumentStore";
+import { TaskDocumentStore, type TaskDocumentRecord } from "../src/model/taskDocumentStore";
+import { filterTaskRecordsByQuery } from "../src/model/taskQuery";
 import { cancelTaskAtLine, clickTaskCheckboxAtLine, rightClickTaskCheckboxAtLine, toggleTaskAtLine, unfinishTaskAtLine } from "../src/editor/toggle";
 import { reconcileExternalTaskCompletion } from "../src/editor/externalReconcileCore";
 import { createTaskLiteCoreApi } from "../src/api/taskLiteCoreApi";
@@ -1449,6 +1450,87 @@ describe("TaskLite core", () => {
 			expect(taskIdentityKey(task1!.data)).toBe(taskIdentityKey(task2!.data));
 		});
 	});
+
+	describe("task query filters", () => {
+		test("filters common DQL-like task fields", () => {
+			const records = createQueryRecords();
+
+			expect(filterTaskRecordsByQuery(records, 'status = "TODO"').map((record) => record.task.description)).toEqual([
+				"Ship dashboard",
+				"Backlog item",
+			]);
+			expect(filterTaskRecordsByQuery(records, "due <= date(today)").map((record) => record.task.description)).toEqual([
+				"Ship dashboard",
+			]);
+			expect(filterTaskRecordsByQuery(records, "scheduled <= date(today)").map((record) => record.task.description)).toEqual([
+				"Ship dashboard",
+			]);
+			expect(filterTaskRecordsByQuery(records, 'priority = ""').map((record) => record.task.description)).toEqual([
+				"Backlog item",
+			]);
+			expect(filterTaskRecordsByQuery(records, 'path =~ "Work/"').map((record) => record.task.description)).toEqual([
+				"Ship dashboard",
+				"Backlog item",
+				"Done report",
+			]);
+			expect(filterTaskRecordsByQuery(records, 'tags contains "#work"').map((record) => record.task.description)).toEqual([
+				"Ship dashboard",
+			]);
+			expect(filterTaskRecordsByQuery(records, 'person = "Alice"').map((record) => record.task.description)).toEqual([
+				"Ship dashboard",
+			]);
+			expect(filterTaskRecordsByQuery(records, "hasChildren = true").map((record) => record.task.description)).toEqual([
+				"Ship dashboard",
+			]);
+			expect(filterTaskRecordsByQuery(records, "parentLine = null").map((record) => record.task.description)).toEqual([
+				"Ship dashboard",
+				"Done report",
+			]);
+			expect(filterTaskRecordsByQuery(records, 'description contains "Backlog"').map((record) => record.task.description)).toEqual([
+				"Backlog item",
+			]);
+		});
+
+		test("supports AND OR NOT and parentheses", () => {
+			const records = createQueryRecords();
+			const result = filterTaskRecordsByQuery(
+				records,
+				'(status = "TODO" AND path =~ "Work/") OR (NOT hasChildren = true AND tags contains "#later")',
+			);
+
+			expect(result.map((record) => record.task.description)).toEqual([
+				"Ship dashboard",
+				"Backlog item",
+			]);
+		});
+
+		test("filters through the core API", async () => {
+			const api = createTestCoreApi({
+				vault: {
+					getMarkdownFiles: () => [createTestFile("Work/tasks.md", "tasks")],
+					cachedRead: () => [
+						`- [ ] Ship dashboard ${TASK_SYMBOLS.due} 2026-05-16 #work`,
+						"  - [ ] Child task",
+						"- [x] Done report",
+					].join("\n"),
+				},
+				metadataCache: {
+					getFileCache: () => null,
+				},
+			});
+
+			const listed = await api.listTasks({
+				includeChildren: true,
+				includeCompleted: true,
+				query: 'status = "TODO" AND tags contains "#work"',
+			});
+			const all = await api.listTasks({includeChildren: true, includeCompleted: true});
+			const filtered = api.filterTasks(all, 'description contains "Child"');
+
+			expect(listed.map((record) => record.task.description)).toEqual(["Ship dashboard #work"]);
+			expect(filtered.map((record) => record.task.description)).toEqual(["Child task"]);
+		});
+	});
 });
 
 function createTestCoreApi(app: Record<string, unknown> = {}) {
@@ -1474,6 +1556,90 @@ function createTestPlugin(app: Record<string, unknown> = {}) {
 
 function createTestFile(path: string, basename: string) {
 	return {path, basename, extension: "md"};
+}
+
+function createQueryRecords(): TaskDocumentRecord[] {
+	return [
+		createQueryRecord({
+			path: "Work/tasks.md",
+			lineNumber: 0,
+			parentLine: null,
+			hasChildren: true,
+			description: "Ship dashboard",
+			status: "TODO",
+			priority: "🔺",
+			due: "2026-05-16",
+			scheduled: "2026-05-15",
+			tags: ["#work"],
+			person: "Alice",
+		}),
+		createQueryRecord({
+			path: "Work/tasks.md",
+			lineNumber: 1,
+			parentLine: 0,
+			depth: 1,
+			description: "Backlog item",
+			status: "TODO",
+			due: "2026-05-20",
+			scheduled: "2026-05-20",
+			tags: ["#later"],
+		}),
+		createQueryRecord({
+			path: "Work/done.md",
+			lineNumber: 0,
+			parentLine: null,
+			description: "Done report",
+			status: "DONE",
+			priority: "🔼",
+			due: "2026-05-20",
+			tags: ["#archive"],
+			person: "Bob",
+		}),
+	];
+}
+
+function createQueryRecord(input: {
+	path: string;
+	lineNumber: number;
+	parentLine: number | null;
+	depth?: number;
+	hasChildren?: boolean;
+	description: string;
+	status: "TODO" | "DONE" | "IN_PROGRESS" | "ON_HOLD" | "CANCELLED" | "NON_TASK" | "EMPTY";
+	priority?: "🔺" | "⏫" | "🔼" | "🔽" | "⏬" | null;
+	due?: string | null;
+	scheduled?: string | null;
+	tags?: string[];
+	person?: string | null;
+}): TaskDocumentRecord {
+	return {
+		path: input.path,
+		basename: input.path.split("/").pop()?.replace(/\.md$/u, "") ?? input.path,
+		lineNumber: input.lineNumber,
+		parentLine: input.parentLine,
+		depth: input.depth ?? 0,
+		hasChildren: input.hasChildren ?? false,
+		task: {
+			status: input.status,
+			description: input.description,
+			priority: input.priority ?? null,
+			dates: {
+				start: null,
+				created: null,
+				scheduled: input.scheduled ?? null,
+				due: input.due ?? null,
+				done: null,
+				cancelled: null,
+			},
+			recurrence: null,
+			onCompletion: null,
+			dependsOn: null,
+			id: null,
+			person: input.person ?? null,
+			blockLink: null,
+			tags: input.tags ?? [],
+		},
+	};
 }
 
 function expectSameLineMetadataIsIgnored(lastLine: string, description: string): void {
