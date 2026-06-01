@@ -18,21 +18,20 @@ interface DateSuggestion {
 	entry: DateSuggestionEntry;
 }
 
-type Suggestion = EmojiSuggestion | DateSuggestion;
+interface RecurrenceSuggestion {
+	kind: "recurrence";
+	label: string;
+	insert: string;
+}
+
+type Suggestion = EmojiSuggestion | DateSuggestion | RecurrenceSuggestion;
 
 const EMOJI_SUGGESTIONS: EmojiSuggestion[] = [
 	{kind: "emoji", label: "Due date / 截止日期", insert: `${TASK_SYMBOLS.due} `},
 	{kind: "emoji", label: "Scheduled / 计划日期", insert: `${TASK_SYMBOLS.scheduled} `},
 	{kind: "emoji", label: "Start / 开始日期", insert: `${TASK_SYMBOLS.start} `},
 	{kind: "emoji", label: "Created / 创建日期", insert: `${TASK_SYMBOLS.created} `},
-	{kind: "emoji", label: "Recurring / 循环", insert: `${TASK_SYMBOLS.recurrence} every `},
-	{kind: "emoji", label: "Every day / 每天", insert: `${TASK_SYMBOLS.recurrence} every day`},
-	{kind: "emoji", label: "Every weekday / 工作日", insert: `${TASK_SYMBOLS.recurrence} every weekday`},
-	{kind: "emoji", label: "Every week / 每周", insert: `${TASK_SYMBOLS.recurrence} every week`},
-	{kind: "emoji", label: "Every week on Monday / 每周一", insert: `${TASK_SYMBOLS.recurrence} every week on Monday`},
-	{kind: "emoji", label: "Every week on Friday / 每周五", insert: `${TASK_SYMBOLS.recurrence} every week on Friday`},
-	{kind: "emoji", label: "Every month / 每月", insert: `${TASK_SYMBOLS.recurrence} every month`},
-	{kind: "emoji", label: "Every month on the 1st / 每月1号", insert: `${TASK_SYMBOLS.recurrence} every month on the 1st`},
+	{kind: "emoji", label: "Recurring / 循环", insert: `${TASK_SYMBOLS.recurrence} `},
 	{kind: "emoji", label: "High priority / 高优先级", insert: TASK_SYMBOLS.priority.high},
 	{kind: "emoji", label: "Medium priority / 中优先级", insert: TASK_SYMBOLS.priority.medium},
 	{kind: "emoji", label: "Low priority / 低优先级", insert: TASK_SYMBOLS.priority.low},
@@ -41,6 +40,17 @@ const EMOJI_SUGGESTIONS: EmojiSuggestion[] = [
 	{kind: "emoji", label: "On completion: keep / 完成后保留", insert: `${TASK_SYMBOLS.onCompletion} keep`},
 	{kind: "emoji", label: "On completion: delete / 完成后删除", insert: `${TASK_SYMBOLS.onCompletion} delete`},
 	{kind: "emoji", label: "Assignee / 负责人", insert: `${TASK_SYMBOLS.person} `},
+];
+
+const RECURRENCE_SUGGESTIONS: RecurrenceSuggestion[] = [
+	{kind: "recurrence", label: "Every day / 每天", insert: "every day"},
+	{kind: "recurrence", label: "Every weekday / 工作日", insert: "every weekday"},
+	{kind: "recurrence", label: "Every week / 每周", insert: "every week"},
+	{kind: "recurrence", label: "Every week on Monday / 每周一", insert: "every week on Monday"},
+	{kind: "recurrence", label: "Every week on Friday / 每周五", insert: "every week on Friday"},
+	{kind: "recurrence", label: "Every month / 每月", insert: "every month"},
+	{kind: "recurrence", label: "Every month on the 1st / 每月1号", insert: "every month on the 1st"},
+	{kind: "recurrence", label: "Every year / 每年", insert: "every year"},
 ];
 
 /** Date emoji symbols that, when followed by a space and text, trigger date shorthand suggestions. */
@@ -78,8 +88,14 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 			}
 		}
 
-		// Determine which trigger is closer to the cursor
-		if (atIndex >= 0 && atIndex > lastDateSymbolIdx) {
+		// Find the last index of recurrence symbol
+		const recurrenceSymbol = TASK_SYMBOLS.recurrence;
+		const recurrenceIndex = beforeCursor.lastIndexOf(recurrenceSymbol);
+
+		const maxIndex = Math.max(atIndex, lastDateSymbolIdx, recurrenceIndex);
+		if (maxIndex === -1) return null;
+
+		if (maxIndex === atIndex) {
 			// Mode 1: @ triggers emoji field menu
 			const queryText = beforeCursor.slice(atIndex + 1);
 			if (!containsDelimiter(queryText)) {
@@ -89,7 +105,7 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 					query: `@:${queryText.toLowerCase()}`,
 				};
 			}
-		} else if (lastDateSymbol !== null && lastDateSymbolIdx >= 0) {
+		} else if (maxIndex === lastDateSymbolIdx && lastDateSymbol !== null) {
 			// Mode 2: date emoji followed by space -> date shorthand
 			const afterSymbolIdx = lastDateSymbolIdx + lastDateSymbol.length;
 			if (beforeCursor.charAt(afterSymbolIdx) === " ") {
@@ -101,6 +117,22 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 							start: {line: cursor.line, ch: queryStart},
 							end: cursor,
 							query: `date:${queryText.toLowerCase()}`,
+						};
+					}
+				}
+			}
+		} else if (maxIndex === recurrenceIndex) {
+			// Mode 3: recurrence emoji followed by space -> recurrence shorthand
+			const afterSymbolIdx = recurrenceIndex + recurrenceSymbol.length;
+			if (beforeCursor.charAt(afterSymbolIdx) === " ") {
+				const queryStart = afterSymbolIdx + 1;
+				if (cursor.ch >= queryStart) {
+					const queryText = beforeCursor.slice(queryStart);
+					if (!containsDelimiter(queryText)) {
+						return {
+							start: {line: cursor.line, ch: queryStart},
+							end: cursor,
+							query: `recur:${queryText.toLowerCase()}`,
 						};
 					}
 				}
@@ -128,6 +160,13 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 			return entries.map<DateSuggestion>((entry) => ({kind: "date", entry}));
 		}
 
+		// ---- recurrence shorthand mode ----
+		if (query.startsWith("recur:")) {
+			const q = query.slice(6).trim();
+			if (!q) return RECURRENCE_SUGGESTIONS.slice(0, 8);
+			return RECURRENCE_SUGGESTIONS.filter((s) => s.label.toLowerCase().includes(q) || s.insert.toLowerCase().includes(q)).slice(0, 8);
+		}
+
 		return [];
 	}
 
@@ -135,6 +174,9 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 		el.addClass("taskslite-suggest-item");
 		if (value.kind === "emoji") {
 			el.createSpan({text: value.insert.trim() || "…", cls: "taskslite-suggest-token"});
+			el.createSpan({text: value.label});
+		} else if (value.kind === "recurrence") {
+			el.createSpan({text: value.insert, cls: "taskslite-suggest-token"});
 			el.createSpan({text: value.label});
 		} else {
 			// Only show "text -> replacement text"
@@ -145,6 +187,8 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 	selectSuggestion(value: Suggestion): void {
 		if (!this.context) return;
 		if (value.kind === "emoji") {
+			this.context.editor.replaceRange(value.insert, this.context.start, this.context.end);
+		} else if (value.kind === "recurrence") {
 			this.context.editor.replaceRange(value.insert, this.context.start, this.context.end);
 		} else {
 			// Write the resolved YYYY-MM-DD date into the note

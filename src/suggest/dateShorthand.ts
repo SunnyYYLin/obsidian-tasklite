@@ -290,6 +290,7 @@ function hintMatchesQuery(hint: DateSuggestionEntry, q: string): boolean {
 // ---------------------------------------------------------------------------
 
 function buildLabel(humanText: string, resolved: string): string {
+	if (humanText === resolved) return resolved;
 	return `${humanText}  →  ${resolved}`;
 }
 
