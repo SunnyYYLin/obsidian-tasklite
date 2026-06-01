@@ -214,3 +214,42 @@ export function parseLineWithStatus(line: string, registry: StatusRegistry): Tas
 	const statusSymbol = line.match(/\[(.)\]/u)?.[1] ?? " ";
 	return parseTaskLine(line, registry.get(statusSymbol).type);
 }
+
+/**
+ * Normalize the indentation of a single line of text according to the vault's tab settings.
+ */
+export function normalizeLineIndentation(line: string, useTab: boolean, tabSize: number): string {
+	const match = line.match(listItemRegex);
+	if (!match) return line;
+
+	const rawIndent = match[1] ?? "";
+	const lastQuoteIdx = rawIndent.lastIndexOf(">");
+	let quotePart = "";
+	let indentPart = rawIndent;
+	if (lastQuoteIdx >= 0) {
+		if (rawIndent[lastQuoteIdx + 1] === " " || rawIndent[lastQuoteIdx + 1] === "\t") {
+			quotePart = rawIndent.slice(0, lastQuoteIdx + 2);
+			indentPart = rawIndent.slice(lastQuoteIdx + 2);
+		} else {
+			quotePart = rawIndent.slice(0, lastQuoteIdx + 1);
+			indentPart = rawIndent.slice(lastQuoteIdx + 1);
+		}
+	}
+
+	const spacesCount = indentPart.replace(/\t/gu, " ".repeat(tabSize)).length;
+
+	let newIndentPart = "";
+	if (useTab) {
+		const tabs = Math.floor(spacesCount / tabSize);
+		const remainder = spacesCount % tabSize;
+		newIndentPart = "\t".repeat(tabs) + " ".repeat(remainder);
+	} else {
+		newIndentPart = " ".repeat(spacesCount);
+	}
+
+	const newIndent = quotePart + newIndentPart;
+	if (rawIndent !== newIndent) {
+		return newIndent + line.slice(rawIndent.length);
+	}
+	return line;
+}

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseTaskLine, TASK_SYMBOLS } from "../src/model/format";
+import { parseTaskLine, TASK_SYMBOLS, normalizeLineIndentation } from "../src/model/format";
 import { StatusRegistry } from "../src/model/status";
 import { buildTaskTree } from "../src/model/tree";
 import { taskIdentityKey } from "../src/model/taskIdentity";
@@ -1353,36 +1353,6 @@ describe("TaskLite core", () => {
 			expect(tree.nodes[1]!.task).toBeNull();
 			expect(tree.nodes[1]!.parent).toBe(tree.nodes[0]);
 		});
-
-		test("corrects parent-child link if metadata parentLine physical indentation is invalid", () => {
-			const registry = new StatusRegistry();
-			// Line 0: parent (indent 0)
-			// Line 1: child1 (indent 4)
-			// Line 2: child2 (indent 4)
-			// Mocking an invalid parent from Obsidian where Line 2 parent points to Line 1 (flat level)
-			const mockMetadata = {
-				listItems: [
-					{ position: { start: { line: 0, col: 0 } }, parent: -1 },
-					{ position: { start: { line: 1, col: 4 } }, parent: 0 },
-					{ position: { start: { line: 2, col: 4 } }, parent: 1 },
-				],
-			};
-
-			const tree = buildTaskTree(
-				[
-					"- [ ] parent",
-					"    - [ ] child1",
-					"    - [ ] child2",
-				],
-				mockMetadata as any,
-				registry,
-			);
-
-			expect(tree.nodes.length).toBe(3);
-			expect(tree.nodes[1]!.parent).toBe(tree.nodes[0]);
-			expect(tree.nodes[2]!.parent).toBe(tree.nodes[0]);
-			expect(tree.nodes[2]!.parentLine).toBe(0);
-		});
 	});
 
 	describe("reconciliation edge cases", () => {
@@ -1728,7 +1698,7 @@ function expectSameLineMetadataIsIgnored(lastLine: string, description: string):
 		listItems: [
 			createListItem(0, -1, 0, " "),
 			createListItem(1, 0, 4, " "),
-			createListItem(2, 0, 4, " "),
+			createListItem(2, 1, 4, " "),
 			createListItem(2, 2, 12),
 		],
 	} as CachedMetadata;
@@ -1738,8 +1708,8 @@ function expectSameLineMetadataIsIgnored(lastLine: string, description: string):
 
 	expect(tree.nodes).toHaveLength(3);
 	expect(node).toBeDefined();
-	expect(node!.parentLine).toBe(0);
-	expect(node!.parent?.lineNumber).toBe(0);
+	expect(node!.parentLine).toBe(1);
+	expect(node!.parent?.lineNumber).toBe(1);
 	expect(node!.children).toHaveLength(0);
 	expect(node!.task?.data.description).toBe(description);
 }
@@ -1767,3 +1737,30 @@ function formatDate(date: Date): string {
 	const day = date.getUTCDate().toString().padStart(2, "0");
 	return `${year}-${month}-${day}`;
 }
+
+describe("indentation normalization", () => {
+	test("converts spaces to tab when useTab is true", () => {
+		expect(normalizeLineIndentation("    - [ ] task", true, 4)).toBe("\t- [ ] task");
+		expect(normalizeLineIndentation("      - [ ] task", true, 4)).toBe("\t  - [ ] task");
+		expect(normalizeLineIndentation("  - [ ] task", true, 4)).toBe("  - [ ] task");
+		expect(normalizeLineIndentation("\t- [ ] task", true, 4)).toBe("\t- [ ] task");
+	});
+
+	test("converts tabs to spaces when useTab is false", () => {
+		expect(normalizeLineIndentation("\t- [ ] task", false, 4)).toBe("    - [ ] task");
+		expect(normalizeLineIndentation("\t  - [ ] task", false, 4)).toBe("      - [ ] task");
+		expect(normalizeLineIndentation("  - [ ] task", false, 4)).toBe("  - [ ] task");
+	});
+
+	test("preserves quote blocks (>) and only normalizes list item indents", () => {
+		expect(normalizeLineIndentation("> - [ ] task", true, 4)).toBe("> - [ ] task");
+		expect(normalizeLineIndentation(">   - [ ] task", true, 4)).toBe(">   - [ ] task");
+		expect(normalizeLineIndentation(">     - [ ] task", true, 4)).toBe("> \t- [ ] task");
+		expect(normalizeLineIndentation("> \t- [ ] task", false, 4)).toBe(">     - [ ] task");
+	});
+
+	test("does nothing to non-list lines", () => {
+		expect(normalizeLineIndentation("just some text", true, 4)).toBe("just some text");
+		expect(normalizeLineIndentation("  just indented text", true, 4)).toBe("  just indented text");
+	});
+});

@@ -54,6 +54,11 @@ const messages = {
 		"settings.parentOnUnfinish.desc": "When a child is unfinished, also unfinish the parent.",
 		"settings.parentOnUncancel.name": "Auto-uncancel parent",
 		"settings.parentOnUncancel.desc": "When a child is uncanceled, also uncancel the parent.",
+		"settings.normalizeIndents.name": "Normalize Indentation",
+		"settings.normalizeIndents.desc": "Convert spaces/tabs in the current active document to conform to your Tab settings (tab size & use tab).",
+		"settings.normalizeIndents.button": "Normalize Current Document",
+		"notice.normalizedIndents": "Normalized indentation of list items.",
+		"notice.noActiveFile": "No active markdown file found.",
 	},
 	zh: {
 		"common.cancel": "取消",
@@ -110,6 +115,11 @@ const messages = {
 		"settings.parentOnUnfinish.desc": "撤销子任务完成时，同时撤销父任务的完成状态。",
 		"settings.parentOnUncancel.name": "自动撤销父任务取消",
 		"settings.parentOnUncancel.desc": "撤销子任务取消时，同时撤销父任务的取消状态。",
+		"settings.normalizeIndents.name": "规范化缩进",
+		"settings.normalizeIndents.desc": "根据当前的制表符设置（制表符宽度和是否使用制表符），转换当前活动文档中的空格或制表符，使其保持一致。",
+		"settings.normalizeIndents.button": "规范化当前文档",
+		"notice.normalizedIndents": "已规范化列表项缩进。",
+		"notice.noActiveFile": "未找到活动 Markdown 文件。",
 	},
 } as const;
 

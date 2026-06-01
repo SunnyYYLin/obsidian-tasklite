@@ -1,6 +1,7 @@
 import { Notice, PluginSettingTab, Setting, type App } from "obsidian";
 import type TaskLitePlugin from "./main";
 import { t, type I18nKey } from "./i18n";
+import { listItemRegex, normalizeLineIndentation } from "./model/format";
 
 export interface ToggleBehaviorSettings {
 	cascadeFinish: boolean;
@@ -69,6 +70,44 @@ export class TaskLiteSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 					new Notice(t("notice.reloadForSuggestions"));
 				}),
+			);
+
+		new Setting(containerEl)
+			.setName(t("settings.normalizeIndents.name"))
+			.setDesc(t("settings.normalizeIndents.desc"))
+			.addButton((button) =>
+				button
+					.setButtonText(t("settings.normalizeIndents.button"))
+					.setCta()
+					.onClick(async () => {
+						const activeFile = this.app.workspace.getActiveFile();
+						if (!activeFile) {
+							new Notice(t("notice.noActiveFile"));
+							return;
+						}
+						const content = await this.app.vault.read(activeFile);
+						const lines = content.length > 0 ? content.split("\n") : [];
+
+						const vaultConfig = (this.app.vault as any).config || {};
+						const useTab = vaultConfig.useTab ?? true;
+						const tabSize = vaultConfig.tabSize ?? 4;
+
+						let changed = false;
+						const newLines = lines.map((line) => {
+							const newLine = normalizeLineIndentation(line, useTab, tabSize);
+							if (newLine !== line) {
+								changed = true;
+							}
+							return newLine;
+						});
+
+						if (changed) {
+							const newContent = newLines.join("\n");
+							await this.app.vault.modify(activeFile, newContent);
+							await this.plugin.documentStore.replaceDocumentContent(activeFile, newContent);
+						}
+						new Notice(t("notice.normalizedIndents"));
+					}),
 			);
 
 		this.addHeading(containerEl, "settings.heading.cascade");
