@@ -31,9 +31,9 @@ function findExternallyCompletedLine(before: string[], after: string[], registry
 	const beforeTree = buildTaskTree(before, null, registry);
 	const afterTree = buildTaskTree(after, null, registry);
 	for (const [lineNumber, afterNode] of afterTree.byLine) {
-		if (!afterNode.task || afterNode.task.status.type !== "DONE" || afterNode.task.metadata.dates.done) continue;
+		if (!afterNode.task || afterNode.task.statusType !== "DONE" || afterNode.task.metadata.dates.done) continue;
 		const beforeNode = beforeTree.byLine.get(lineNumber);
-		if (!beforeNode?.task || beforeNode.task.status.type === "DONE") continue;
+		if (!beforeNode?.task || beforeNode.task.statusType === "DONE") continue;
 		if (taskIdentityKey(beforeNode.task) === taskIdentityKey(afterNode.task)) return lineNumber;
 	}
 	return null;

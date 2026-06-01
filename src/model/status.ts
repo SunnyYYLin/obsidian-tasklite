@@ -63,8 +63,8 @@ export class StatusRegistry {
 		return this.get(status.nextStatusSymbol);
 	}
 
-	recurrenceStatus(afterCompletedStatus: StatusConfiguration): StatusConfiguration {
-		let candidate = this.next(afterCompletedStatus);
+	recurrenceStatus(afterCompletedStatusSymbol: string): StatusConfiguration {
+		let candidate = this.next(this.get(afterCompletedStatusSymbol));
 		for (let index = 0; index < this.bySymbol.size + 1; index++) {
 			if (candidate.type === "TODO" || candidate.type === "IN_PROGRESS") {
 				return candidate;

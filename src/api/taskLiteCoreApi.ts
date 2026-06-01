@@ -183,10 +183,12 @@ async function createTask({
 	documentStore?: TaskDocumentStore;
 }): Promise<void> {
 	const statusSymbol = input.status ?? " ";
+	const statusConfig = registry.get(statusSymbol);
 	const taskLine: TaskLine = {
 		indentation: "",
 		listMarker: "-",
-		status: registry.get(statusSymbol),
+		statusSymbol: statusConfig.symbol,
+		statusType: statusConfig.type,
 		metadata: {
 			description: input.description,
 			priority: input.priority ?? null,
@@ -315,12 +317,15 @@ async function editFileTask({
 		if (d.due !== undefined) metadata.dates.due = d.due;
 	}
 
-	let status = node.task.status;
+	let statusSymbol = node.task.statusSymbol;
+	let statusType = node.task.statusType;
 	if (patch.statusSymbol !== undefined) {
-		status = registry.get(patch.statusSymbol);
+		const statusConfig = registry.get(patch.statusSymbol);
+		statusSymbol = statusConfig.symbol;
+		statusType = statusConfig.type;
 	}
 
-	const updatedTask: TaskLine = {...node.task, status, metadata};
+	const updatedTask: TaskLine = {...node.task, statusSymbol, statusType, metadata};
 	lines[lineNumber] = serializeTaskLine(updatedTask);
 	const nextContent = lines.join("\n");
 	await app.vault.modify(file, nextContent);
@@ -374,8 +379,8 @@ async function updateFileTask({
 function filterTaskRecords(records: TaskLiteTaskRecord[], options: ListTasksOptions): TaskLiteTaskRecord[] {
 	return records.filter((record) => {
 		if (!options.includeChildren && record.parentLine !== null) return false;
-		if (!options.includeCompleted && record.task.status.type === "DONE") return false;
-		if (!options.includeCancelled && record.task.status.type === "CANCELLED") return false;
+		if (!options.includeCompleted && record.task.statusType === "DONE") return false;
+		if (!options.includeCancelled && record.task.statusType === "CANCELLED") return false;
 		return true;
 	});
 }
@@ -386,7 +391,7 @@ function filterTaskRecords(records: TaskLiteTaskRecord[], options: ListTasksOpti
 
 function executeSingleLineApiToggle(line: string, registry: StatusRegistry, settings: TaskLiteSettings): string {
 	const task = parseLineWithStatus(line, registry);
-	if (task?.status.type === "DONE" || task?.status.type === "CANCELLED") {
+	if (task?.statusType === "DONE" || task?.statusType === "CANCELLED") {
 		return normalizeApiToggledLine(line, registry, settings);
 	}
 
@@ -404,7 +409,7 @@ function normalizeApiToggledLine(line: string, registry: StatusRegistry, setting
 	const task = parseLineWithStatus(line, registry);
 	if (!task) return line;
 
-	return serializeTaskLine(applyTaskStatus(task, task.status, settings, {fillMissingStatusDate: true}));
+	return serializeTaskLine(applyTaskStatus(task, { symbol: task.statusSymbol, type: task.statusType }, settings, {fillMissingStatusDate: true}));
 }
 
 function findOpenEditorTaskContext(

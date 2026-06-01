@@ -69,9 +69,11 @@ function makeNextOccurrence(
 	if (settings.setCreatedDate) {
 		metadata.dates.created = todayString();
 	}
+	const nextStatus = registry.recurrenceStatus(terminated.statusSymbol);
 	return {
 		...original,
-		status: registry.recurrenceStatus(terminated.status),
+		statusSymbol: nextStatus.symbol,
+		statusType: nextStatus.type,
 		metadata,
 		original: "",
 	};
@@ -96,6 +98,12 @@ function copySubtreeForNextOccurrence(
 		metadata.blockLink = null;
 		metadata.id = null;
 		metadata.dependsOn = null;
-		return serializeTaskLine({...node.task, status: registry.get(" "), metadata});
+		const todoStatus = registry.get(" ");
+		return serializeTaskLine({
+			...node.task,
+			statusSymbol: todoStatus.symbol,
+			statusType: todoStatus.type,
+			metadata,
+		});
 	});
 }

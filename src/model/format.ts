@@ -1,4 +1,4 @@
-import type { StatusConfiguration, StatusRegistry } from "./status";
+import type { StatusConfiguration, StatusRegistry, StatusType } from "./status";
 
 /** Priority levels, ordered from highest to lowest. */
 export type TaskPriority = "🔺" | "⏫" | "🔼" | "🔽" | "⏬";
@@ -52,7 +52,8 @@ export interface TaskMetadata {
 export interface TaskLine {
 	indentation: string;
 	listMarker: string;
-	status: StatusConfiguration;
+	statusSymbol: string;
+	statusType: StatusType;
 	metadata: TaskMetadata;
 	original: string;
 }
@@ -63,7 +64,7 @@ const dateRegex = "\\d{4}-\\d{2}-\\d{2}";
 const blockLinkRegex = / \^[a-zA-Z0-9-]+$/u;
 const tagRegex = /(^|\s)#[^ !@#$%^&*(),.?":{}|<>]+/g;
 
-export function parseTaskLine(line: string, status: StatusConfiguration): TaskLine | null {
+export function parseTaskLine(line: string, status: { symbol: string; type: StatusType }): TaskLine | null {
 	const match = line.match(taskLineRegex);
 	if (!match) return null;
 	const indentation = match[1] ?? "";
@@ -72,7 +73,8 @@ export function parseTaskLine(line: string, status: StatusConfiguration): TaskLi
 	return {
 		indentation,
 		listMarker,
-		status,
+		statusSymbol: status.symbol,
+		statusType: status.type,
 		metadata: parseTaskBody(body),
 		original: line,
 	};
@@ -134,7 +136,7 @@ export function parseTaskBody(body: string): TaskMetadata {
 }
 
 export function serializeTaskLine(task: TaskLine): string {
-	return `${task.indentation}${task.listMarker} [${task.status.symbol}] ${serializeTaskBody(task.metadata)}`.trimEnd();
+	return `${task.indentation}${task.listMarker} [${task.statusSymbol}] ${serializeTaskBody(task.metadata)}`.trimEnd();
 }
 
 export function serializeTaskBody(metadata: TaskMetadata): string {

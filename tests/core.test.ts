@@ -978,7 +978,7 @@ describe("TaskLite core", () => {
 			expect(node).toBeDefined();
 			expect(node!.statusCharacter).toBe("x");
 			expect(node!.task).not.toBeNull();
-			expect(node!.task!.status.type).toBe("DONE");
+			expect(node!.task!.statusType).toBe("DONE");
 		});
 
 		test("- [-] is a valid cancelled task", () => {
@@ -988,7 +988,7 @@ describe("TaskLite core", () => {
 			expect(node).toBeDefined();
 			expect(node!.statusCharacter).toBe("-");
 			expect(node!.task).not.toBeNull();
-			expect(node!.task!.status.type).toBe("CANCELLED");
+			expect(node!.task!.statusType).toBe("CANCELLED");
 		});
 
 		test("- [/] is a valid in-progress task", () => {
@@ -998,7 +998,7 @@ describe("TaskLite core", () => {
 			expect(node).toBeDefined();
 			expect(node!.statusCharacter).toBe("/");
 			expect(node!.task).not.toBeNull();
-			expect(node!.task!.status.type).toBe("IN_PROGRESS");
+			expect(node!.task!.statusType).toBe("IN_PROGRESS");
 		});
 
 		test("- [ ] -[] toggles the first checkbox, not the -[]", () => {
@@ -1022,7 +1022,7 @@ describe("TaskLite core", () => {
 			const node = tree.byLine.get(0);
 			expect(node).toBeDefined();
 			expect(node!.task).not.toBeNull();
-			expect(node!.task!.status.type).toBe("TODO");
+			expect(node!.task!.statusType).toBe("TODO");
 			expect(node!.task!.metadata.description).toBe("[]");
 		});
 

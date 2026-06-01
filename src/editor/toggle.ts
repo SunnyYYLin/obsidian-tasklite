@@ -54,11 +54,11 @@ export function toggleTaskAtLine({
 		return togglePlainCheckbox(node, registry);
 	}
 
-	const targetStatus = registry.next(node.task.status);
+	const targetStatus = registry.next(registry.get(node.task.statusSymbol));
 	if (targetStatus.type === "DONE") return finishTaskAtLine({lines, lineNumber, metadata, registry, settings});
 	if (targetStatus.type === "CANCELLED") return cancelTaskAtLine({lines, lineNumber, metadata, registry, settings});
-	if (node.task.status.type === "DONE") return unfinishTaskAtLine({lines, lineNumber, metadata, registry, settings});
-	if (node.task.status.type === "CANCELLED") return uncancelTaskAtLine({lines, lineNumber, metadata, registry, settings});
+	if (node.task.statusType === "DONE") return unfinishTaskAtLine({lines, lineNumber, metadata, registry, settings});
+	if (node.task.statusType === "CANCELLED") return uncancelTaskAtLine({lines, lineNumber, metadata, registry, settings});
 	return updateSingleTaskStatusAtLine({lines, lineNumber, metadata, registry, settings, status: targetStatus});
 }
 
@@ -82,8 +82,8 @@ export function clickTaskCheckboxAtLine(input: TaskStatusMutationInput): ToggleR
 	const tree = buildTaskTree(input.lines, input.metadata, input.registry);
 	const node = tree.byLine.get(input.lineNumber);
 	if (!node?.task) return node ? togglePlainCheckbox(node, input.registry) : null;
-	if (node.task.status.type === "DONE") return unfinishTaskAtLine(input);
-	if (node.task.status.type === "CANCELLED") return uncancelTaskAtLine(input);
+	if (node.task.statusType === "DONE") return unfinishTaskAtLine(input);
+	if (node.task.statusType === "CANCELLED") return uncancelTaskAtLine(input);
 	return finishTaskAtLine(input);
 }
 
@@ -91,7 +91,7 @@ export function rightClickTaskCheckboxAtLine(input: TaskStatusMutationInput): To
 	const tree = buildTaskTree(input.lines, input.metadata, input.registry);
 	const node = tree.byLine.get(input.lineNumber);
 	if (!node?.task) return null;
-	if (node.task.status.type === "CANCELLED") return uncancelTaskAtLine(input);
+	if (node.task.statusType === "CANCELLED") return uncancelTaskAtLine(input);
 	return cancelTaskAtLine(input);
 }
 
@@ -148,7 +148,7 @@ function updateSingleTaskStatusAtLine({
 	const tree = buildTaskTree(lines, metadata, registry);
 	const node = tree.byLine.get(lineNumber);
 	if (!node?.task) return null;
-	if (node.task.status.symbol === status.symbol && !needsMissingStatusDate(node.task, status)) return null;
+	if (node.task.statusSymbol === status.symbol && !needsMissingStatusDate(node.task, status)) return null;
 
 	const changedTask = applyTaskStatus(node.task, status, settings, {fillMissingStatusDate: true});
 	const changedTasks = new Map<number, TaskLine>([[node.lineNumber, changedTask]]);
@@ -235,7 +235,7 @@ function buildTaskMutationResult({
 	};
 }
 
-function needsMissingStatusDate(task: TaskLine, status: TaskLine["status"]): boolean {
+function needsMissingStatusDate(task: TaskLine, status: { symbol: string; type: StatusType }): boolean {
 	return (status.type === "DONE" && !task.metadata.dates.done) || (status.type === "CANCELLED" && !task.metadata.dates.cancelled);
 }
 
@@ -301,7 +301,7 @@ function statusForSubtreeBehavior(
 	changedTasks: Map<number, TaskLine>,
 	settings: TaskLiteSettings,
 ): StatusConfiguration | null {
-	const type = node.task!.status.type;
+	const type = node.task!.statusType;
 	if (behavior === "finish") return type === "CANCELLED" ? null : registry.get("x");
 	if (behavior === "cancel") {
 		if (type === "DONE") return null;
@@ -320,17 +320,17 @@ function statusForParentBehavior(
 ): StatusConfiguration | null {
 	if (!parent.task) return null;
 	if (behavior === "finish") {
-		if (parent.task.status.type === "CANCELLED" || parent.task.status.type === "DONE") return null;
+		if (parent.task.statusType === "CANCELLED" || parent.task.statusType === "DONE") return null;
 		return areAllTaskChildrenTerminated(parent, changedTasks) ? registry.get("x") : null;
 	}
 	if (behavior === "cancel") {
-		if (parent.task.status.type === "DONE" || parent.task.status.type === "CANCELLED") return null;
+		if (parent.task.statusType === "DONE" || parent.task.statusType === "CANCELLED") return null;
 		return areNonCancelledChildrenDone(parent, changedTasks) ? registry.get("x") : null;
 	}
 	if (behavior === "unfinish") {
-		return parent.task.status.type === "DONE" || parent.task.status.type === "CANCELLED" ? registry.get(" ") : null;
+		return parent.task.statusType === "DONE" || parent.task.statusType === "CANCELLED" ? registry.get(" ") : null;
 	}
-	return parent.task.status.type === "CANCELLED" ? registry.get(" ") : null;
+	return parent.task.statusType === "CANCELLED" ? registry.get(" ") : null;
 }
 
 function replaceTaskStatus(
@@ -342,7 +342,7 @@ function replaceTaskStatus(
 ): void {
 	if (!node.task) return;
 	const currentTask = changedTasks.get(node.lineNumber) ?? node.task;
-	if (currentTask.status.symbol === status.symbol && !needsMissingStatusDate(currentTask, status)) return;
+	if (currentTask.statusSymbol === status.symbol && !needsMissingStatusDate(currentTask, status)) return;
 	const updatedTask = applyTaskStatus(currentTask, status, settings, {fillMissingStatusDate: true});
 	changedTasks.set(node.lineNumber, updatedTask);
 	replacementByLine.set(node.lineNumber, serializeTaskLine(updatedTask));
@@ -352,7 +352,7 @@ function findRecurringTerminatedNode(node: TaskTreeNode, changedTasks: Map<numbe
 	let current: TaskTreeNode | null = node;
 	while (current) {
 		const changedTask = changedTasks.get(current.lineNumber);
-		if (current.task?.metadata.recurrence && isTerminalStatus(changedTask?.status.type) && !isTerminalStatus(current.task.status.type)) {
+		if (current.task?.metadata.recurrence && isTerminalStatus(changedTask?.statusType) && !isTerminalStatus(current.task.statusType)) {
 			return current;
 		}
 		current = current.parent;
@@ -362,7 +362,7 @@ function findRecurringTerminatedNode(node: TaskTreeNode, changedTasks: Map<numbe
 
 function findTerminatedNode(node: TaskTreeNode, changedTasks: Map<number, TaskLine>): TaskTreeNode | null {
 	const changedTask = changedTasks.get(node.lineNumber);
-	if (node.task && isTerminalStatus(changedTask?.status.type) && !isTerminalStatus(node.task.status.type)) {
+	if (node.task && isTerminalStatus(changedTask?.statusType) && !isTerminalStatus(node.task.statusType)) {
 		return node;
 	}
 	return null;
@@ -374,7 +374,7 @@ function areAllTaskChildrenTerminated(parent: TaskTreeNode, changedTasks: Map<nu
 	return taskChildren.every((child) => {
 		if (!child.task) return false;
 		const changedTask = changedTasks.get(child.lineNumber);
-		const statusType = changedTask ? changedTask.status.type : child.task.status.type;
+		const statusType = changedTask ? changedTask.statusType : child.task.statusType;
 		return isTerminalStatus(statusType);
 	});
 }
@@ -402,7 +402,7 @@ function areNonCancelledChildrenDone(parent: TaskTreeNode, changedTasks: Map<num
 	for (const child of taskChildren) {
 		if (!child.task) continue;
 		const changedTask = changedTasks.get(child.lineNumber);
-		const statusType = changedTask ? changedTask.status.type : child.task.status.type;
+		const statusType = changedTask ? changedTask.statusType : child.task.statusType;
 		if (statusType === "CANCELLED") continue;
 		if (statusType !== "DONE") return false;
 	}

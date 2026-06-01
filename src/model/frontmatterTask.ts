@@ -1,5 +1,5 @@
 import type { CachedMetadata, TFile } from "obsidian";
-import type { StatusRegistry } from "./status";
+import type { StatusRegistry, StatusType } from "./status";
 import type { TaskPriority, OnCompletionAction } from "./format";
 
 /**
@@ -40,8 +40,8 @@ export interface FrontmatterTaskRecord {
 }
 
 export interface FrontmatterTaskData {
-	status: string;
-	statusType: string;
+	statusSymbol: string;
+	statusType: StatusType;
 	description: string;
 	priority: TaskPriority | null;
 	dates: {
@@ -92,7 +92,7 @@ export function parseFrontmatterTask(
 			: null;
 
 	const task: FrontmatterTaskData = {
-		status: statusConfig.symbol,
+		statusSymbol: statusConfig.symbol,
 		statusType: statusConfig.type,
 		description: typeof fm["description"] === "string" ? fm["description"] : file.basename,
 		priority,
@@ -133,7 +133,7 @@ export function buildFrontmatterPatch(
 ): Record<string, unknown> {
 	const patch: Record<string, unknown> = {};
 
-	if (updates.status !== undefined) patch["status"] = updates.status;
+	if (updates.statusSymbol !== undefined) patch["status"] = updates.statusSymbol;
 	if (updates.priority !== undefined) patch["priority"] = updates.priority;
 	if (updates.description !== undefined) patch["description"] = updates.description;
 	if (updates.recurrence !== undefined) patch["recurrence"] = updates.recurrence;
@@ -153,7 +153,7 @@ export function buildFrontmatterPatch(
 	}
 
 	// Carry over fields that are not being updated
-	if (!("status" in patch)) patch["status"] = current.status;
+	if (!("status" in patch)) patch["status"] = current.statusSymbol;
 
 	return patch;
 }
