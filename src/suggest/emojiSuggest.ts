@@ -1,7 +1,7 @@
 import { EditorSuggest, type Editor, type EditorPosition, type EditorSuggestContext, type EditorSuggestTriggerInfo, type TFile } from "obsidian";
 import type TaskLitePlugin from "../main";
 import { taskLineRegex, TASK_SYMBOLS } from "../model/format";
-import { DATE_SHORTHAND_SUGGESTIONS, parseDateShorthand, type DateShorthandSuggestion } from "./dateShorthand";
+import { getDateSuggestions, parseDateShorthand, type DateSuggestionEntry } from "./dateShorthand";
 
 // ---------------------------------------------------------------------------
 // Emoji field suggestions (triggered by @)
@@ -15,8 +15,7 @@ interface EmojiSuggestion {
 
 interface DateSuggestion {
 	kind: "date";
-	label: string;
-	entry: DateShorthandSuggestion;
+	entry: DateSuggestionEntry;
 }
 
 type Suggestion = EmojiSuggestion | DateSuggestion;
@@ -35,12 +34,12 @@ const EMOJI_SUGGESTIONS: EmojiSuggestion[] = [
 	{kind: "emoji", label: "Every month / 每月", insert: `${TASK_SYMBOLS.recurrence} every month`},
 	{kind: "emoji", label: "Every month on the 1st / 每月1号", insert: `${TASK_SYMBOLS.recurrence} every month on the 1st`},
 	{kind: "emoji", label: "High priority / 高优先级", insert: TASK_SYMBOLS.priority.high},
+	{kind: "emoji", label: "Medium priority / 中优先级", insert: TASK_SYMBOLS.priority.medium},
 	{kind: "emoji", label: "Low priority / 低优先级", insert: TASK_SYMBOLS.priority.low},
 	{kind: "emoji", label: "Task id / 任务 ID", insert: `${TASK_SYMBOLS.id} `},
 	{kind: "emoji", label: "Depends on / 依赖", insert: `${TASK_SYMBOLS.dependsOn} `},
-	{kind: "emoji", label: "On completion / 完成时", insert: `${TASK_SYMBOLS.onCompletion} `},
-	{kind: "emoji", label: "On completion: keep / 保留", insert: `${TASK_SYMBOLS.onCompletion} keep`},
-	{kind: "emoji", label: "On completion: delete / 删除", insert: `${TASK_SYMBOLS.onCompletion} delete`},
+	{kind: "emoji", label: "On completion: keep / 完成后保留", insert: `${TASK_SYMBOLS.onCompletion} keep`},
+	{kind: "emoji", label: "On completion: delete / 完成后删除", insert: `${TASK_SYMBOLS.onCompletion} delete`},
 	{kind: "emoji", label: "Assignee / 负责人", insert: `${TASK_SYMBOLS.person} `},
 ];
 
@@ -84,14 +83,17 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 		}
 
 		// ----------------------------------------------------------------
-		// Mode 2: date emoji followed by text → date shorthand suggestions
+		// Mode 2: date emoji followed by text (or just a space) → date shorthand
 		// ----------------------------------------------------------------
 		const dateMatch = beforeCursor.match(DATE_FIELD_PATTERN);
 		if (dateMatch) {
 			const query = dateMatch[2] ?? "";
-			const symbolEnd = beforeCursor.lastIndexOf(dateMatch[1] ?? "");
-			const queryStart = symbolEnd + (dateMatch[1]?.length ?? 0) + 1; // +1 for the space
-			if (query.length > 0) {
+			const symbolStr = dateMatch[1] ?? "";
+			const symbolEnd = beforeCursor.lastIndexOf(symbolStr);
+			// queryStart = right after the space that follows the emoji
+			const queryStart = symbolEnd + [...symbolStr].length + 1; // handle multi-codepoint emoji
+			// Only trigger when cursor is right after the space or into the typed text
+			if (cursor.ch >= queryStart) {
 				return {
 					start: {line: cursor.line, ch: queryStart},
 					end: cursor,
@@ -116,26 +118,8 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 		// ---- date shorthand mode ----
 		if (query.startsWith("date:")) {
 			const q = query.slice(5);
-			// Show matching shorthand entries, plus any parseable free-form input
-			const matched = DATE_SHORTHAND_SUGGESTIONS
-				.filter((s) => s.label.toLowerCase().includes(q) || this.labelMatchesInput(q))
-				.map<DateSuggestion>((entry) => ({kind: "date", label: entry.label, entry}))
-				.slice(0, 8);
-
-			// If the raw input resolves to a date, add it as first item
-			if (q.length >= 3) {
-				const resolved = parseDateShorthand(q);
-				if (resolved) {
-					const dynamic: DateSuggestion = {
-						kind: "date",
-						label: `"${q}" → ${resolved}`,
-						entry: {label: q, resolve: () => resolved},
-					};
-					return [dynamic, ...matched.filter((m) => m.entry.resolve() !== resolved)].slice(0, 8);
-				}
-			}
-
-			return matched;
+			const entries = getDateSuggestions(q, 8);
+			return entries.map<DateSuggestion>((entry) => ({kind: "date", entry}));
 		}
 
 		return [];
@@ -144,12 +128,12 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 	renderSuggestion(value: Suggestion, el: HTMLElement): void {
 		el.addClass("taskslite-suggest-item");
 		if (value.kind === "emoji") {
-			el.createSpan({text: value.insert, cls: "taskslite-suggest-token"});
+			el.createSpan({text: value.insert.trim() || "…", cls: "taskslite-suggest-token"});
 			el.createSpan({text: value.label});
 		} else {
-			const resolved = value.entry.resolve();
-			el.createSpan({text: resolved, cls: "taskslite-suggest-token"});
-			el.createSpan({text: value.label});
+			// Show the resolved date prominently, then the human label
+			el.createSpan({text: value.entry.resolved, cls: "taskslite-suggest-token"});
+			el.createSpan({text: value.entry.localLabel});
 		}
 	}
 
@@ -158,14 +142,9 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 		if (value.kind === "emoji") {
 			this.context.editor.replaceRange(value.insert, this.context.start, this.context.end);
 		} else {
-			// Insert the resolved date string
-			this.context.editor.replaceRange(value.entry.resolve(), this.context.start, this.context.end);
+			// Write the resolved YYYY-MM-DD date into the note
+			this.context.editor.replaceRange(value.entry.resolved, this.context.start, this.context.end);
 		}
-	}
-
-	private labelMatchesInput(q: string): boolean {
-		// Returns true only so we don't fully filter; individual entries are pre-filtered in getSuggestions
-		return q.length > 0;
 	}
 }
 
