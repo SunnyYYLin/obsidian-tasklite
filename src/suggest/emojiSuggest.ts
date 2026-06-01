@@ -110,14 +110,15 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 
 		// ---- emoji mode (@) ----
 		if (query.startsWith("@:")) {
-			const q = query.slice(2);
-			if (!q) return EMOJI_SUGGESTIONS.slice(0, 8);
+			const q = query.slice(2).trim();
+			if (!q) return [];
 			return EMOJI_SUGGESTIONS.filter((s) => s.label.toLowerCase().includes(q)).slice(0, 8);
 		}
 
 		// ---- date shorthand mode ----
 		if (query.startsWith("date:")) {
-			const q = query.slice(5);
+			const q = query.slice(5).trim();
+			if (!q) return [];
 			const entries = getDateSuggestions(q, 8);
 			return entries.map<DateSuggestion>((entry) => ({kind: "date", entry}));
 		}
