@@ -51,10 +51,24 @@ export function buildTaskTree(lines: string[], metadata: CachedMetadata | null |
 	}
 
 	for (const node of nodes) {
-		const parent = node.parentLine === null ? null : byLine.get(node.parentLine);
+		let parent = node.parentLine === null ? null : byLine.get(node.parentLine);
+		const nodeIndent = getIndentLength(node.indentation);
+
+		while (parent) {
+			const parentIndent = getIndentLength(parent.indentation);
+			if (nodeIndent > parentIndent) {
+				break;
+			}
+			parent = parent.parent;
+		}
+
 		if (parent && parent !== node && !wouldCreateCycle(node, parent)) {
 			node.parent = parent;
+			node.parentLine = parent.lineNumber;
 			parent.children.push(node);
+		} else {
+			node.parent = null;
+			node.parentLine = null;
 		}
 	}
 
@@ -156,4 +170,8 @@ function inferListItems(lines: string[]): ListItemCache[] {
 		stack.push({indent, line: index});
 	});
 	return result;
+}
+
+function getIndentLength(indentation: string): number {
+	return indentation.replace(/\t/gu, "    ").length;
 }
