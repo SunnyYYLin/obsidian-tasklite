@@ -1,6 +1,5 @@
 import { Notice, PluginSettingTab, Setting, type App } from "obsidian";
 import type TaskLitePlugin from "./main";
-import { DEFAULT_STATUS_SETTINGS, normalizeStatusSettings, type StatusSettings } from "./model/status";
 import { t, type I18nKey } from "./i18n";
 
 export interface ToggleBehaviorSettings {
@@ -21,7 +20,6 @@ export interface TaskLiteSettings {
 	copySubtasksOnRecurrence: boolean;
 	autoSuggestInEditor: boolean;
 	toggleBehavior: ToggleBehaviorSettings;
-	statusSettings: StatusSettings;
 }
 
 export const DEFAULT_TOGGLE_BEHAVIOR: ToggleBehaviorSettings = {
@@ -42,7 +40,6 @@ export const DEFAULT_SETTINGS: TaskLiteSettings = {
 	copySubtasksOnRecurrence: true,
 	autoSuggestInEditor: true,
 	toggleBehavior: DEFAULT_TOGGLE_BEHAVIOR,
-	statusSettings: DEFAULT_STATUS_SETTINGS,
 };
 
 export class TaskLiteSettingTab extends PluginSettingTab {
@@ -90,17 +87,6 @@ export class TaskLiteSettingTab extends PluginSettingTab {
 			{key: "parentOnUncancel", nameKey: "settings.parentOnUncancel.name", descKey: "settings.parentOnUncancel.desc"},
 		]);
 
-		this.addHeading(containerEl, "settings.heading.status");
-		new Setting(containerEl)
-			.setName(t("settings.importStatuses.name"))
-			.setDesc(t("settings.importStatuses.desc"))
-			.addButton((button) =>
-				button.setButtonText(t("settings.importStatuses.button")).onClick(async () => {
-					const imported = await this.plugin.importTasksStatusSettings();
-					new Notice(imported ? t("notice.importedStatusSettings") : t("notice.noStatusSettings"));
-					this.display();
-				}),
-			);
 	}
 
 	private addHeading(containerEl: HTMLElement, key: I18nKey): void {
@@ -133,22 +119,11 @@ export class TaskLiteSettingTab extends PluginSettingTab {
 	}
 }
 
-export async function importTasksStatusSettings(app: App): Promise<StatusSettings | null> {
-	const configDir = app.vault.configDir;
-	const file = app.vault.getAbstractFileByPath(`${configDir}/plugins/obsidian-tasks-plugin/data.json`);
-	if (!file || !("extension" in file)) return null;
-	const raw = await app.vault.adapter.read(file.path);
-	const parsed = JSON.parse(raw) as {statusSettings?: unknown};
-	return normalizeStatusSettings(parsed.statusSettings);
-}
-
 export function mergeSettings(loaded: Partial<TaskLiteSettings> | null | undefined): TaskLiteSettings {
-	const statusSettings = normalizeStatusSettings(loaded?.statusSettings) ?? DEFAULT_STATUS_SETTINGS;
 	const toggleBehavior: ToggleBehaviorSettings = { ...DEFAULT_TOGGLE_BEHAVIOR, ...loaded?.toggleBehavior };
 	return {
 		...DEFAULT_SETTINGS,
 		...loaded,
-		statusSettings,
 		toggleBehavior,
 	};
 }

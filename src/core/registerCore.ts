@@ -84,14 +84,6 @@ export function registerTaskLiteCore(plugin: TaskLitePlugin): void {
 		},
 	});
 
-	plugin.addCommand({
-		id: "import-tasks-status-settings",
-		name: t("command.importStatusSettings"),
-		callback: async () => {
-			const imported = await plugin.importTasksStatusSettings();
-			new Notice(imported ? t("notice.importedStatusSettings") : t("notice.noStatusSettings"));
-		},
-	});
 
 	new ExternalTaskReconciler(plugin, plugin.app, plugin.statusRegistry, () => plugin.settings, plugin.documentStore).register();
 	plugin.registerEditorExtension(createLivePreviewExtension(plugin.app, plugin.statusRegistry, () => plugin.settings, plugin.documentStore));

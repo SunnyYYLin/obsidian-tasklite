@@ -44,16 +44,6 @@ const settings: TaskLiteSettings = {
 		parentOnUnfinish: true,
 		parentOnUncancel: true,
 	},
-	statusSettings: {
-		coreStatuses: [
-			{symbol: " ", name: "Todo", nextStatusSymbol: "x", availableAsCommand: true, type: "TODO"},
-			{symbol: "x", name: "Done", nextStatusSymbol: " ", availableAsCommand: true, type: "DONE"},
-		],
-		customStatuses: [
-			{symbol: "/", name: "In progress", nextStatusSymbol: "x", availableAsCommand: true, type: "IN_PROGRESS"},
-			{symbol: "-", name: "Cancelled", nextStatusSymbol: " ", availableAsCommand: true, type: "CANCELLED"},
-		],
-	},
 };
 
 describe("TaskLite core", () => {

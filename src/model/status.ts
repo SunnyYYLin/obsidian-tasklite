@@ -8,46 +8,13 @@ export interface StatusConfiguration {
 	type: StatusType;
 }
 
-export interface StatusSettings {
-	coreStatuses: StatusConfiguration[];
-	customStatuses: StatusConfiguration[];
-}
-
-export const DEFAULT_STATUS_SETTINGS: StatusSettings = {
-	coreStatuses: [
-		{symbol: " ", name: "Todo", nextStatusSymbol: "x", availableAsCommand: true, type: "TODO"},
-		{symbol: "x", name: "Done", nextStatusSymbol: " ", availableAsCommand: true, type: "DONE"},
-	],
-	customStatuses: [
-		{symbol: "/", name: "In progress", nextStatusSymbol: "x", availableAsCommand: true, type: "IN_PROGRESS"},
-		{symbol: "-", name: "Cancelled", nextStatusSymbol: " ", availableAsCommand: true, type: "CANCELLED"},
-	],
-};
-
-const DEFAULT_TODO_STATUS = DEFAULT_STATUS_SETTINGS.coreStatuses[0] as StatusConfiguration;
-const DEFAULT_DONE_STATUS = DEFAULT_STATUS_SETTINGS.coreStatuses[1] as StatusConfiguration;
-
 export class StatusRegistry {
-	private readonly bySymbol = new Map<string, StatusConfiguration>();
-
-	constructor(settings: StatusSettings = DEFAULT_STATUS_SETTINGS) {
-		this.set(settings);
-	}
-
-	set(settings: StatusSettings): void {
-		this.bySymbol.clear();
-		for (const status of [...settings.coreStatuses, ...settings.customStatuses]) {
-			if (isValidStatusConfiguration(status) && !this.bySymbol.has(status.symbol)) {
-				this.bySymbol.set(status.symbol, status);
-			}
-		}
-		if (!this.bySymbol.has(" ")) {
-			this.bySymbol.set(" ", DEFAULT_TODO_STATUS);
-		}
-		if (!this.bySymbol.has("x")) {
-			this.bySymbol.set("x", DEFAULT_DONE_STATUS);
-		}
-	}
+	private readonly bySymbol = new Map<string, StatusConfiguration>([
+		[" ", {symbol: " ", name: "Todo", nextStatusSymbol: "x", availableAsCommand: true, type: "TODO"}],
+		["x", {symbol: "x", name: "Done", nextStatusSymbol: " ", availableAsCommand: true, type: "DONE"}],
+		["/", {symbol: "/", name: "In progress", nextStatusSymbol: "x", availableAsCommand: true, type: "IN_PROGRESS"}],
+		["-", {symbol: "-", name: "Cancelled", nextStatusSymbol: " ", availableAsCommand: true, type: "CANCELLED"}],
+	]);
 
 	get(symbol: string): StatusConfiguration {
 		return this.bySymbol.get(symbol) ?? {
@@ -73,49 +40,6 @@ export class StatusRegistry {
 		}
 		return this.get(" ");
 	}
-}
-
-export function allStatuses(settings: StatusSettings): StatusConfiguration[] {
-	return [...settings.coreStatuses, ...settings.customStatuses];
-}
-
-export function normalizeStatusSettings(value: unknown): StatusSettings | null {
-	const maybe = value as Partial<StatusSettings> | undefined;
-	if (!maybe || !Array.isArray(maybe.coreStatuses) || !Array.isArray(maybe.customStatuses)) {
-		return null;
-	}
-	const coreStatuses = maybe.coreStatuses.filter(isValidStatusConfiguration);
-	const customStatuses = maybe.customStatuses.filter(isValidStatusConfiguration);
-	if (coreStatuses.length === 0) {
-		return null;
-	}
-	return {coreStatuses, customStatuses};
-}
-
-function isValidStatusConfiguration(value: unknown): value is StatusConfiguration {
-	const status = value as Partial<StatusConfiguration> | undefined;
-	return Boolean(
-		status &&
-			typeof status.symbol === "string" &&
-			status.symbol.length <= 1 &&
-			typeof status.name === "string" &&
-			typeof status.nextStatusSymbol === "string" &&
-			status.nextStatusSymbol.length <= 1 &&
-			typeof status.availableAsCommand === "boolean" &&
-			isStatusType(status.type),
-	);
-}
-
-function isStatusType(value: unknown): value is StatusType {
-	return (
-		value === "TODO" ||
-		value === "DONE" ||
-		value === "IN_PROGRESS" ||
-		value === "ON_HOLD" ||
-		value === "CANCELLED" ||
-		value === "NON_TASK" ||
-		value === "EMPTY"
-	);
 }
 
 function inferStatusType(symbol: string): StatusType {
