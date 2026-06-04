@@ -162,7 +162,7 @@ scheduled <= date(today)
 priority = ""
 path =~ "Work/"
 tags contains "#work"
-person = "Alice"
+assignee = "Alice"
 hasChildren = true
 parentLine = null
 description contains "xxx"
@@ -174,7 +174,7 @@ AND / OR / NOT / 括号
 - `=~` 执行字符串包含匹配。
 - `contains` 执行字符串包含匹配，适合 `tags`、`description` 等字段。
 - 缺失日期字段按 `null` 处理，因此 `due <= date(today)` 不会匹配没有截止日期的任务。
-- `person` 字段支持使用 `&` 作为分隔符标记多位负责人（如 `👤 Alice & Bob`）。在过滤时，`person = "Alice"` 或 `person = "Bob"` 都能精准匹配到该任务，而 `person != "Alice"` 则会在包含 "Alice" 时返回不匹配。
+- `assignee` 字段支持使用 `&` 作为分隔符标记多位负责人（如 `👤 Alice & Bob`）。在过滤时，`assignee = "Alice"` 或 `assignee = "Bob"` 都能精准匹配到该任务，而 `assignee != "Alice"` 则会在包含 "Alice" 时返回不匹配。为了保持向前兼容，DQL 查询仍支持 `person` 作为 `assignee` 的别名（如 `person = "Alice"`）。
 
 ---
 
@@ -198,6 +198,7 @@ interface CreateTaskInput {
   onCompletion?: string | null;  // 完成行为
   id?: string | null;            // 任务 ID
   dependsOn?: string | null;     // 依赖的任务 ID
+  assignee?: string[];           // 负责人数组，如 ["Alice", "Bob"]
   path?: string;                 // 目标文件路径，默认 "Tasks/New_Tasks.md"
   parentLineNumber?: number;     // 父任务行号（0-indexed），新任务插入到该行正下方并自动缩进
 }
@@ -290,6 +291,7 @@ type EditTaskPatch = {
   onCompletion?: string | null;  // 完成行为："delete" 或 "keep"，null 清除
   id?: string | null;            // 任务 ID（用于 dependsOn），null 清除
   dependsOn?: string | null;     // 依赖的任务 ID，null 清除
+  assignee?: string[];           // 负责人数组，如 ["Alice", "Bob"]
 }
 ```
 
@@ -458,7 +460,7 @@ interface TaskData {
   onCompletion: string | null;   // 🏁 完成行为（"delete" | "keep"）
   id: string | null;             // 🆔 任务 ID
   dependsOn: string | null;      // ⛔ 依赖 ID
-  person: string[];              // 👤 负责人
+  assignee: string[];            // 👤 负责人
   blockLink: string | null;      // Obsidian 块引用，如 "^abc123"（仅行任务，文件任务为 null）
   tags: string[];                // 提取的标签列表，如 ["#work", "#urgent"]
 }
@@ -491,6 +493,7 @@ type EditTaskPatch = {
   onCompletion?: string | null;
   id?: string | null;
   dependsOn?: string | null;
+  assignee?: string[];
 }
 ```
 
