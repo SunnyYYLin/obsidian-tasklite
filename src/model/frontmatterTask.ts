@@ -71,7 +71,7 @@ export function parseFrontmatterTask(
 			? rawOnCompletion
 			: null;
 
-	const rawPerson: unknown = (fm as Record<string, unknown>)["person"];
+	const rawPerson: unknown = (fm as Record<string, unknown>)["person"] ?? (fm as Record<string, unknown>)["assignee"];
 	let person: string[] = [];
 	if (Array.isArray(rawPerson)) {
 		person = rawPerson.map(String).map((p) => p.trim()).filter(Boolean);
