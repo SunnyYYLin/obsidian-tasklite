@@ -987,6 +987,52 @@ describe("TaskLite core", () => {
 		expect(lineRecord?.depth).toBe(0);
 	});
 
+	test("document store skips non-task list item ancestors to link to nearest task or frontmatter task", async () => {
+		const registry = new StatusRegistry();
+		const fmFile = createTestFile("fm.md", "fm");
+		const app = {
+			vault: {
+				on: () => {},
+				getMarkdownFiles: () => [fmFile],
+				cachedRead: () => Promise.resolve([
+					"---",
+					"task: true",
+					"description: Project Alpha",
+					"---",
+					"- Plain text list parent",
+					"    - [ ] Child task nested under plain text list parent",
+				].join("\n")),
+			},
+			metadataCache: {
+				getFileCache: () => ({
+					frontmatter: {
+						task: true,
+						description: "Project Alpha",
+					},
+				}),
+				on: () => {},
+			},
+		};
+		const plugin = {
+			registerEvent: () => {},
+		};
+		const store = new TaskDocumentStore(app as TaskLitePlugin["app"], registry);
+		store.register(plugin as unknown as TaskLitePlugin);
+
+		const records = await store.listRecords();
+		expect(records).toHaveLength(2); // Frontmatter task and Child task
+
+		const fmRecord = records.find(r => r.lineNumber === -1);
+		const lineRecord = records.find(r => r.lineNumber === 5);
+
+		expect(fmRecord).toBeDefined();
+		expect(lineRecord).toBeDefined();
+
+		// Since its immediate parent (line 4) is plain text (not a task), it should skip it
+		// and link to the frontmatter task (line -1) because there is no other ancestor task.
+		expect(lineRecord?.parentLine).toBe(-1);
+	});
+
 	describe("bracket edge cases", () => {
 		test("empty brackets are not treated as a checkbox", () => {
 			const registry = new StatusRegistry();

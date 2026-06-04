@@ -9,7 +9,7 @@ import { findOpenMarkdownEditor } from "../editor/editorUtils";
 import { copyTaskData, parseLineWithStatus, serializeTaskLine, type TaskLine, type TaskPriority, type OnCompletionAction, type TaskData } from "../model/format";
 import { taskIdentityKey } from "../model/taskIdentity";
 import { applyTaskStatus } from "../model/taskState";
-import { buildTaskTree, getSubtreeNodes, taskDepth } from "../model/tree";
+import { buildTaskTree, getSubtreeNodes, taskDepth, getTaskParentLine } from "../model/tree";
 import type { TaskDocumentStore, TaskDocumentRecord } from "../model/taskDocumentStore";
 import { parseFrontmatterTask, buildFrontmatterPatch, applyFrontmatterPatchToContent } from "../model/frontmatterTask";
 import { filterTaskRecordsByQuery } from "../model/taskQuery";
@@ -171,8 +171,9 @@ async function listTasks({
 		}
 		for (const node of tree.nodes) {
 			if (!node.task) continue;
-			const parentLine = (fmRecord && node.parentLine === null) ? -1 : node.parentLine;
-			const depth = (fmRecord && node.parentLine === null) ? 0 : taskDepth(node);
+			const taskParentLine = getTaskParentLine(node);
+			const parentLine = (fmRecord && taskParentLine === null) ? -1 : taskParentLine;
+			const depth = (fmRecord && taskParentLine === null) ? 0 : taskDepth(node);
 			records.push({
 				path: file.path,
 				basename: file.basename,

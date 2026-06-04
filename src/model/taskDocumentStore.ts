@@ -1,5 +1,5 @@
 import type { App, CachedMetadata, Plugin, TFile } from "obsidian";
-import { buildTaskTree, taskDepth, type TaskTree, type TaskTreeNode } from "./tree";
+import { buildTaskTree, taskDepth, getTaskParentLine, type TaskTree, type TaskTreeNode } from "./tree";
 import type { StatusRegistry } from "./status";
 import type { TaskData, TaskLine } from "./format";
 import { parseFrontmatterTask, type FrontmatterTaskRecord } from "./frontmatterTask";
@@ -174,8 +174,9 @@ function taskRecordsFromDocument(document: TaskDocument): TaskDocumentRecord[] {
 	}
 	for (const node of document.tree.nodes) {
 		if (!node.task) continue;
-		const parentLine = (hasFm && node.parentLine === null) ? -1 : node.parentLine;
-		const depth = (hasFm && node.parentLine === null) ? 0 : taskDepth(node);
+		const taskParentLine = getTaskParentLine(node);
+		const parentLine = (hasFm && taskParentLine === null) ? -1 : taskParentLine;
+		const depth = (hasFm && taskParentLine === null) ? 0 : taskDepth(node);
 		records.push({
 			path: document.path,
 			basename: document.basename,

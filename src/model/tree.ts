@@ -157,3 +157,12 @@ function inferListItems(lines: string[]): ListItemCache[] {
 	});
 	return result;
 }
+
+export function getTaskParentLine(node: TaskTreeNode): number | null {
+	let current = node.parent;
+	while (current) {
+		if (current.task) return current.lineNumber;
+		current = current.parent;
+	}
+	return null;
+}
