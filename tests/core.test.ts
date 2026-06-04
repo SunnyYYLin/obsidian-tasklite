@@ -1574,6 +1574,37 @@ describe("TaskLite core", () => {
 			]);
 		});
 	});
+
+	test("listTasks includes both line-level tasks and file-level tasks", async () => {
+		const api = createTestCoreApi({
+			vault: {
+				getMarkdownFiles: () => [createTestFile("Work/tasks.md", "tasks")],
+				cachedRead: () => [
+					"---",
+					"task: true",
+					"description: Project Alpha",
+					"status: \" \"",
+					"---",
+					"- [ ] Line-level task",
+				].join("\n"),
+			},
+			metadataCache: {
+				getFileCache: () => ({
+					frontmatter: {
+						task: true,
+						description: "Project Alpha",
+						status: " ",
+					},
+				}),
+			},
+		});
+
+		const listed = await api.listTasks();
+		expect(listed.map((record) => record.task.description)).toEqual([
+			"Project Alpha",
+			"Line-level task",
+		]);
+	});
 });
 
 function createTestCoreApi(app: Record<string, unknown> = {}) {

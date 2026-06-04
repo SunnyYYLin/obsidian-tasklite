@@ -59,11 +59,14 @@ export type EditTaskPatch = {
 };
 
 export interface TaskLiteCoreApi {
+	/**
+	 * Return all tasks, including line-level tasks (ordinary list items)
+	 * and file-level tasks (encoded in YAML frontmatter with `task: true`).
+	 */
 	listTasks(options?: ListTasksOptions): Promise<TaskLiteTaskRecord[]>;
 	filterTasks(records: TaskLiteTaskRecord[], query: string): TaskLiteTaskRecord[];
 	/**
 	 * Return all file-level tasks (encoded in YAML frontmatter with `task: true`).
-	 * These are distinct from line tasks and are NOT included in `listTasks`.
 	 */
 	listFrontmatterTasks(): Promise<TaskLiteTaskRecord[]>;
 	/**
@@ -159,6 +162,11 @@ async function listTasks({
 		const content = await app.vault.cachedRead(file);
 		const lines = content.split("\n");
 		const tree = buildTaskTree(lines, metadata, registry);
+		const hasBodyTasks = tree.nodes.some((n) => n.task);
+		const fmRecord = parseFrontmatterTask(file, metadata, registry, hasBodyTasks);
+		if (fmRecord) {
+			records.push(fmRecord);
+		}
 		for (const node of tree.nodes) {
 			if (!node.task) continue;
 			records.push({

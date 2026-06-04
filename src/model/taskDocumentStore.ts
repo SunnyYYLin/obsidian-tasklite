@@ -168,6 +168,9 @@ export class TaskDocumentStore {
 
 function taskRecordsFromDocument(document: TaskDocument): TaskDocumentRecord[] {
 	const records: TaskDocumentRecord[] = [];
+	if (document.frontmatterTask) {
+		records.push(document.frontmatterTask);
+	}
 	for (const node of document.tree.nodes) {
 		if (!node.task) continue;
 		records.push({

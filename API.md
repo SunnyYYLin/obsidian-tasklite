@@ -1,6 +1,6 @@
 # TaskLite Plugin API
 
-> **Version**: 0.4.1-alpha.0  
+> **Version**: 0.4.3-alpha.0  
 > **Plugin ID**: `taskslite`
 
 本文档面向希望基于 TaskLite 插件开发新插件的开发者。
@@ -106,7 +106,7 @@ interface TaskLiteCoreApi {
 
 ### 2.1 `listTasks`
 
-列出 Vault 中所有满足条件的顶层任务（默认只返回未完成、未取消的非子任务）。
+列出 Vault 中所有满足条件的任务，包含普通行级任务与在 Frontmatter 中使用 `task: true` 标记的文件级任务（默认只返回未完成、未取消的顶层任务）。
 
 ```typescript
 listTasks(options?: ListTasksOptions): Promise<TaskLiteTaskRecord[]>
@@ -750,6 +750,7 @@ async function archiveCompletedTasks(app: App, api: TaskLiteCoreApi) {
 
 | 版本 | 新增 API |
 |------|---------|
+| 0.4.3-alpha.0 | `listTasks` 现在返回所有任务（包括 Frontmatter 定义的文件级任务和普通行级任务） |
 | 0.4.2-alpha.0 | 新增 DQL-like 查询过滤：`listTasks({ query })` 和 `filterTasks(records, query)`，支持常用字段比较、`contains`、`=~`、`AND`/`OR`/`NOT` 与括号 |
 | 0.4.1-alpha.4 | 状态管理重构：统一状态变更 API 接口为 `updateTaskStatus` 并支持传入状态符号（包含级联逻辑及循环功能），移除冗余的 `finishTask`/`unfinishTask`/`cancelTask`/`uncancelTask` 方法，且从 `editTask` 中去除了临时状态修改属性 |
 | 0.4.1-alpha.0 | 统一任务数据模型：合并行任务和文件级任务的数据结构与接口 (TaskData/TaskLiteTaskRecord)，移除了冗余的 metadata 嵌套与 FrontmatterTaskRecord 类型，frontmatter 任务的 depth 调整为 -1 |
