@@ -188,7 +188,7 @@ createTask(input: CreateTaskInput): Promise<void>
 interface CreateTaskInput {
   description: string;         // 任务描述（必填）
   status?: string;             // 状态符号，默认 " "（待办）
-  priority?: string | null;    // 优先级 emoji，如 "⏫"
+  priority?: string | null;    // 优先级名称或 emoji，如 "high" 或 "⏫"
   dates?: {
     start?: string | null;     // 开始日期 "YYYY-MM-DD"
     scheduled?: string | null; // 计划日期
@@ -281,7 +281,7 @@ editTask(path: string, lineNumber: number, patch: EditTaskPatch): Promise<boolea
 
 type EditTaskPatch = {
   description?: string;        // 任务描述文本
-  priority?: string | null;    // 优先级 emoji，如 "⏫"，null 表示清除
+  priority?: string | null;    // 优先级名称或 emoji，如 "high" 或 "⏫"，null 表示清除
   dates?: {
     start?: string | null;     // 开始日期 "YYYY-MM-DD"，null 表示清除
     scheduled?: string | null; // 计划日期
@@ -466,15 +466,15 @@ interface TaskData {
 }
 ```
 
-**优先级 emoji 对照表：**
+**优先级名称与 Emoji 对照表：**
 
-| 优先级 | Emoji |
-|--------|-------|
-| 最高   | `🔺`  |
-| 高     | `⏫`  |
-| 中     | `🔼`  |
-| 低     | `🔽`  |
-| 最低   | `⏬`  |
+| 优先级名称 | Emoji | 描述 |
+|------------|-------|------|
+| `highest`  | `🔺`  | 最高 |
+| `high`     | `⏫`  | 高   |
+| `medium`   | `🔼`  | 中   |
+| `low`      | `🔽`  | 低   |
+| `lowest`   | `⏬`  | 最低 |
 
 ### `EditTaskPatch`
 

@@ -1264,14 +1264,14 @@ describe("TaskLite core", () => {
 			const task = parseTaskLine("- [ ] task 🔺", "TODO");
 			expect(task).not.toBeNull();
 			expect(task!.data.description).toBe("task");
-			expect(task!.data.priority).toBe("🔺");
+			expect(task!.data.priority).toBe("highest");
 		});
 
 		test("lowest priority emoji is extracted", () => {
 			const registry = new StatusRegistry();
 			const task = parseTaskLine("- [ ] task ⏬", "TODO");
 			expect(task).not.toBeNull();
-			expect(task!.data.priority).toBe("⏬");
+			expect(task!.data.priority).toBe("lowest");
 		});
 
 		test("multiple dates are all extracted", () => {
@@ -1468,6 +1468,15 @@ describe("TaskLite core", () => {
 			expect(filterTaskRecordsByQuery(records, 'priority = ""').map((record) => record.task.description)).toEqual([
 				"Backlog item",
 			]);
+			expect(filterTaskRecordsByQuery(records, 'priority = "highest"').map((record) => record.task.description)).toEqual([
+				"Ship dashboard",
+			]);
+			expect(filterTaskRecordsByQuery(records, 'priority = "🔺"').map((record) => record.task.description)).toEqual([
+				"Ship dashboard",
+			]);
+			expect(filterTaskRecordsByQuery(records, 'priority > "medium"').map((record) => record.task.description)).toEqual([
+				"Ship dashboard",
+			]);
 			expect(filterTaskRecordsByQuery(records, 'path =~ "Work/"').map((record) => record.task.description)).toEqual([
 				"Ship dashboard",
 				"Backlog item",
@@ -1642,7 +1651,7 @@ function createQueryRecords(): TaskDocumentRecord[] {
 			hasChildren: true,
 			description: "Ship dashboard",
 			status: "TODO",
-			priority: "🔺",
+			priority: "highest",
 			due: "2026-05-16",
 			scheduled: "2026-05-15",
 			tags: ["#work"],
@@ -1665,7 +1674,7 @@ function createQueryRecords(): TaskDocumentRecord[] {
 			parentLine: null,
 			description: "Done report",
 			status: "DONE",
-			priority: "🔼",
+			priority: "medium",
 			due: "2026-05-20",
 			tags: ["#archive"],
 			assignee: "Bob",
@@ -1681,7 +1690,7 @@ function createQueryRecord(input: {
 	hasChildren?: boolean;
 	description: string;
 	status: "TODO" | "DONE" | "IN_PROGRESS" | "ON_HOLD" | "CANCELLED" | "NON_TASK" | "EMPTY";
-	priority?: "🔺" | "⏫" | "🔼" | "🔽" | "⏬" | null;
+	priority?: TaskPriority | null;
 	due?: string | null;
 	scheduled?: string | null;
 	tags?: string[];

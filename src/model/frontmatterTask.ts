@@ -39,7 +39,13 @@ export interface FrontmatterTaskRecord {
 	task: TaskData;
 }
 
-const PRIORITY_SYMBOLS = new Set(["🔺", "⏫", "🔼", "🔽", "⏬"]);
+const PRIORITY_MAP: Record<string, TaskPriority> = {
+	"🔺": "highest", "highest": "highest",
+	"⏫": "high", "high": "high",
+	"🔼": "medium", "medium": "medium",
+	"🔽": "low", "low": "low",
+	"⏬": "lowest", "lowest": "lowest",
+};
 
 /**
  * Try to parse a file's frontmatter as a task record.
@@ -61,8 +67,8 @@ export function parseFrontmatterTask(
 
 	const rawPriority = fm["priority"];
 	const priority: TaskPriority | null =
-		typeof rawPriority === "string" && PRIORITY_SYMBOLS.has(rawPriority)
-			? (rawPriority as TaskPriority)
+		typeof rawPriority === "string" && rawPriority in PRIORITY_MAP
+			? PRIORITY_MAP[rawPriority] ?? null
 			: null;
 
 	const rawOnCompletion = fm["onCompletion"] ?? fm["on_completion"];

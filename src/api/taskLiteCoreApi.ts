@@ -29,7 +29,7 @@ export interface ListTasksOptions {
 export interface CreateTaskInput {
 	description: string;
 	status?: string;
-	priority?: TaskPriority | null;
+	priority?: TaskPriority | string | null;
 	dates?: {
 		start?: string | null;
 		scheduled?: string | null;
@@ -44,10 +44,9 @@ export interface CreateTaskInput {
 	parentLineNumber?: number;
 }
 
-/** Partial patch for task metadata fields. Omitted keys are left unchanged. */
 export type EditTaskPatch = {
 	description?: string;
-	priority?: TaskPriority | null;
+	priority?: TaskPriority | string | null;
 	dates?: {
 		start?: string | null;
 		scheduled?: string | null;
@@ -205,7 +204,7 @@ async function createTask({
 		data: {
 			status: statusConfig.type,
 			description: input.description,
-			priority: input.priority ?? null,
+			priority: normalizePriority(input.priority),
 			dates: {
 				start: input.dates?.start ?? null,
 				created: null,
@@ -327,7 +326,7 @@ async function editFileTask({
 	const data = copyTaskData(node.task.data);
 
 	if (patch.description !== undefined) data.description = patch.description;
-	if (patch.priority !== undefined) data.priority = patch.priority;
+	if (patch.priority !== undefined) data.priority = normalizePriority(patch.priority);
 	if (patch.recurrence !== undefined) data.recurrence = patch.recurrence;
 	if (patch.onCompletion !== undefined) data.onCompletion = patch.onCompletion;
 	if (patch.id !== undefined) data.id = patch.id;
@@ -459,6 +458,16 @@ function findMatchingTaskLine(lines: string[], line: string, registry: StatusReg
 		const candidateTask = parseLineWithStatus(candidate, registry);
 		return candidateTask ? taskIdentityKey(candidateTask.data) === incomingKey : false;
 	});
+}
+
+function normalizePriority(pri: string | null | undefined): TaskPriority | null {
+	if (!pri) return null;
+	if (pri === "highest" || pri === "🔺") return "highest";
+	if (pri === "high" || pri === "⏫") return "high";
+	if (pri === "medium" || pri === "🔼") return "medium";
+	if (pri === "low" || pri === "🔽") return "low";
+	if (pri === "lowest" || pri === "⏬") return "lowest";
+	return null;
 }
 
 function isTFile(value: unknown): value is TFile {

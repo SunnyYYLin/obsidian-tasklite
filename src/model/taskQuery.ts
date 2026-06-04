@@ -249,8 +249,24 @@ function evaluateComparison(left: LiteralValue | string[], operator: ComparisonO
 	return comparison >= 0;
 }
 
+const PRIORITY_RANKS: Record<string, number> = {
+	"highest": 5, "🔺": 5,
+	"high": 4, "⏫": 4,
+	"medium": 3, "🔼": 3,
+	"low": 2, "🔽": 2,
+	"lowest": 1, "⏬": 1,
+	"none": 0, "": 0,
+};
+
 function compareValues(left: LiteralValue, right: LiteralValue): number {
 	if (left === right) return 0;
+
+	const leftStr = left === null ? "" : String(left).trim();
+	const rightStr = right === null ? "" : String(right).trim();
+	if (leftStr in PRIORITY_RANKS && rightStr in PRIORITY_RANKS) {
+		return (PRIORITY_RANKS[leftStr] ?? 0) - (PRIORITY_RANKS[rightStr] ?? 0);
+	}
+
 	if (typeof left === "number" && typeof right === "number") {
 		return left - right;
 	}

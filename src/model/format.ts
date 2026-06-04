@@ -1,7 +1,7 @@
 import type { StatusConfiguration, StatusRegistry, StatusType } from "./status";
 
 /** Priority levels, ordered from highest to lowest. */
-export type TaskPriority = "🔺" | "⏫" | "🔼" | "🔽" | "⏬";
+export type TaskPriority = "highest" | "high" | "medium" | "low" | "lowest";
 
 /** Behaviour to apply when a task is finished. */
 export type OnCompletionAction = "delete" | "keep";
@@ -124,7 +124,12 @@ export function parseTaskBody(body: string, status: StatusType): TaskData {
 		const regex = new RegExp(` ?(${priorities})$`, "u");
 		const match = target.description.match(regex);
 		if (!match) return false;
-		target.priority = (match[1] ?? null) as TaskPriority | null;
+		const emoji = match[1];
+		if (emoji === "🔺") target.priority = "highest";
+		else if (emoji === "⏫") target.priority = "high";
+		else if (emoji === "🔼") target.priority = "medium";
+		else if (emoji === "🔽") target.priority = "low";
+		else if (emoji === "⏬") target.priority = "lowest";
 		target.description = target.description.replace(regex, "").trim();
 		return true;
 	}
@@ -148,7 +153,15 @@ export function serializeTaskLine(task: TaskLine, indentPrefix: string, registry
 
 export function serializeTaskBody(data: TaskData): string {
 	const parts = [data.description.trim()];
-	if (data.priority) parts.push(data.priority);
+	if (data.priority) {
+		let emoji = "";
+		if (data.priority === "highest") emoji = "🔺";
+		else if (data.priority === "high") emoji = "⏫";
+		else if (data.priority === "medium") emoji = "🔼";
+		else if (data.priority === "low") emoji = "🔽";
+		else if (data.priority === "lowest") emoji = "⏬";
+		if (emoji) parts.push(emoji);
+	}
 	addDate(parts, TASK_SYMBOLS.start, data.dates.start);
 	addDate(parts, TASK_SYMBOLS.created, data.dates.created);
 	addDate(parts, TASK_SYMBOLS.scheduled, data.dates.scheduled);
