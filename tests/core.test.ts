@@ -1397,6 +1397,13 @@ describe("TaskLite core", () => {
 			expect(tree.nodes[1]!.task).toBeNull();
 			expect(tree.nodes[1]!.parent).toBe(tree.nodes[0]);
 		});
+
+		test("child indented by two levels is linked to parent", () => {
+			const registry = new StatusRegistry();
+			const tree = buildTaskTree(["- [ ] parent", "    - [ ] child skipped level"], null, registry);
+			expect(tree.nodes.length).toBe(2);
+			expect(tree.nodes[1]!.parent).toBe(tree.nodes[0]);
+		});
 	});
 
 	describe("reconciliation edge cases", () => {
