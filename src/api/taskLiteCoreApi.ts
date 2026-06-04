@@ -11,9 +11,9 @@ import { taskIdentityKey } from "../model/taskIdentity";
 import { applyTaskStatus } from "../model/taskState";
 import { buildTaskTree, getSubtreeNodes, taskDepth } from "../model/tree";
 import type { TaskDocumentStore, TaskDocumentRecord } from "../model/taskDocumentStore";
-import { parseFrontmatterTask } from "../model/frontmatterTask";
+import { parseFrontmatterTask, buildFrontmatterPatch, applyFrontmatterPatchToContent } from "../model/frontmatterTask";
 import { filterTaskRecordsByQuery } from "../model/taskQuery";
-import type { StatusRegistry } from "../model/status";
+import { type StatusRegistry, type StatusType } from "../model/status";
 import type { TaskLiteSettings } from "../settings";
 
 /** TaskLiteTaskRecord 与 TaskDocumentRecord 共享同一个形状，此处直接复用，避免类型重复定义 */
@@ -123,6 +123,7 @@ export function createTaskLiteCoreApi({app, registry, getSettings, documentStore
 			settings: getSettings(),
 			documentStore,
 			mutate: (input) => changeTaskStatusAtLine({ ...input, targetStatusSymbol: statusSymbol }),
+			statusSymbol,
 		}),
 		createTask: (input) => createTask({app, input, registry, settings: getSettings(), documentStore}),
 		deleteTask: (path, lineNumber) => deleteFileTask({app, path, lineNumber, registry, documentStore}),
@@ -170,12 +171,14 @@ async function listTasks({
 		}
 		for (const node of tree.nodes) {
 			if (!node.task) continue;
+			const parentLine = (fmRecord && node.parentLine === null) ? -1 : node.parentLine;
+			const depth = (fmRecord && node.parentLine === null) ? 0 : taskDepth(node);
 			records.push({
 				path: file.path,
 				basename: file.basename,
 				lineNumber: node.lineNumber,
-				parentLine: node.parentLine,
-				depth: taskDepth(node),
+				parentLine: parentLine,
+				depth: depth,
 				hasChildren: node.children.some((child) => child.task),
 				task: node.task.data,
 			});
@@ -282,6 +285,16 @@ async function deleteFileTask({
 	const document = await documentStore?.getDocumentByPath(path);
 	const lines = document ? [...document.lines] : (await app.vault.read(file)).split("\n");
 	const tree = buildTaskTree(lines, app.metadataCache.getFileCache(file), registry);
+	if (lineNumber === -1) {
+		const metadata = app.metadataCache.getFileCache(file);
+		if (!metadata?.frontmatter?.task) return false;
+		const fmPatch = { task: null };
+		const nextContent = applyFrontmatterPatchToContent(lines.join("\n"), fmPatch);
+		await app.vault.modify(file, nextContent);
+		await documentStore?.replaceDocumentContent(file, nextContent);
+		return true;
+	}
+
 	const node = tree.byLine.get(lineNumber);
 	if (!node) return false;
 
@@ -320,6 +333,34 @@ async function editFileTask({
 	const document = await documentStore?.getDocumentByPath(path);
 	const lines = document ? [...document.lines] : (await app.vault.read(file)).split("\n");
 	const tree = buildTaskTree(lines, app.metadataCache.getFileCache(file), registry);
+	if (lineNumber === -1) {
+		const metadata = app.metadataCache.getFileCache(file);
+		const hasBodyTasks = tree.nodes.some((n) => n.task);
+		const fmRecord = parseFrontmatterTask(file, metadata, registry, hasBodyTasks);
+		if (!fmRecord) return false;
+
+		const data = copyTaskData(fmRecord.task);
+		if (patch.description !== undefined) data.description = patch.description;
+		if (patch.priority !== undefined) data.priority = normalizePriority(patch.priority);
+		if (patch.recurrence !== undefined) data.recurrence = patch.recurrence;
+		if (patch.onCompletion !== undefined) data.onCompletion = patch.onCompletion;
+		if (patch.id !== undefined) data.id = patch.id;
+		if (patch.dependsOn !== undefined) data.dependsOn = patch.dependsOn;
+		if (patch.assignee !== undefined) data.assignee = patch.assignee;
+		if (patch.dates) {
+			const d = patch.dates;
+			if (d.start !== undefined) data.dates.start = d.start;
+			if (d.scheduled !== undefined) data.dates.scheduled = d.scheduled;
+			if (d.due !== undefined) data.dates.due = d.due;
+		}
+
+		const fmPatch = buildFrontmatterPatch(fmRecord.task, data, registry);
+		const nextContent = applyFrontmatterPatchToContent(lines.join("\n"), fmPatch);
+		await app.vault.modify(file, nextContent);
+		await documentStore?.replaceDocumentContent(file, nextContent);
+		return true;
+	}
+
 	const node = tree.byLine.get(lineNumber);
 	if (!node?.task) return false;
 
@@ -357,6 +398,7 @@ async function updateFileTask({
 	settings,
 	documentStore,
 	mutate,
+	statusSymbol,
 }: {
 	app: App;
 	path: string;
@@ -372,11 +414,52 @@ async function updateFileTask({
 		registry: StatusRegistry;
 		settings: TaskLiteSettings;
 	}) => ToggleResult | null;
+	statusSymbol?: string;
 }): Promise<boolean> {
 	const file = app.vault.getAbstractFileByPath(path);
 	if (!isTFile(file)) return false;
 	const document = await documentStore?.getDocumentByPath(path);
 	const lines = document ? [...document.lines] : (await app.vault.read(file)).split("\n");
+
+	if (lineNumber === -1) {
+		if (!statusSymbol) return false;
+		const metadata = app.metadataCache.getFileCache(file);
+		const tree = buildTaskTree(lines, metadata, registry);
+		const hasBodyTasks = tree.nodes.some((n) => n.task);
+		const fmRecord = parseFrontmatterTask(file, metadata, registry, hasBodyTasks);
+		if (!fmRecord) return false;
+
+		const statusConfig = registry.get(statusSymbol);
+		const updatedData = applyTaskStatus(fmRecord.task, statusConfig.type, settings, {fillMissingStatusDate: true});
+
+		// Cascade to children if enabled
+		const behavior = statusConfig.type === "DONE" ? "finish" :
+			(statusConfig.type === "CANCELLED" ? "cancel" :
+			(fmRecord.task.status === "CANCELLED" ? "uncancel" : "unfinish"));
+		const cascade = (behavior === "finish" && settings.toggleBehavior.cascadeFinish) ||
+			(behavior === "cancel" && settings.toggleBehavior.cascadeCancel) ||
+			(behavior === "unfinish" && settings.toggleBehavior.cascadeUnfinish) ||
+			(behavior === "uncancel" && settings.toggleBehavior.cascadeUncancel);
+
+		if (cascade) {
+			for (let i = 0; i < lines.length; i++) {
+				const node = tree.byLine.get(i);
+				if (node?.task) {
+					const nodeUpdatedData = applyTaskStatus(node.task.data, statusConfig.type, settings, {fillMissingStatusDate: true});
+					const depth = taskDepth(node);
+					const indent = getIndentPrefix(depth, app, lines);
+					lines[i] = serializeTaskLine({...node.task, data: nodeUpdatedData}, indent, registry);
+				}
+			}
+		}
+
+		const fmPatch = buildFrontmatterPatch(fmRecord.task, updatedData, registry);
+		const nextContent = applyFrontmatterPatchToContent(lines.join("\n"), fmPatch);
+		await app.vault.modify(file, nextContent);
+		await documentStore?.replaceDocumentContent(file, nextContent);
+		return true;
+	}
+
 	const result = mutate({
 		lines,
 		lineNumber,
@@ -388,6 +471,48 @@ async function updateFileTask({
 	if (!result) return false;
 
 	lines.splice(result.fromLine, result.toLine - result.fromLine + 1, ...result.replacement);
+
+	// Propagate status update to frontmatter task if it exists
+	const fmMetadata = app.metadataCache.getFileCache(file);
+	const tempTree = buildTaskTree(lines, fmMetadata, registry);
+	const hasBodyTasks = tempTree.nodes.some((n) => n.task);
+	const fmRecord = parseFrontmatterTask(file, fmMetadata, registry, hasBodyTasks);
+	if (fmRecord) {
+		const rootTasks = tempTree.nodes.filter((n) => n.task && n.parentLine === null);
+		if (rootTasks.length > 0) {
+			const currentType = fmRecord.task.status;
+			let targetType: StatusType | null = null;
+
+			const hasIncomplete = rootTasks.some((n) => n.task && n.task.data.status !== "DONE" && n.task.data.status !== "CANCELLED");
+			const hasCancelled = rootTasks.some((n) => n.task && n.task.data.status === "CANCELLED");
+			const allDoneOrCancelled = rootTasks.every((n) => n.task && (n.task.data.status === "DONE" || n.task.data.status === "CANCELLED"));
+			const allCancelled = rootTasks.every((n) => n.task && n.task.data.status === "CANCELLED");
+
+			if (hasIncomplete) {
+				if ((currentType === "DONE" || currentType === "CANCELLED") && settings.toggleBehavior.parentOnUnfinish) {
+					targetType = "TODO";
+				}
+			} else if (allDoneOrCancelled) {
+				if (currentType === "TODO" || currentType === "IN_PROGRESS" || currentType === "ON_HOLD") {
+					if (allCancelled && settings.toggleBehavior.parentOnCancel) {
+						targetType = "CANCELLED";
+					} else if (settings.toggleBehavior.parentOnFinish) {
+						targetType = "DONE";
+					}
+				}
+			}
+
+			if (targetType && targetType !== currentType) {
+				const updatedData = applyTaskStatus(fmRecord.task, targetType, settings, {fillMissingStatusDate: true});
+				const fmPatch = buildFrontmatterPatch(fmRecord.task, updatedData, registry);
+				const finalContent = applyFrontmatterPatchToContent(lines.join("\n"), fmPatch);
+				await app.vault.modify(file, finalContent);
+				await documentStore?.replaceDocumentContent(file, finalContent);
+				return true;
+			}
+		}
+	}
+
 	const nextContent = lines.join("\n");
 	await app.vault.modify(file, nextContent);
 	await documentStore?.replaceDocumentContent(file, nextContent);

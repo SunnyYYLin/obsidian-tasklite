@@ -60,6 +60,43 @@ tasks: ignore
 ---
 ```
 
+### File-level Tasks (Frontmatter Tasks)
+
+You can turn an entire file (like a project note or a daily note) into a single task. This is particularly useful for tracking high-level projects or notes that themselves represent a task.
+
+To enable this, add `task: true` (or a status symbol) to the file's YAML frontmatter:
+
+```yaml
+---
+task: true
+description: "Review quarterly roadmap"
+status: " "
+priority: "⏫"
+due: "2026-06-30"
+assignee: "Alice & Bob"
+---
+```
+
+#### Supported Frontmatter Fields
+
+* **`task`**: Set to `true` (or any truthy value) to enable the file task.
+* **`status`**: The status symbol (e.g. `" "` for todo, `"x"` for done, `"-"` for cancelled). Note that status symbols with spaces should be quoted.
+* **`description`**: The task description. If omitted, the file's basename will be used.
+* **`priority`**: Task priority. Supports emoji (`🔺`, `⏫`, `🔼`, `🔽`, `⏬`) or keyword (`highest`, `high`, `medium`, `low`, `lowest`).
+* **`due` / `scheduled` / `start` / `created` / `done` / `cancelled`**: Dates in `YYYY-MM-DD` format.
+* **`recurrence`**: Recurrence rules (e.g., `every week`).
+* **`assignee` / `person`**: The person assigned (supports array or a single string with names separated by `&`).
+* **`onCompletion`**: On-completion actions (`delete` or `keep`).
+* **`id`**: Unique task ID.
+* **`dependsOn`**: Depends on task IDs.
+
+#### Body Tasks Connection
+
+Any root-level task lines (indented at depth 0, i.e. not indented under another list item) within the body of a file-task note are automatically treated as **subtasks** of the file task. 
+
+* Toggling the status of a file task can cascade status changes to all list tasks in its body (depending on settings).
+* Completing all list tasks in the body can bubble up to automatically complete the file-level task (depending on settings).
+
 ## Creating Tasks & Task Syntax
 
 A task in TaskLite is a standard Markdown checklist item (e.g., `- [ ]`) followed by a description and metadata emojis.

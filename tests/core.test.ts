@@ -943,6 +943,50 @@ describe("TaskLite core", () => {
 		expect(readCount).toBe(4);
 	});
 
+	test("document store correctly links root body tasks to frontmatter tasks with parentLine: -1", async () => {
+		const registry = new StatusRegistry();
+		const fmFile = createTestFile("fm.md", "fm");
+		const app = {
+			vault: {
+				on: () => {},
+				getMarkdownFiles: () => [fmFile],
+				cachedRead: () => Promise.resolve([
+					"---",
+					"task: true",
+					"description: Project Alpha",
+					"---",
+					"- [ ] Line-level task",
+				].join("\n")),
+			},
+			metadataCache: {
+				getFileCache: () => ({
+					frontmatter: {
+						task: true,
+						description: "Project Alpha",
+					},
+				}),
+				on: () => {},
+			},
+		};
+		const plugin = {
+			registerEvent: () => {},
+		};
+		const store = new TaskDocumentStore(app as TaskLitePlugin["app"], registry);
+		store.register(plugin as unknown as TaskLitePlugin);
+
+		const records = await store.listRecords();
+		expect(records).toHaveLength(2);
+
+		const fmRecord = records.find(r => r.lineNumber === -1);
+		const lineRecord = records.find(r => r.lineNumber === 4);
+
+		expect(fmRecord).toBeDefined();
+		expect(lineRecord).toBeDefined();
+
+		expect(lineRecord?.parentLine).toBe(-1);
+		expect(lineRecord?.depth).toBe(0);
+	});
+
 	describe("bracket edge cases", () => {
 		test("empty brackets are not treated as a checkbox", () => {
 			const registry = new StatusRegistry();
@@ -1609,7 +1653,7 @@ describe("TaskLite core", () => {
 			},
 		});
 
-		const listed = await api.listTasks();
+		const listed = await api.listTasks({ includeChildren: true });
 		expect(listed.map((record) => record.task.description)).toEqual([
 			"Project Alpha",
 			"Line-level task",

@@ -168,17 +168,20 @@ export class TaskDocumentStore {
 
 function taskRecordsFromDocument(document: TaskDocument): TaskDocumentRecord[] {
 	const records: TaskDocumentRecord[] = [];
+	const hasFm = !!document.frontmatterTask;
 	if (document.frontmatterTask) {
 		records.push(document.frontmatterTask);
 	}
 	for (const node of document.tree.nodes) {
 		if (!node.task) continue;
+		const parentLine = (hasFm && node.parentLine === null) ? -1 : node.parentLine;
+		const depth = (hasFm && node.parentLine === null) ? 0 : taskDepth(node);
 		records.push({
 			path: document.path,
 			basename: document.basename,
 			lineNumber: node.lineNumber,
-			parentLine: node.parentLine,
-			depth: taskDepth(node),
+			parentLine: parentLine,
+			depth: depth,
 			hasChildren: node.children.some((child) => child.task),
 			task: node.task.data,
 		});
