@@ -71,12 +71,12 @@ export function parseFrontmatterTask(
 			? rawOnCompletion
 			: null;
 
-	const rawPerson: unknown = (fm as Record<string, unknown>)["person"] ?? (fm as Record<string, unknown>)["assignee"];
-	let person: string[] = [];
-	if (Array.isArray(rawPerson)) {
-		person = rawPerson.map(String).map((p) => p.trim()).filter(Boolean);
-	} else if (typeof rawPerson === "string") {
-		person = rawPerson.split("&").map((p) => p.trim()).filter(Boolean);
+	const rawAssignee: unknown = (fm as Record<string, unknown>)["assignee"] ?? (fm as Record<string, unknown>)["person"];
+	let assignee: string[] = [];
+	if (Array.isArray(rawAssignee)) {
+		assignee = rawAssignee.map(String).map((p) => p.trim()).filter(Boolean);
+	} else if (typeof rawAssignee === "string") {
+		assignee = rawAssignee.split("&").map((p) => p.trim()).filter(Boolean);
 	}
 
 	const task: TaskData = {
@@ -95,7 +95,7 @@ export function parseFrontmatterTask(
 		onCompletion,
 		id: typeof fm["id"] === "string" ? fm["id"] : null,
 		dependsOn: typeof fm["dependsOn"] === "string" ? fm["dependsOn"] : null,
-		person,
+		assignee,
 		blockLink: null,
 		tags: Array.isArray(fm["tags"]) ? fm["tags"].map(String) : [],
 	};
@@ -132,7 +132,7 @@ export function buildFrontmatterPatch(
 	if (updates.onCompletion !== undefined) patch["onCompletion"] = updates.onCompletion;
 	if (updates.id !== undefined) patch["id"] = updates.id;
 	if (updates.dependsOn !== undefined) patch["dependsOn"] = updates.dependsOn;
-	if (updates.person !== undefined) patch["person"] = updates.person;
+	if (updates.assignee !== undefined) patch["assignee"] = updates.assignee;
 
 	if (updates.dates) {
 		const d = updates.dates;

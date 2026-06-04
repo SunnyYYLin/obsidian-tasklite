@@ -41,7 +41,7 @@ const EMOJI_SUGGESTIONS: EmojiSuggestion[] = [
 	{kind: "emoji", label: "Depends on / 依赖", insert: `${TASK_SYMBOLS.dependsOn} `},
 	{kind: "emoji", label: "On completion: keep / 完成后保留", insert: `${TASK_SYMBOLS.onCompletion} keep`},
 	{kind: "emoji", label: "On completion: delete / 完成后删除", insert: `${TASK_SYMBOLS.onCompletion} delete`},
-	{kind: "emoji", label: "Assignee / 负责人", insert: `${TASK_SYMBOLS.person} `},
+	{kind: "emoji", label: "Assignee / 负责人", insert: `${TASK_SYMBOLS.assignee} `},
 ];
 
 const RECURRENCE_SUGGESTIONS: RecurrenceSuggestion[] = [
@@ -214,7 +214,7 @@ function containsDelimiter(text: string): boolean {
 		TASK_SYMBOLS.onCompletion,
 		TASK_SYMBOLS.dependsOn,
 		TASK_SYMBOLS.id,
-		TASK_SYMBOLS.person,
+		TASK_SYMBOLS.assignee,
 		TASK_SYMBOLS.priority.highest,
 		TASK_SYMBOLS.priority.high,
 		TASK_SYMBOLS.priority.medium,

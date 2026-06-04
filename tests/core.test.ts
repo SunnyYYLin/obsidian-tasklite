@@ -1476,7 +1476,7 @@ describe("TaskLite core", () => {
 			expect(filterTaskRecordsByQuery(records, 'tags contains "#work"').map((record) => record.task.description)).toEqual([
 				"Ship dashboard",
 			]);
-			expect(filterTaskRecordsByQuery(records, 'person = "Alice"').map((record) => record.task.description)).toEqual([
+			expect(filterTaskRecordsByQuery(records, 'assignee = "Alice"').map((record) => record.task.description)).toEqual([
 				"Ship dashboard",
 			]);
 			expect(filterTaskRecordsByQuery(records, "hasChildren = true").map((record) => record.task.description)).toEqual([
@@ -1539,7 +1539,7 @@ describe("TaskLite core", () => {
 					parentLine: null,
 					description: "Task A",
 					status: "TODO",
-					person: "Alice & Bob",
+					assignee: "Alice & Bob",
 				}),
 				createQueryRecord({
 					path: "Work/tasks.md",
@@ -1547,7 +1547,7 @@ describe("TaskLite core", () => {
 					parentLine: null,
 					description: "Task B",
 					status: "TODO",
-					person: "Alice",
+					assignee: "Alice",
 				}),
 				createQueryRecord({
 					path: "Work/tasks.md",
@@ -1555,21 +1555,22 @@ describe("TaskLite core", () => {
 					parentLine: null,
 					description: "Task C",
 					status: "TODO",
-					person: "Charlie",
+					assignee: "Charlie",
 				}),
 			];
 
-			expect(filterTaskRecordsByQuery(records, 'person = "Alice"').map((record) => record.task.description)).toEqual([
+			expect(filterTaskRecordsByQuery(records, 'assignee = "Alice"').map((record) => record.task.description)).toEqual([
 				"Task A",
 				"Task B",
 			]);
+			// Verify that "person" query works as an alias
 			expect(filterTaskRecordsByQuery(records, 'person = "Bob"').map((record) => record.task.description)).toEqual([
 				"Task A",
 			]);
-			expect(filterTaskRecordsByQuery(records, 'person = "Charlie"').map((record) => record.task.description)).toEqual([
+			expect(filterTaskRecordsByQuery(records, 'assignee = "Charlie"').map((record) => record.task.description)).toEqual([
 				"Task C",
 			]);
-			expect(filterTaskRecordsByQuery(records, 'person != "Alice"').map((record) => record.task.description)).toEqual([
+			expect(filterTaskRecordsByQuery(records, 'assignee != "Alice"').map((record) => record.task.description)).toEqual([
 				"Task C",
 			]);
 		});
@@ -1645,7 +1646,7 @@ function createQueryRecords(): TaskDocumentRecord[] {
 			due: "2026-05-16",
 			scheduled: "2026-05-15",
 			tags: ["#work"],
-			person: "Alice",
+			assignee: "Alice",
 		}),
 		createQueryRecord({
 			path: "Work/tasks.md",
@@ -1667,7 +1668,7 @@ function createQueryRecords(): TaskDocumentRecord[] {
 			priority: "🔼",
 			due: "2026-05-20",
 			tags: ["#archive"],
-			person: "Bob",
+			assignee: "Bob",
 		}),
 	];
 }
@@ -1684,7 +1685,7 @@ function createQueryRecord(input: {
 	due?: string | null;
 	scheduled?: string | null;
 	tags?: string[];
-	person?: string | string[] | null;
+	assignee?: string | string[] | null;
 }): TaskDocumentRecord {
 	return {
 		path: input.path,
@@ -1709,9 +1710,9 @@ function createQueryRecord(input: {
 			onCompletion: null,
 			dependsOn: null,
 			id: null,
-			person: typeof input.person === "string"
-				? input.person.split("&").map((p) => p.trim()).filter(Boolean)
-				: (Array.isArray(input.person) ? input.person : []),
+			assignee: typeof input.assignee === "string"
+				? input.assignee.split("&").map((p) => p.trim()).filter(Boolean)
+				: (Array.isArray(input.assignee) ? input.assignee : []),
 			blockLink: null,
 			tags: input.tags ?? [],
 		},

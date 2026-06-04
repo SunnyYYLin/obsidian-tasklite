@@ -277,8 +277,9 @@ function getFieldValue(record: TaskDocumentRecord, field: string): LiteralValue 
 			return record.basename;
 		case "tags":
 			return record.task.tags.join(" ");
+		case "assignee":
 		case "person":
-			return record.task.person;
+			return record.task.assignee;
 		case "hasChildren":
 			return record.hasChildren;
 		case "parentLine":

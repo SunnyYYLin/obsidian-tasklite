@@ -39,6 +39,7 @@ export interface CreateTaskInput {
 	onCompletion?: OnCompletionAction | null;
 	id?: string | null;
 	dependsOn?: string | null;
+	assignee?: string[];
 	path?: string;
 	parentLineNumber?: number;
 }
@@ -56,6 +57,7 @@ export type EditTaskPatch = {
 	onCompletion?: OnCompletionAction | null;
 	id?: string | null;
 	dependsOn?: string | null;
+	assignee?: string[];
 };
 
 export interface TaskLiteCoreApi {
@@ -216,7 +218,7 @@ async function createTask({
 			onCompletion: input.onCompletion ?? null,
 			dependsOn: input.dependsOn ?? null,
 			id: input.id ?? null,
-			person: [],
+			assignee: input.assignee ?? [],
 			blockLink: null,
 			tags: [],
 		},
@@ -330,6 +332,7 @@ async function editFileTask({
 	if (patch.onCompletion !== undefined) data.onCompletion = patch.onCompletion;
 	if (patch.id !== undefined) data.id = patch.id;
 	if (patch.dependsOn !== undefined) data.dependsOn = patch.dependsOn;
+	if (patch.assignee !== undefined) data.assignee = patch.assignee;
 	if (patch.dates) {
 		const d = patch.dates;
 		if (d.start !== undefined) data.dates.start = d.start;
