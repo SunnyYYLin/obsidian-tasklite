@@ -26,6 +26,14 @@ export class StatusRegistry {
 		};
 	}
 
+	has(symbol: string): boolean {
+		return this.bySymbol.has(symbol);
+	}
+
+	getAll(): StatusConfiguration[] {
+		return [...this.bySymbol.values()];
+	}
+
 	next(status: StatusConfiguration): StatusConfiguration {
 		return this.get(status.nextStatusSymbol);
 	}

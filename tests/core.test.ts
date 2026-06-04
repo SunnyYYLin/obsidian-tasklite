@@ -1659,6 +1659,58 @@ describe("TaskLite core", () => {
 			"Line-level task",
 		]);
 	});
+
+	test("frontmatter task supports status keywords and preserves them on update", async () => {
+		let updatedContent = "";
+		const file = createTestFile("Work/project.md", "project");
+		const api = createTestCoreApi({
+			vault: {
+				getMarkdownFiles: () => [file],
+				cachedRead: () => [
+					"---",
+					"task: true",
+					"status: todo",
+					"description: Project Keyword",
+					"---",
+				].join("\n"),
+				read: () => Promise.resolve([
+					"---",
+					"task: true",
+					"status: todo",
+					"description: Project Keyword",
+					"---",
+				].join("\n")),
+				modify: (f: unknown, content: string) => {
+					updatedContent = content;
+					return Promise.resolve();
+				},
+				getAbstractFileByPath: () => file,
+			},
+			metadataCache: {
+				getFileCache: () => ({
+					frontmatter: {
+						task: true,
+						status: "todo",
+						description: "Project Keyword",
+					},
+				}),
+			},
+		});
+
+		const listed = await api.listTasks();
+		expect(listed).toHaveLength(1);
+		expect(listed[0]?.task.status).toBe("TODO");
+
+		// Toggle it to DONE
+		const result = await api.updateTaskStatus("Work/project.md", -1, "x");
+		expect(result).toBe(true);
+		expect(updatedContent).toContain("status: done");
+
+		// Toggle it back to TODO
+		const result2 = await api.updateTaskStatus("Work/project.md", -1, " ");
+		expect(result2).toBe(true);
+		expect(updatedContent).toContain("status: todo");
+	});
 });
 
 function createTestCoreApi(app: Record<string, unknown> = {}) {

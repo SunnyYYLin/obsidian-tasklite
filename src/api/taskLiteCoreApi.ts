@@ -354,7 +354,7 @@ async function editFileTask({
 			if (d.due !== undefined) data.dates.due = d.due;
 		}
 
-		const fmPatch = buildFrontmatterPatch(fmRecord.task, data, registry);
+		const fmPatch = buildFrontmatterPatch(fmRecord.task, data, registry, fmRecord.rawStatus);
 		const nextContent = applyFrontmatterPatchToContent(lines.join("\n"), fmPatch);
 		await app.vault.modify(file, nextContent);
 		await documentStore?.replaceDocumentContent(file, nextContent);
@@ -453,7 +453,7 @@ async function updateFileTask({
 			}
 		}
 
-		const fmPatch = buildFrontmatterPatch(fmRecord.task, updatedData, registry);
+		const fmPatch = buildFrontmatterPatch(fmRecord.task, updatedData, registry, fmRecord.rawStatus);
 		const nextContent = applyFrontmatterPatchToContent(lines.join("\n"), fmPatch);
 		await app.vault.modify(file, nextContent);
 		await documentStore?.replaceDocumentContent(file, nextContent);
@@ -504,7 +504,7 @@ async function updateFileTask({
 
 			if (targetType && targetType !== currentType) {
 				const updatedData = applyTaskStatus(fmRecord.task, targetType, settings, {fillMissingStatusDate: true});
-				const fmPatch = buildFrontmatterPatch(fmRecord.task, updatedData, registry);
+				const fmPatch = buildFrontmatterPatch(fmRecord.task, updatedData, registry, fmRecord.rawStatus);
 				const finalContent = applyFrontmatterPatchToContent(lines.join("\n"), fmPatch);
 				await app.vault.modify(file, finalContent);
 				await documentStore?.replaceDocumentContent(file, finalContent);

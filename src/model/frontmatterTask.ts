@@ -37,6 +37,8 @@ export interface FrontmatterTaskRecord {
 	hasChildren: boolean;
 	/** Parsed task data built from frontmatter fields. */
 	task: TaskData;
+	/** Raw status value from frontmatter before mapping. */
+	rawStatus: string | null;
 }
 
 const PRIORITY_MAP: Record<string, TaskPriority> = {
@@ -46,6 +48,56 @@ const PRIORITY_MAP: Record<string, TaskPriority> = {
 	"🔽": "low", "low": "low",
 	"⏬": "lowest", "lowest": "lowest",
 };
+
+const STATUS_KEYWORD_MAP: Record<string, string> = {
+	"todo": " ",
+	"open": " ",
+	"done": "x",
+	"complete": "x",
+	"completed": "x",
+	"in-progress": "/",
+	"inprogress": "/",
+	"doing": "/",
+	"active": "/",
+	"cancelled": "-",
+	"canceled": "-",
+};
+
+function resolveStatusSymbol(rawStatus: unknown, registry: StatusRegistry): string {
+	if (typeof rawStatus !== "string") {
+		return " ";
+	}
+
+	const normalized = rawStatus.trim().toLowerCase();
+
+	// 1. Direct symbol check in registry
+	if (registry.has(rawStatus)) {
+		return rawStatus;
+	}
+	if (registry.has(normalized)) {
+		return normalized;
+	}
+
+	// 2. Keyword map check
+	if (normalized in STATUS_KEYWORD_MAP) {
+		return STATUS_KEYWORD_MAP[normalized] ?? " ";
+	}
+
+	// 3. Scan registry for name or type match
+	for (const config of registry.getAll()) {
+		if (config.name.toLowerCase() === normalized) {
+			return config.symbol;
+		}
+		if (config.type.toLowerCase() === normalized) {
+			return config.symbol;
+		}
+		if (config.type.toLowerCase().replace("_", "-") === normalized) {
+			return config.symbol;
+		}
+	}
+
+	return " ";
+}
 
 /**
  * Try to parse a file's frontmatter as a task record.
@@ -62,7 +114,8 @@ export function parseFrontmatterTask(
 	if (!fm || !fm["task"]) return null;
 	if (fm["tasks"] === "ignore") return null;
 
-	const statusSymbol = typeof fm["status"] === "string" ? fm["status"] : " ";
+	const rawStatus = typeof fm["status"] === "string" ? fm["status"] : null;
+	const statusSymbol = resolveStatusSymbol(fm["status"], registry);
 	const statusConfig = registry.get(statusSymbol);
 
 	const rawPriority = fm["priority"];
@@ -114,6 +167,7 @@ export function parseFrontmatterTask(
 		depth: -1,
 		hasChildren,
 		task,
+		rawStatus,
 	};
 }
 
@@ -126,11 +180,17 @@ export function buildFrontmatterPatch(
 	current: TaskData,
 	updates: Partial<TaskData>,
 	registry: StatusRegistry,
+	currentStatusRaw?: string | null,
 ): Record<string, unknown> {
 	const patch: Record<string, unknown> = {};
+	const useKeyword = typeof currentStatusRaw === "string" && !registry.has(currentStatusRaw);
 
 	if (updates.status !== undefined) {
-		patch["status"] = registry.getByType(updates.status).symbol;
+		if (useKeyword) {
+			patch["status"] = updates.status.toLowerCase().replace("_", "-");
+		} else {
+			patch["status"] = registry.getByType(updates.status).symbol;
+		}
 	}
 	if (updates.priority !== undefined) patch["priority"] = updates.priority;
 	if (updates.description !== undefined) patch["description"] = updates.description;
@@ -152,7 +212,11 @@ export function buildFrontmatterPatch(
 
 	// Carry over fields that are not being updated
 	if (!("status" in patch)) {
-		patch["status"] = registry.getByType(current.status).symbol;
+		if (useKeyword) {
+			patch["status"] = current.status.toLowerCase().replace("_", "-");
+		} else {
+			patch["status"] = registry.getByType(current.status).symbol;
+		}
 	}
 
 	return patch;

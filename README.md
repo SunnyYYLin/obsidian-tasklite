@@ -80,7 +80,7 @@ assignee: "Alice & Bob"
 #### Supported Frontmatter Fields
 
 * **`task`**: Set to `true` (or any truthy value) to enable the file task.
-* **`status`**: The status symbol (e.g. `" "` for todo, `"x"` for done, `"-"` for cancelled). Note that status symbols with spaces should be quoted.
+* **`status`**: The status symbol (e.g. `" "` for todo, `"x"` for done) or keywords (e.g., `todo`, `done`, `in-progress`, `cancelled`). Keywords are case-insensitive and format-preserving. Status symbols with spaces (like `" "`) should be quoted.
 * **`description`**: The task description. If omitted, the file's basename will be used.
 * **`priority`**: Task priority. Supports emoji (`🔺`, `⏫`, `🔼`, `🔽`, `⏬`) or keyword (`highest`, `high`, `medium`, `low`, `lowest`).
 * **`due` / `scheduled` / `start` / `created` / `done` / `cancelled`**: Dates in `YYYY-MM-DD` format.
