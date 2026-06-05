@@ -202,9 +202,15 @@ function shiftDateByDelta(
 	nextReference: string,
 ): string | null {
 	if (!value) return null;
-	if (!originalReference) return nextReference;
-	const dayOffset = daysBetween(originalReference, value);
-	return addDays(nextReference, dayOffset);
+	if (!originalReference) {
+		const { time } = splitDateTime(value);
+		return nextReference + time;
+	}
+	const { date: valDate, time: valTime } = splitDateTime(value);
+	const { date: refDate } = splitDateTime(originalReference);
+	const dayOffset = daysBetween(refDate, valDate);
+	const shiftedDate = addDays(nextReference, dayOffset);
+	return shiftedDate + valTime;
 }
 
 function daysBetween(from: string, to: string): number {
@@ -215,14 +221,24 @@ function daysBetween(from: string, to: string): number {
 }
 
 function addDays(value: string, days: number): string {
-	const date = parseDate(value);
+	const { date: valDate, time: valTime } = splitDateTime(value);
+	const date = parseDate(valDate);
 	if (!date) return value;
 	date.setUTCDate(date.getUTCDate() + days);
-	return formatDate(date);
+	return formatDate(date) + valTime;
+}
+
+function splitDateTime(value: string): { date: string; time: string } {
+	const match = value.match(/^(\d{4}-\d{2}-\d{2})(.*)$/u);
+	if (match) {
+		return { date: match[1] ?? value, time: match[2] ?? "" };
+	}
+	return { date: value, time: "" };
 }
 
 function parseDate(value: string): Date | null {
-	const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/u);
+	const { date: dateStr } = splitDateTime(value);
+	const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/u);
 	if (!match) return null;
 	const year = Number.parseInt(match[1] ?? "", 10);
 	const month = Number.parseInt(match[2] ?? "", 10);

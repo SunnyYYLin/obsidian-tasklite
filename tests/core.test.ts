@@ -99,6 +99,23 @@ describe("TaskLite core", () => {
 		expect(result?.replacement[0]).toContain(`${TASK_SYMBOLS.due} 2026-06-15`);
 	});
 
+	test("supports recurrence with times and remind dates", () => {
+		const registry = new StatusRegistry();
+		// Due on 2026-05-29 10:00 AM, Remind on 2026-05-28 6:00 PM, recur every day
+		// Next due should be 2026-05-30 10:00 AM
+		// Next remind should be 2026-05-29 6:00 PM
+		const result = toggleTaskAtLine({
+			lines: [`- [ ] Standup ${TASK_SYMBOLS.due} 2026-05-29 10:00 AM ${TASK_SYMBOLS.remind} 2026-05-28 6:00 PM ${TASK_SYMBOLS.recurrence} every day`],
+			lineNumber: 0,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.replacement[0]).toContain(`${TASK_SYMBOLS.due} 2026-05-30 10:00 AM`);
+		expect(result?.replacement[0]).toContain(`${TASK_SYMBOLS.remind} 2026-05-29 6:00 PM`);
+	});
+
 	test("toggles status and adds a done date", () => {
 		const registry = new StatusRegistry();
 		const result = toggleTaskAtLine({
@@ -1393,6 +1410,14 @@ describe("TaskLite core", () => {
 			const task = parseTaskLine("- [ ] 买菜 🛒", "TODO");
 			expect(task).not.toBeNull();
 			expect(task!.data.description).toBe("买菜 🛒");
+		});
+
+		test("remind date and times in dates are parsed correctly", () => {
+			const task = parseTaskLine("- [ ] task ⏰ 2026-06-05 18:40 📅 2026-06-05 6:40 PM", "TODO");
+			expect(task).not.toBeNull();
+			expect(task!.data.dates.remind).toBe("2026-06-05 18:40");
+			expect(task!.data.dates.due).toBe("2026-06-05 6:40 PM");
+			expect(task!.data.description).toBe("task");
 		});
 	});
 
