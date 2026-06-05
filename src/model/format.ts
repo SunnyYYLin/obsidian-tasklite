@@ -25,6 +25,7 @@ export const TASK_SYMBOLS = {
 	dependsOn: "⛔",
 	id: "🆔",
 	assignee: "👤",
+	remind: "⏰",
 };
 
 export interface TaskDates {
@@ -34,6 +35,7 @@ export interface TaskDates {
 	due: string | null;
 	done: string | null;
 	cancelled: string | null;
+	remind: string | null;
 }
 
 export interface TaskData {
@@ -48,6 +50,8 @@ export interface TaskData {
 	assignee: string[];
 	blockLink: string | null;
 	tags: string[];
+	/** Raw remaining text not matched by any extractor. */
+	unmatched: string | null;
 }
 
 export interface TaskLine {
@@ -59,7 +63,8 @@ export interface TaskLine {
 export const taskLineRegex = /^([\s\t>]*)([-*+]|[0-9]+[.)]) +\[(.)\] *(.*)$/u;
 export const listItemRegex =
 	/^([\s\t>]*)([-*+]|[0-9]+[.)]) *(?:\[(.)\] *)?(.*)$/u;
-const dateRegex = "\\d{4}-\\d{2}-\\d{2}";
+const dateRegex =
+	"\\d{4}-\\d{2}-\\d{2}(?: \\d{1,2}:\\d{2}(?:\\s?[AaPp][Mm])?)?";
 const blockLinkRegex = / \^[a-zA-Z0-9-]+$/u;
 const tagRegex = /(^|\s)#[^ !@#$%^&*(),.?":{}|<>]+/g;
 
@@ -196,6 +201,7 @@ export const DEFAULT_EXTRACTORS: FieldExtractor[] = [
 	createDateExtractor("scheduled", TASK_SYMBOLS.scheduled),
 	createDateExtractor("start", TASK_SYMBOLS.start),
 	createDateExtractor("created", TASK_SYMBOLS.created),
+	createDateExtractor("remind", TASK_SYMBOLS.remind),
 	createStringExtractor(
 		"recurrence",
 		TASK_SYMBOLS.recurrence,
@@ -271,6 +277,7 @@ export function parseTaskBody(
 			due: null,
 			done: null,
 			cancelled: null,
+			remind: null,
 		},
 		recurrence: null,
 		onCompletion: null,
@@ -279,6 +286,7 @@ export function parseTaskBody(
 		assignee: [],
 		blockLink,
 		tags: [],
+		unmatched: null,
 	};
 
 	let matched = true;
@@ -297,6 +305,7 @@ export function parseTaskBody(
 	}
 
 	data.description = remaining.replace(/ {2,}/gu, " ").trim();
+	data.unmatched = remaining.trim() || null;
 	data.tags = extractTags(data.description);
 	return data;
 }
@@ -331,6 +340,7 @@ export function serializeTaskBody(data: TaskData): string {
 	addDate(parts, TASK_SYMBOLS.due, data.dates.due);
 	addDate(parts, TASK_SYMBOLS.done, data.dates.done);
 	addDate(parts, TASK_SYMBOLS.cancelled, data.dates.cancelled);
+	addDate(parts, TASK_SYMBOLS.remind, data.dates.remind);
 	if (data.recurrence)
 		parts.push(`${TASK_SYMBOLS.recurrence} ${data.recurrence}`);
 	if (data.onCompletion)
@@ -358,6 +368,7 @@ export function copyTaskData(data: TaskData): TaskData {
 					due: null,
 					done: null,
 					cancelled: null,
+					remind: null,
 				},
 		recurrence: data.recurrence ?? null,
 		onCompletion: data.onCompletion ?? null,
@@ -366,6 +377,7 @@ export function copyTaskData(data: TaskData): TaskData {
 		assignee: data.assignee ? [...data.assignee] : [],
 		blockLink: data.blockLink ?? null,
 		tags: data.tags ? [...data.tags] : [],
+		unmatched: data.unmatched ?? null,
 	};
 }
 

@@ -20,7 +20,7 @@ import type { TaskPriority, OnCompletionAction, TaskData } from "./format";
  *
  * Supported frontmatter keys: task, status, description, due, scheduled,
  * start, created, done, cancelled, priority, recurrence, onCompletion, id,
- * dependsOn, person.
+ * dependsOn, person, remind.
  */
 export interface FrontmatterTaskRecord {
 	/** Vault-relative path of the file, e.g. "Projects/Alpha.md". */
@@ -42,28 +42,36 @@ export interface FrontmatterTaskRecord {
 }
 
 const PRIORITY_MAP: Record<string, TaskPriority> = {
-	"🔺": "highest", "highest": "highest",
-	"⏫": "high", "high": "high",
-	"🔼": "medium", "medium": "medium",
-	"🔽": "low", "low": "low",
-	"⏬": "lowest", "lowest": "lowest",
+	"🔺": "highest",
+	highest: "highest",
+	"⏫": "high",
+	high: "high",
+	"🔼": "medium",
+	medium: "medium",
+	"🔽": "low",
+	low: "low",
+	"⏬": "lowest",
+	lowest: "lowest",
 };
 
 const STATUS_KEYWORD_MAP: Record<string, string> = {
-	"todo": " ",
-	"open": " ",
-	"done": "x",
-	"complete": "x",
-	"completed": "x",
+	todo: " ",
+	open: " ",
+	done: "x",
+	complete: "x",
+	completed: "x",
 	"in-progress": "/",
-	"inprogress": "/",
-	"doing": "/",
-	"active": "/",
-	"cancelled": "-",
-	"canceled": "-",
+	inprogress: "/",
+	doing: "/",
+	active: "/",
+	cancelled: "-",
+	canceled: "-",
 };
 
-function resolveStatusSymbol(rawStatus: unknown, registry: StatusRegistry): string {
+function resolveStatusSymbol(
+	rawStatus: unknown,
+	registry: StatusRegistry,
+): string {
 	if (typeof rawStatus !== "string") {
 		return " ";
 	}
@@ -121,7 +129,7 @@ export function parseFrontmatterTask(
 	const rawPriority = fm["priority"];
 	const priority: TaskPriority | null =
 		typeof rawPriority === "string" && rawPriority in PRIORITY_MAP
-			? PRIORITY_MAP[rawPriority] ?? null
+			? (PRIORITY_MAP[rawPriority] ?? null)
 			: null;
 
 	const rawOnCompletion = fm["onCompletion"] ?? fm["on_completion"];
@@ -130,17 +138,28 @@ export function parseFrontmatterTask(
 			? rawOnCompletion
 			: null;
 
-	const rawAssignee: unknown = (fm as Record<string, unknown>)["assignee"] ?? (fm as Record<string, unknown>)["person"];
+	const rawAssignee: unknown =
+		(fm as Record<string, unknown>)["assignee"] ??
+		(fm as Record<string, unknown>)["person"];
 	let assignee: string[] = [];
 	if (Array.isArray(rawAssignee)) {
-		assignee = rawAssignee.map(String).map((p) => p.trim()).filter(Boolean);
+		assignee = rawAssignee
+			.map(String)
+			.map((p) => p.trim())
+			.filter(Boolean);
 	} else if (typeof rawAssignee === "string") {
-		assignee = rawAssignee.split("&").map((p) => p.trim()).filter(Boolean);
+		assignee = rawAssignee
+			.split("&")
+			.map((p) => p.trim())
+			.filter(Boolean);
 	}
 
 	const task: TaskData = {
 		status: statusConfig.type,
-		description: typeof fm["description"] === "string" ? fm["description"] : file.basename,
+		description:
+			typeof fm["description"] === "string"
+				? fm["description"]
+				: file.basename,
 		priority,
 		dates: {
 			start: dateField(fm["start"]),
@@ -149,14 +168,17 @@ export function parseFrontmatterTask(
 			due: dateField(fm["due"]),
 			done: dateField(fm["done"]),
 			cancelled: dateField(fm["cancelled"]),
+			remind: dateField(fm["remind"]),
 		},
-		recurrence: typeof fm["recurrence"] === "string" ? fm["recurrence"] : null,
+		recurrence:
+			typeof fm["recurrence"] === "string" ? fm["recurrence"] : null,
 		onCompletion,
 		id: typeof fm["id"] === "string" ? fm["id"] : null,
 		dependsOn: typeof fm["dependsOn"] === "string" ? fm["dependsOn"] : null,
 		assignee,
 		blockLink: null,
 		tags: Array.isArray(fm["tags"]) ? fm["tags"].map(String) : [],
+		unmatched: null,
 	};
 
 	return {
@@ -183,7 +205,8 @@ export function buildFrontmatterPatch(
 	currentStatusRaw?: string | null,
 ): Record<string, unknown> {
 	const patch: Record<string, unknown> = {};
-	const useKeyword = typeof currentStatusRaw === "string" && !registry.has(currentStatusRaw);
+	const useKeyword =
+		typeof currentStatusRaw === "string" && !registry.has(currentStatusRaw);
 
 	if (updates.status !== undefined) {
 		if (useKeyword) {
@@ -193,9 +216,12 @@ export function buildFrontmatterPatch(
 		}
 	}
 	if (updates.priority !== undefined) patch["priority"] = updates.priority;
-	if (updates.description !== undefined) patch["description"] = updates.description;
-	if (updates.recurrence !== undefined) patch["recurrence"] = updates.recurrence;
-	if (updates.onCompletion !== undefined) patch["onCompletion"] = updates.onCompletion;
+	if (updates.description !== undefined)
+		patch["description"] = updates.description;
+	if (updates.recurrence !== undefined)
+		patch["recurrence"] = updates.recurrence;
+	if (updates.onCompletion !== undefined)
+		patch["onCompletion"] = updates.onCompletion;
 	if (updates.id !== undefined) patch["id"] = updates.id;
 	if (updates.dependsOn !== undefined) patch["dependsOn"] = updates.dependsOn;
 	if (updates.assignee !== undefined) patch["assignee"] = updates.assignee;
@@ -208,6 +234,7 @@ export function buildFrontmatterPatch(
 		if (d.due !== undefined) patch["due"] = d.due ?? null;
 		if (d.done !== undefined) patch["done"] = d.done ?? null;
 		if (d.cancelled !== undefined) patch["cancelled"] = d.cancelled ?? null;
+		if (d.remind !== undefined) patch["remind"] = d.remind ?? null;
 	}
 
 	// Carry over fields that are not being updated
@@ -278,5 +305,9 @@ export function applyFrontmatterPatchToContent(
 
 function dateField(value: unknown): string | null {
 	if (typeof value !== "string") return null;
-	return /^\d{4}-\d{2}-\d{2}$/u.test(value) ? value : null;
+	return /^\d{4}-\d{2}-\d{2}(?: \d{1,2}:\d{2}(?:\s?[AaPp][Mm])?)?$/u.test(
+		value,
+	)
+		? value
+		: null;
 }

@@ -7,7 +7,15 @@ export class TaskQueryError extends Error {
 	}
 }
 
-type TokenType = "identifier" | "string" | "boolean" | "null" | "operator" | "paren" | "comma" | "eof";
+type TokenType =
+	| "identifier"
+	| "string"
+	| "boolean"
+	| "null"
+	| "operator"
+	| "paren"
+	| "comma"
+	| "eof";
 
 interface Token {
 	type: TokenType;
@@ -18,11 +26,29 @@ interface Token {
 type LiteralValue = string | number | boolean | null;
 
 type Expression =
-	| {type: "binary"; operator: "AND" | "OR"; left: Expression; right: Expression}
-	| {type: "not"; expression: Expression}
-	| {type: "comparison"; field: string; operator: ComparisonOperator; value: LiteralValue};
+	| {
+			type: "binary";
+			operator: "AND" | "OR";
+			left: Expression;
+			right: Expression;
+	  }
+	| { type: "not"; expression: Expression }
+	| {
+			type: "comparison";
+			field: string;
+			operator: ComparisonOperator;
+			value: LiteralValue;
+	  };
 
-type ComparisonOperator = "=" | "!=" | "<" | "<=" | ">" | ">=" | "contains" | "=~";
+type ComparisonOperator =
+	| "="
+	| "!="
+	| "<"
+	| "<="
+	| ">"
+	| ">="
+	| "contains"
+	| "=~";
 
 export interface CompiledTaskQuery {
 	query: string;
@@ -47,13 +73,17 @@ export function compileTaskQuery(query: string): CompiledTaskQuery {
 	const expression = parser.parse();
 	const compiled = {
 		query: normalizedQuery,
-		matches: (record: TaskDocumentRecord) => evaluateExpression(expression, record),
+		matches: (record: TaskDocumentRecord) =>
+			evaluateExpression(expression, record),
 	};
 	compiledQueryCache.set(normalizedQuery, compiled);
 	return compiled;
 }
 
-export function filterTaskRecordsByQuery(records: TaskDocumentRecord[], query: string): TaskDocumentRecord[] {
+export function filterTaskRecordsByQuery(
+	records: TaskDocumentRecord[],
+	query: string,
+): TaskDocumentRecord[] {
 	const compiled = compileTaskQuery(query);
 	return records.filter((record) => compiled.matches(record));
 }
@@ -72,7 +102,12 @@ class Parser {
 	private parseOr(): Expression {
 		let expression = this.parseAnd();
 		while (this.matchKeyword("OR")) {
-			expression = {type: "binary", operator: "OR", left: expression, right: this.parseAnd()};
+			expression = {
+				type: "binary",
+				operator: "OR",
+				left: expression,
+				right: this.parseAnd(),
+			};
 		}
 		return expression;
 	}
@@ -80,14 +115,19 @@ class Parser {
 	private parseAnd(): Expression {
 		let expression = this.parseNot();
 		while (this.matchKeyword("AND")) {
-			expression = {type: "binary", operator: "AND", left: expression, right: this.parseNot()};
+			expression = {
+				type: "binary",
+				operator: "AND",
+				left: expression,
+				right: this.parseNot(),
+			};
 		}
 		return expression;
 	}
 
 	private parseNot(): Expression {
 		if (this.matchKeyword("NOT")) {
-			return {type: "not", expression: this.parseNot()};
+			return { type: "not", expression: this.parseNot() };
 		}
 		return this.parsePrimary();
 	}
@@ -105,7 +145,7 @@ class Parser {
 		const field = this.expect("identifier").value;
 		const operator = this.parseOperator();
 		const value = this.parseValue();
-		return {type: "comparison", field, operator, value};
+		return { type: "comparison", field, operator, value };
 	}
 
 	private parseOperator(): ComparisonOperator {
@@ -114,7 +154,10 @@ class Parser {
 			this.index++;
 			return token.value as ComparisonOperator;
 		}
-		if (token.type === "identifier" && token.value.toLowerCase() === "contains") {
+		if (
+			token.type === "identifier" &&
+			token.value.toLowerCase() === "contains"
+		) {
 			this.index++;
 			return "contains";
 		}
@@ -135,7 +178,10 @@ class Parser {
 			this.index++;
 			return null;
 		}
-		if (token.type === "identifier" && token.value.toLowerCase() === "date") {
+		if (
+			token.type === "identifier" &&
+			token.value.toLowerCase() === "date"
+		) {
 			return this.parseDateFunction();
 		}
 		if (token.type === "identifier") {
@@ -150,14 +196,20 @@ class Parser {
 		this.expectParen("(");
 		const valueToken = this.current();
 		let value: string;
-		if (valueToken.type === "identifier" && valueToken.value.toLowerCase() === "today") {
+		if (
+			valueToken.type === "identifier" &&
+			valueToken.value.toLowerCase() === "today"
+		) {
 			this.index++;
 			value = todayString();
 		} else if (valueToken.type === "string") {
 			this.index++;
 			value = valueToken.value;
 		} else {
-			throw this.error(valueToken, "Expected today or a date string in date(...).");
+			throw this.error(
+				valueToken,
+				"Expected today or a date string in date(...).",
+			);
 		}
 		this.expectParen(")");
 		return value;
@@ -165,7 +217,11 @@ class Parser {
 
 	private matchKeyword(keyword: "AND" | "OR" | "NOT"): boolean {
 		const token = this.current();
-		if (token.type !== "identifier" || token.value.toUpperCase() !== keyword) return false;
+		if (
+			token.type !== "identifier" ||
+			token.value.toUpperCase() !== keyword
+		)
+			return false;
 		this.index++;
 		return true;
 	}
@@ -204,20 +260,33 @@ class Parser {
 	}
 }
 
-function evaluateExpression(expression: Expression, record: TaskDocumentRecord): boolean {
+function evaluateExpression(
+	expression: Expression,
+	record: TaskDocumentRecord,
+): boolean {
 	switch (expression.type) {
 		case "binary":
 			return expression.operator === "AND"
-				? evaluateExpression(expression.left, record) && evaluateExpression(expression.right, record)
-				: evaluateExpression(expression.left, record) || evaluateExpression(expression.right, record);
+				? evaluateExpression(expression.left, record) &&
+						evaluateExpression(expression.right, record)
+				: evaluateExpression(expression.left, record) ||
+						evaluateExpression(expression.right, record);
 		case "not":
 			return !evaluateExpression(expression.expression, record);
 		case "comparison":
-			return evaluateComparison(getFieldValue(record, expression.field), expression.operator, expression.value);
+			return evaluateComparison(
+				getFieldValue(record, expression.field),
+				expression.operator,
+				expression.value,
+			);
 	}
 }
 
-function evaluateComparison(left: LiteralValue | string[], operator: ComparisonOperator, right: LiteralValue): boolean {
+function evaluateComparison(
+	left: LiteralValue | string[],
+	operator: ComparisonOperator,
+	right: LiteralValue,
+): boolean {
 	if (Array.isArray(left)) {
 		const target = right === null ? "" : String(right).trim();
 		if (operator === "=") {
@@ -250,12 +319,18 @@ function evaluateComparison(left: LiteralValue | string[], operator: ComparisonO
 }
 
 const PRIORITY_RANKS: Record<string, number> = {
-	"highest": 5, "🔺": 5,
-	"high": 4, "⏫": 4,
-	"medium": 3, "🔼": 3,
-	"low": 2, "🔽": 2,
-	"lowest": 1, "⏬": 1,
-	"none": 0, "": 0,
+	highest: 5,
+	"🔺": 5,
+	high: 4,
+	"⏫": 4,
+	medium: 3,
+	"🔼": 3,
+	low: 2,
+	"🔽": 2,
+	lowest: 1,
+	"⏬": 1,
+	none: 0,
+	"": 0,
 };
 
 function compareValues(left: LiteralValue, right: LiteralValue): number {
@@ -279,7 +354,10 @@ function compareValues(left: LiteralValue, right: LiteralValue): number {
 	return String(left).localeCompare(String(right));
 }
 
-function getFieldValue(record: TaskDocumentRecord, field: string): LiteralValue | string[] {
+function getFieldValue(
+	record: TaskDocumentRecord,
+	field: string,
+): LiteralValue | string[] {
 	switch (field) {
 		case "status":
 			return record.task.status;
@@ -316,6 +394,8 @@ function getFieldValue(record: TaskDocumentRecord, field: string): LiteralValue 
 			return record.task.dates.done;
 		case "cancelled":
 			return record.task.dates.cancelled;
+		case "remind":
+			return record.task.dates.remind;
 		case "recurrence":
 			return record.task.recurrence ?? "";
 		case "onCompletion":
@@ -339,60 +419,82 @@ function tokenize(input: string): Token[] {
 			continue;
 		}
 		if (char === "(" || char === ")") {
-			tokens.push({type: "paren", value: char, position: index});
+			tokens.push({ type: "paren", value: char, position: index });
 			index++;
 			continue;
 		}
 		if (char === ",") {
-			tokens.push({type: "comma", value: char, position: index});
+			tokens.push({ type: "comma", value: char, position: index });
 			index++;
 			continue;
 		}
-		if (char === "\"") {
+		if (char === '"') {
 			const parsed = readString(input, index);
-			tokens.push({type: "string", value: parsed.value, position: index});
+			tokens.push({
+				type: "string",
+				value: parsed.value,
+				position: index,
+			});
 			index = parsed.nextIndex;
 			continue;
 		}
 		const twoChar = input.slice(index, index + 2);
-		if (twoChar === "<=" || twoChar === ">=" || twoChar === "!=" || twoChar === "=~") {
-			tokens.push({type: "operator", value: twoChar, position: index});
+		if (
+			twoChar === "<=" ||
+			twoChar === ">=" ||
+			twoChar === "!=" ||
+			twoChar === "=~"
+		) {
+			tokens.push({ type: "operator", value: twoChar, position: index });
 			index += 2;
 			continue;
 		}
 		if (char === "=" || char === "<" || char === ">") {
-			tokens.push({type: "operator", value: char, position: index});
+			tokens.push({ type: "operator", value: char, position: index });
 			index++;
 			continue;
 		}
 		if (/[A-Za-z0-9_.#/-]/u.test(char)) {
 			const start = index;
-			while (index < input.length && /[A-Za-z0-9_.#/-]/u.test(input[index]!)) index++;
+			while (
+				index < input.length &&
+				/[A-Za-z0-9_.#/-]/u.test(input[index]!)
+			)
+				index++;
 			const value = input.slice(start, index);
 			const lowerValue = value.toLowerCase();
-			const type: TokenType = lowerValue === "true" || lowerValue === "false"
-				? "boolean"
-				: lowerValue === "null"
-					? "null"
-					: "identifier";
-			tokens.push({type, value, position: start});
+			const type: TokenType =
+				lowerValue === "true" || lowerValue === "false"
+					? "boolean"
+					: lowerValue === "null"
+						? "null"
+						: "identifier";
+			tokens.push({ type, value, position: start });
 			continue;
 		}
-		throw new TaskQueryError(`Unexpected character '${char}'. Position ${index}.`);
+		throw new TaskQueryError(
+			`Unexpected character '${char}'. Position ${index}.`,
+		);
 	}
-	tokens.push({type: "eof", value: "", position: input.length});
+	tokens.push({ type: "eof", value: "", position: input.length });
 	return tokens;
 }
 
-function readString(input: string, start: number): {value: string; nextIndex: number} {
+function readString(
+	input: string,
+	start: number,
+): { value: string; nextIndex: number } {
 	let index = start + 1;
 	let value = "";
 	while (index < input.length) {
 		const char = input[index]!;
-		if (char === "\"") return {value, nextIndex: index + 1};
+		if (char === '"') return { value, nextIndex: index + 1 };
 		if (char === "\\") {
 			const next = input[index + 1];
-			if (next === undefined) throw new TaskQueryError(`Unterminated string. Position ${start}.`);
+			if (next === undefined)
+				throw new TaskQueryError(
+					`Unterminated string. Position ${start}.`,
+				);
 			value += next;
 			index += 2;
 			continue;
@@ -404,7 +506,8 @@ function readString(input: string, start: number): {value: string; nextIndex: nu
 }
 
 function todayString(): string {
-	const momentFactory = typeof window !== "undefined" ? window.moment : undefined;
+	const momentFactory =
+		typeof window !== "undefined" ? window.moment : undefined;
 	if (momentFactory) return momentFactory().format("YYYY-MM-DD");
 	return new Date().toISOString().slice(0, 10);
 }
