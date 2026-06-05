@@ -5,10 +5,10 @@
 	"main": "main.js",
 	"type": "module",
 	"scripts": {
-		"dev": "node esbuild.config.mjs",
-		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"dev": "bun esbuild.config.mjs",
+		"build": "tsc -noEmit -skipLibCheck && bun esbuild.config.mjs production",
 		"test": "bun test",
-		"version": "node version-bump.mjs && git add manifest.json versions.json",
+		"version": "bun version-bump.mjs && git add manifest.json versions.json",
 		"lint": "eslint ."
 	},
 	"keywords": [],
