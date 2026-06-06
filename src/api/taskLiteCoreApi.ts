@@ -95,7 +95,10 @@ export interface CreateTaskInput {
 	path?: string;
 	/** Line number of an existing task to nest this task under as a child. */
 	parentLineNumber?: number;
+	/** If true, the task will be created as a file-level task (encoded in YAML frontmatter). */
+	isFileTask?: boolean;
 }
+
 
 export type EditTaskPatch = {
 	/** New task body text. Omit to leave unchanged. */
@@ -207,9 +210,11 @@ export function createTaskLiteCoreApi({
 				statusSymbol,
 			});
 		},
-		createTask: (input) => {
+		createTask: async (input) => {
 			if (!input.description?.trim())
 				throw new TypeError("TaskLite createTask: description must not be empty.");
+			if (input.isFileTask && typeof input.parentLineNumber === "number")
+				throw new TypeError("TaskLite createTask: file-level tasks cannot have a parentLineNumber.");
 			return createTask({
 				app,
 				input,
@@ -375,6 +380,51 @@ async function createTask({
 	if (!isTFile(file)) {
 		throw new Error("TaskLite inbox path points to a folder.");
 	}
+
+	if (input.isFileTask) {
+		const fmPatch: Record<string, unknown> = {
+			task: true,
+		};
+		if (input.description !== undefined) {
+			fmPatch["description"] = input.description;
+		}
+		fmPatch["status"] = statusConfig.symbol;
+
+		const normPriority = normalizePriority(input.priority);
+		if (normPriority !== null) {
+			fmPatch["priority"] = normPriority;
+		}
+		if (input.recurrence !== undefined && input.recurrence !== null) {
+			fmPatch["recurrence"] = input.recurrence;
+		}
+		if (input.onCompletion !== undefined && input.onCompletion !== null) {
+			fmPatch["onCompletion"] = input.onCompletion;
+		}
+		if (input.id !== undefined && input.id !== null) {
+			fmPatch["id"] = input.id;
+		}
+		if (input.dependsOn !== undefined && input.dependsOn !== null) {
+			fmPatch["dependsOn"] = input.dependsOn;
+		}
+		if (input.assignee !== undefined && input.assignee.length > 0) {
+			fmPatch["assignee"] = input.assignee;
+		}
+		if (input.dates) {
+			const d = input.dates;
+			if (d.start !== undefined && d.start !== null) fmPatch["start"] = d.start;
+			if (d.created !== undefined && d.created !== null) fmPatch["created"] = d.created;
+			if (d.scheduled !== undefined && d.scheduled !== null) fmPatch["scheduled"] = d.scheduled;
+			if (d.due !== undefined && d.due !== null) fmPatch["due"] = d.due;
+			if (d.done !== undefined && d.done !== null) fmPatch["done"] = d.done;
+			if (d.cancelled !== undefined && d.cancelled !== null) fmPatch["cancelled"] = d.cancelled;
+			if (d.remind !== undefined && d.remind !== null) fmPatch["remind"] = d.remind;
+		}
+
+		await applyFrontmatterPatch(app.fileManager, file, fmPatch);
+		documentStore?.invalidate(file.path);
+		return;
+	}
+
 
 	const content = await app.vault.read(file);
 	const lines = content.length > 0 ? content.split("\n") : [];

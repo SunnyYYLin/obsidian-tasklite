@@ -1792,6 +1792,57 @@ describe("TaskLite core", () => {
 		expect(result2).toBe(true);
 		expect(fmState.status).toBe("todo");
 	});
+
+	test("createTask can create a frontmatter task", async () => {
+		const fmState: Record<string, unknown> = {};
+		const file = createTestFile("Work/new-project.md", "new-project");
+		const api = createTestCoreApi({
+			vault: {
+				getAbstractFileByPath: () => null,
+				create: (path: string, content: string) => {
+					expect(path).toBe("Work/new-project.md");
+					return Promise.resolve(file);
+				},
+			},
+			fileManager: {
+				processFrontMatter: (_f: unknown, fn: (fm: Record<string, unknown>) => void) => {
+					fn(fmState);
+					return Promise.resolve();
+				},
+			},
+		});
+
+		await api.createTask({
+			description: "New Project Task",
+			status: "/",
+			priority: "high",
+			dates: {
+				due: "2026-06-30",
+				scheduled: "2026-06-29 10:00",
+			},
+			path: "Work/new-project.md",
+			isFileTask: true,
+		});
+
+		expect(fmState.task).toBe(true);
+		expect(fmState.description).toBe("New Project Task");
+		expect(fmState.status).toBe("/");
+		expect(fmState.priority).toBe("high");
+		expect(fmState.due).toBe("2026-06-30");
+		expect(fmState.scheduled).toBe("2026-06-29 10:00");
+	});
+
+	test("createTask throws error when isFileTask is true and parentLineNumber is set", async () => {
+		const api = createTestCoreApi({});
+		await expect(
+			api.createTask({
+				description: "Invalid Task",
+				path: "Work/new-project.md",
+				isFileTask: true,
+				parentLineNumber: 5,
+			})
+		).rejects.toThrow("file-level tasks cannot have a parentLineNumber");
+	});
 });
 
 function createTestCoreApi(app: Record<string, unknown> = {}) {
