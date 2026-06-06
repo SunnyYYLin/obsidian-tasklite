@@ -1781,7 +1781,6 @@ describe("TaskLite core", () => {
 		const listed = await api.listTasks();
 		expect(listed).toHaveLength(1);
 		expect(listed[0]?.task.status).toBe("TODO");
-		expect(listed[0]?.task.refLink).toBe("[[Work/project]]");
 
 		// Toggle it to DONE — processFrontMatter should update fmState.status
 		const result = await api.updateTaskStatus("Work/project.md", -1, "x");
@@ -1843,74 +1842,6 @@ describe("TaskLite core", () => {
 				parentLineNumber: 5,
 			})
 		).rejects.toThrow("file-level tasks cannot have a parentLineNumber");
-	});
-
-	test("createTask can create a line task with bodyText and refLink", async () => {
-		let fileContent = "";
-		const file = createTestFile("tasks.md", "tasks");
-		const api = createTestCoreApi({
-			vault: {
-				getAbstractFileByPath: () => file,
-				read: () => Promise.resolve(""),
-				modify: (_f: unknown, content: string) => {
-					fileContent = content;
-					return Promise.resolve();
-				},
-			},
-			metadataCache: {
-				getFileCache: () => null,
-			},
-		});
-
-		await api.createTask({
-			description: "Buy milk",
-			refLink: "[[Shopping List]]",
-			bodyText: "Make sure it's organic.\nCheck the date.",
-			path: "tasks.md",
-		});
-
-		expect(fileContent).toBe("- [ ] Buy milk [[Shopping List]]\n\nMake sure it's organic.\nCheck the date.\n");
-	});
-
-	test("createTask can create a frontmatter task with bodyText and refLink", async () => {
-		const fmState: Record<string, unknown> = {};
-		let fileContent = "";
-		const file = createTestFile("Work/project.md", "project");
-		const api = createTestCoreApi({
-			vault: {
-				getAbstractFileByPath: () => null,
-				create: (path: string, content: string) => {
-					expect(path).toBe("Work/project.md");
-					fileContent = "---";
-					return Promise.resolve(file);
-				},
-				read: () => Promise.resolve(fileContent),
-				modify: (_f: unknown, content: string) => {
-					fileContent = content;
-					return Promise.resolve();
-				},
-			},
-			fileManager: {
-				processFrontMatter: (_f: unknown, fn: (fm: Record<string, unknown>) => void) => {
-					fn(fmState);
-					fileContent = "---\ntask: true\nrefLink: " + fmState.refLink + "\n---";
-					return Promise.resolve();
-				},
-			},
-		});
-
-		await api.createTask({
-			description: "New Project",
-			refLink: "[[Project Plan]]",
-			bodyText: "Detailed notes go here.",
-			path: "Work/project.md",
-			isFileTask: true,
-		});
-
-		expect(fmState.task).toBe(true);
-		expect(fmState.refLink).toBe("[[Project Plan]]");
-		expect(fileContent).toContain("---\ntask: true\nrefLink: [[Project Plan]]\n---");
-		expect(fileContent).toContain("\nDetailed notes go here.\n");
 	});
 
 	test("createTask inserts new child task at the bottom of the parent's subtree", async () => {

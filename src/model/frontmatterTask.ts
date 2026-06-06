@@ -177,7 +177,6 @@ export function parseFrontmatterTask(
 		dependsOn: typeof fm["dependsOn"] === "string" ? fm["dependsOn"] : null,
 		assignee,
 		blockLink: null,
-		refLink: typeof fm["refLink"] === "string" ? fm["refLink"] : (typeof fm["reference"] === "string" ? fm["reference"] : `[[${file.path.replace(/\.md$/u, "")}]]`),
 		tags: Array.isArray(fm["tags"]) ? fm["tags"].map(String) : [],
 		unmatched: null,
 	};
@@ -226,7 +225,6 @@ export function buildFrontmatterPatch(
 	if (updates.id !== undefined) patch["id"] = updates.id;
 	if (updates.dependsOn !== undefined) patch["dependsOn"] = updates.dependsOn;
 	if (updates.assignee !== undefined) patch["assignee"] = updates.assignee;
-	if (updates.refLink !== undefined) patch["refLink"] = updates.refLink;
 
 	if (updates.dates) {
 		const d = updates.dates;
