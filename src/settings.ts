@@ -2,6 +2,7 @@ import { Notice, PluginSettingTab, Setting, type App } from "obsidian";
 import type TaskLitePlugin from "./main";
 import { t, type I18nKey } from "./i18n";
 import { listItemRegex, normalizeLineIndentation } from "./model/format";
+import { getVaultIndentConfig } from "./editor/editorUtils";
 
 export interface ToggleBehaviorSettings {
 	cascadeFinish: boolean;
@@ -84,9 +85,7 @@ export class TaskLiteSettingTab extends PluginSettingTab {
 						let totalUpdatedFiles = 0;
 						let totalUpdatedLines = 0;
 
-						const vaultConfig = (this.app.vault as any).config || {};
-						const useTab = vaultConfig.useTab ?? true;
-						const tabSize = vaultConfig.tabSize ?? 4;
+						const { useTab, tabSize } = getVaultIndentConfig(this.app);
 
 						new Notice(t("notice.normalizingIndentsAllStarted"));
 
@@ -174,10 +173,31 @@ export class TaskLiteSettingTab extends PluginSettingTab {
 }
 
 export function mergeSettings(loaded: Partial<TaskLiteSettings> | null | undefined): TaskLiteSettings {
-	const toggleBehavior: ToggleBehaviorSettings = { ...DEFAULT_TOGGLE_BEHAVIOR, ...loaded?.toggleBehavior };
+	const safe = loaded ? pickKnownKeys(loaded) : {};
+	const toggleBehavior: ToggleBehaviorSettings = { ...DEFAULT_TOGGLE_BEHAVIOR, ...safe.toggleBehavior };
 	return {
 		...DEFAULT_SETTINGS,
-		...loaded,
+		...safe,
+		toggleBehavior,
+	};
+}
+
+/** Filter loaded settings to only known keys, preventing unexpected keys from persisted data. */
+function pickKnownKeys(obj: Partial<TaskLiteSettings>): Partial<TaskLiteSettings> {
+	const {
+		setCreatedDate,
+		setDoneDate,
+		setCancelledDate,
+		copySubtasksOnRecurrence,
+		autoSuggestInEditor,
+		toggleBehavior,
+	} = obj;
+	return {
+		setCreatedDate,
+		setDoneDate,
+		setCancelledDate,
+		copySubtasksOnRecurrence,
+		autoSuggestInEditor,
 		toggleBehavior,
 	};
 }

@@ -354,6 +354,3 @@ function containsDelimiter(text: string): boolean {
 	return false;
 }
 
-function escapeRegex(s: string): string {
-	return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}

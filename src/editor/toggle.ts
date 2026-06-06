@@ -5,6 +5,7 @@ import { applyTaskStatus } from "../model/taskState";
 import type { StatusConfiguration, StatusRegistry, StatusType } from "../model/status";
 import type { TaskLiteSettings } from "../settings";
 import { buildRecurringTaskOccurrence } from "./recurrenceOccurrence";
+import { getVaultIndentConfig } from "./editorUtils";
 
 export interface ToggleResult {
 	fromLine: number;
@@ -37,16 +38,21 @@ type TaskBehavior = "finish" | "unfinish" | "cancel" | "uncancel";
 
 export function getIndentPrefix(depth: number, app?: App, lines?: string[]): string {
 	if (depth <= 0) return "";
-	
+
 	// 1. Try to read from app vault config
-	const vaultConfig = (app?.vault as any)?.config;
-	if (vaultConfig) {
-		const useTab = vaultConfig.useTab ?? true;
-		const tabSize = vaultConfig.tabSize ?? 4;
-		const oneLevelIndent = useTab ? "\t" : " ".repeat(tabSize);
-		return oneLevelIndent.repeat(depth);
+	if (app) {
+		const { useTab, tabSize } = getVaultIndentConfig(app);
+		// getVaultIndentConfig returns defaults when vault.config is absent;
+		// only trust it when vault.config actually exists on the vault object.
+		const hasConfig = Boolean(
+			(app.vault as unknown as { config?: unknown } | undefined)?.config,
+		);
+		if (hasConfig) {
+			const oneLevelIndent = useTab ? "\t" : " ".repeat(tabSize);
+			return oneLevelIndent.repeat(depth);
+		}
 	}
-	
+
 	// 2. Fallback: detect indentation from document content (useful in tests and mixed vaults)
 	if (lines && lines.length > 0) {
 		for (const line of lines) {
@@ -61,7 +67,7 @@ export function getIndentPrefix(depth: number, app?: App, lines?: string[]): str
 			}
 		}
 	}
-	
+
 	// 3. Absolute fallback: default Obsidian settings (use tab)
 	return "\t".repeat(depth);
 }

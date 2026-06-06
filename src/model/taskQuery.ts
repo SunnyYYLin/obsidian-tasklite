@@ -56,6 +56,7 @@ export interface CompiledTaskQuery {
 }
 
 const compiledQueryCache = new Map<string, CompiledTaskQuery>();
+const COMPILED_QUERY_CACHE_MAX = 100;
 
 export function compileTaskQuery(query: string): CompiledTaskQuery {
 	const normalizedQuery = query.trim();
@@ -76,6 +77,10 @@ export function compileTaskQuery(query: string): CompiledTaskQuery {
 		matches: (record: TaskDocumentRecord) =>
 			evaluateExpression(expression, record),
 	};
+	// Evict the oldest entry when the cache reaches its limit
+	if (compiledQueryCache.size >= COMPILED_QUERY_CACHE_MAX) {
+		compiledQueryCache.delete(compiledQueryCache.keys().next().value!);
+	}
 	compiledQueryCache.set(normalizedQuery, compiled);
 	return compiled;
 }

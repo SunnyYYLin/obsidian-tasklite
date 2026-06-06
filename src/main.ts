@@ -28,6 +28,7 @@ export default class TaskLitePlugin extends Plugin {
 	}
 
 	onunload(): void {
+		this.documentStore.destroy();
 	}
 
 	async loadSettings(): Promise<void> {

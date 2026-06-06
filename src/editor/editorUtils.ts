@@ -23,3 +23,16 @@ export function getEditorForPath(value: unknown, path: string): Editor | null {
 	if (info?.file?.path === path && info.editor) return info.editor;
 	return null;
 }
+
+/**
+ * Safely read Obsidian's internal vault indent configuration.
+ * Falls back to sensible defaults (tab, size=4) if the internal config is unavailable.
+ */
+export function getVaultIndentConfig(app: App): { useTab: boolean; tabSize: number } {
+	const cfg = (app.vault as unknown as { config?: Record<string, unknown> } | undefined)?.config ?? {};
+	return {
+		useTab: typeof cfg.useTab === "boolean" ? cfg.useTab : true,
+		tabSize: typeof cfg.tabSize === "number" && cfg.tabSize > 0 ? cfg.tabSize : 4,
+	};
+}
+

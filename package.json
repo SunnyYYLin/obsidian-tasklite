@@ -27,8 +27,7 @@
 	},
 	"dependencies": {
 		"@codemirror/view": "^6.43.0",
-		"codex": "^0.2.3",
-		"obsidian": "latest",
+		"obsidian": "1.12.3",
 		"rrule": "^2.8.1"
 	}
 }

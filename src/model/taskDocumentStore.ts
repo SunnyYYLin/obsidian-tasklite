@@ -164,6 +164,18 @@ export class TaskDocumentStore {
 		this.dirtyPaths.delete(file.path);
 		return document;
 	}
+
+	/** Cancel all pending debounce timers and clear cached state. Call on plugin unload. */
+	destroy(): void {
+		for (const timer of this.rebuildTimers.values()) {
+			clearTimeout(timer);
+		}
+		this.rebuildTimers.clear();
+		this.documents.clear();
+		this.recordsByPath.clear();
+		this.dirtyPaths.clear();
+		this.indexedAllFiles = false;
+	}
 }
 
 function taskRecordsFromDocument(document: TaskDocument): TaskDocumentRecord[] {

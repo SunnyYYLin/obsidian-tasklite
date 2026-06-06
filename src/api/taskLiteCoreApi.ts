@@ -5,7 +5,7 @@ import {
 	getIndentPrefix,
 	type ToggleResult,
 } from "../editor/toggle";
-import { findOpenMarkdownEditor } from "../editor/editorUtils";
+import { findOpenMarkdownEditor, getVaultIndentConfig } from "../editor/editorUtils";
 import {
 	copyTaskData,
 	parseLineWithStatus,
@@ -156,8 +156,10 @@ export function createTaskLiteCoreApi({
 			filterTaskRecordsByQuery(records, query),
 		listFrontmatterTasks: () =>
 			listFrontmatterTasks({ app, registry, documentStore }),
-		updateTaskStatus: (path, lineNumber, statusSymbol) =>
-			updateFileTask({
+		updateTaskStatus: (path, lineNumber, statusSymbol) => {
+			validatePath(path);
+			validateLineNumber(lineNumber);
+			return updateFileTask({
 				app,
 				path,
 				lineNumber,
@@ -170,26 +172,36 @@ export function createTaskLiteCoreApi({
 						targetStatusSymbol: statusSymbol,
 					}),
 				statusSymbol,
-			}),
-		createTask: (input) =>
-			createTask({
+			});
+		},
+		createTask: (input) => {
+			if (!input.description?.trim())
+				throw new TypeError("TaskLite createTask: description must not be empty.");
+			return createTask({
 				app,
 				input,
 				registry,
 				settings: getSettings(),
 				documentStore,
-			}),
-		deleteTask: (path, lineNumber) =>
-			deleteFileTask({ app, path, lineNumber, registry, documentStore }),
-		editTask: (path, lineNumber, patch) =>
-			editFileTask({
+			});
+		},
+		deleteTask: (path, lineNumber) => {
+			validatePath(path);
+			validateLineNumber(lineNumber);
+			return deleteFileTask({ app, path, lineNumber, registry, documentStore });
+		},
+		editTask: (path, lineNumber, patch) => {
+			validatePath(path);
+			validateLineNumber(lineNumber);
+			return editFileTask({
 				app,
 				path,
 				lineNumber,
 				registry,
 				documentStore,
 				patch,
-			}),
+			});
+		},
 		executeTasksToggleCommand: (line, path) => {
 			const context = findOpenEditorTaskContext(
 				app,
@@ -213,6 +225,18 @@ export function createTaskLiteCoreApi({
 			return result?.replacement.join("\n") ?? line;
 		},
 	};
+}
+
+/** Validate API path parameter. */
+function validatePath(path: unknown): void {
+	if (typeof path !== "string" || !path.trim())
+		throw new TypeError("TaskLite: path must be a non-empty string.");
+}
+
+/** Validate API lineNumber parameter: must be an integer >= -1. */
+function validateLineNumber(lineNumber: unknown): void {
+	if (!Number.isInteger(lineNumber) || (lineNumber as number) < -1)
+		throw new RangeError("TaskLite: lineNumber must be an integer >= -1.");
 }
 
 async function listTasks({
@@ -328,9 +352,7 @@ async function createTask({
 			? tree.byLine.get(input.parentLineNumber)
 			: undefined;
 
-	const vaultConfig = (app.vault as any).config || {};
-	const useTab = vaultConfig.useTab ?? true;
-	const tabSize = vaultConfig.tabSize ?? 4;
+	const { useTab, tabSize } = getVaultIndentConfig(app);
 	const oneLevelIndent = useTab ? "\t" : " ".repeat(tabSize);
 
 	const parentPrefix = parentNode ? parentNode.indentation : "";
@@ -853,7 +875,11 @@ function isTFile(value: unknown): value is TFile {
 }
 
 function normalizePathLocal(path: string): string {
-	return path.replace(/\\/gu, "/").replace(/\/+/gu, "/").replace(/^\/+/u, "");
+	const normalized = path.replace(/\\/gu, "/").replace(/\/+/gu, "/").replace(/^\/+/u, "");
+	// Guard against path traversal segments
+	if (normalized.split("/").some((seg) => seg === ".."))
+		throw new Error("TaskLite: Invalid path — path traversal not allowed.");
+	return normalized;
 }
 
 async function listFrontmatterTasks({

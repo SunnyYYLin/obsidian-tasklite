@@ -7,6 +7,7 @@ import { createLivePreviewExtension } from "../rendering/livePreview";
 import { TaskLiteEmojiSuggest } from "../suggest/emojiSuggest";
 import { TaskLiteSettingTab } from "../settings";
 import { t } from "../i18n";
+import { getVaultIndentConfig } from "../editor/editorUtils";
 
 export function registerTaskLiteCore(plugin: TaskLitePlugin): void {
 	plugin.addCommand({
@@ -97,9 +98,7 @@ export function registerTaskLiteCore(plugin: TaskLitePlugin): void {
 				const content = await plugin.app.vault.read(activeFile);
 				const lines = content.length > 0 ? content.split("\n") : [];
 
-				const vaultConfig = (plugin.app.vault as any).config || {};
-				const useTab = vaultConfig.useTab ?? true;
-				const tabSize = vaultConfig.tabSize ?? 4;
+				const { useTab, tabSize } = getVaultIndentConfig(plugin.app);
 
 				let changed = false;
 				const newLines = lines.map((line) => {
