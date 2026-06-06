@@ -22,6 +22,7 @@ import {
 	getSubtreeNodes,
 	taskDepth,
 	getTaskParentLine,
+	getSubtreeLineRange,
 } from "../model/tree";
 import type {
 	TaskDocumentStore,
@@ -467,12 +468,17 @@ async function createTask({
 	if (input.bodyText) {
 		insertion += `\n\n${input.bodyText}`;
 	}
+	let insertionLineNumber = input.parentLineNumber;
+	if (parentNode) {
+		insertionLineNumber = getSubtreeLineRange(parentNode).to;
+	}
+
 	if (
-		typeof input.parentLineNumber === "number" &&
-		input.parentLineNumber >= 0 &&
-		input.parentLineNumber < lines.length
+		typeof insertionLineNumber === "number" &&
+		insertionLineNumber >= 0 &&
+		insertionLineNumber < lines.length
 	) {
-		lines.splice(input.parentLineNumber + 1, 0, insertion);
+		lines.splice(insertionLineNumber + 1, 0, insertion);
 		const nextContent = lines.join("\n");
 		await app.vault.modify(file, nextContent);
 		await documentStore?.replaceDocumentContent(file, nextContent);

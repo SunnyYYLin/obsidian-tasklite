@@ -1911,6 +1911,43 @@ describe("TaskLite core", () => {
 		expect(fileContent).toContain("---\ntask: true\nrefLink: [[Project Plan]]\n---");
 		expect(fileContent).toContain("\nDetailed notes go here.\n");
 	});
+
+	test("createTask inserts new child task at the bottom of the parent's subtree", async () => {
+		let fileContent = [
+			"- [ ] Parent Task",
+			"    - [ ] Child 1",
+			"    - [ ] Child 2",
+			"- [ ] Other Task",
+		].join("\n");
+		const file = createTestFile("tasks.md", "tasks");
+		const api = createTestCoreApi({
+			vault: {
+				getAbstractFileByPath: () => file,
+				read: () => Promise.resolve(fileContent),
+				modify: (_f: unknown, content: string) => {
+					fileContent = content;
+					return Promise.resolve();
+				},
+			},
+			metadataCache: {
+				getFileCache: () => null,
+			},
+		});
+
+		await api.createTask({
+			description: "Child 3",
+			parentLineNumber: 0,
+			path: "tasks.md",
+		});
+
+		expect(fileContent.split("\n")).toEqual([
+			"- [ ] Parent Task",
+			"    - [ ] Child 1",
+			"    - [ ] Child 2",
+			"\t- [ ] Child 3",
+			"- [ ] Other Task",
+		]);
+	});
 });
 
 function createTestCoreApi(app: Record<string, unknown> = {}) {
