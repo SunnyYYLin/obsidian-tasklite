@@ -1781,6 +1781,7 @@ describe("TaskLite core", () => {
 		const listed = await api.listTasks();
 		expect(listed).toHaveLength(1);
 		expect(listed[0]?.task.status).toBe("TODO");
+		expect(listed[0]?.task.refLink).toBe("[[Work/project]]");
 
 		// Toggle it to DONE — processFrontMatter should update fmState.status
 		const result = await api.updateTaskStatus("Work/project.md", -1, "x");
