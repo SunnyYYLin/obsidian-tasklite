@@ -13,7 +13,7 @@ import { getSubtreeLineRange, buildTaskTree, taskDepth, type TaskTreeNode } from
 import { applyTaskStatus } from "../model/taskState";
 import type { StatusConfiguration, StatusRegistry } from "../model/status";
 import type { TaskLiteSettings } from "../settings";
-import { getVaultIndentConfig } from "./editorUtils";
+import { getVaultIndentConfig, hasVaultConfig } from "./editorUtils";
 import {
 	type MutationCtx,
 	type TaskBehavior,
@@ -56,15 +56,10 @@ export function getIndentPrefix(depth: number, app?: App, lines?: string[]): str
 	if (depth <= 0) return "";
 
 	// 1. Try to read from app vault config
-	if (app) {
+	if (app && hasVaultConfig(app)) {
 		const {useTab, tabSize} = getVaultIndentConfig(app);
-		const hasConfig = Boolean(
-			(app.vault as unknown as {config?: unknown} | undefined)?.config,
-		);
-		if (hasConfig) {
-			const oneLevelIndent = useTab ? "\t" : " ".repeat(tabSize);
-			return oneLevelIndent.repeat(depth);
-		}
+		const oneLevelIndent = useTab ? "\t" : " ".repeat(tabSize);
+		return oneLevelIndent.repeat(depth);
 	}
 
 	// 2. Fallback: detect indentation from document content (useful in tests)

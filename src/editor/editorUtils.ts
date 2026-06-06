@@ -36,3 +36,14 @@ export function getVaultIndentConfig(app: App): { useTab: boolean; tabSize: numb
 	};
 }
 
+/**
+ * Returns true when Obsidian's internal vault config object is present.
+ * Used to decide whether to trust `getVaultIndentConfig` or fall back to
+ * document-content heuristics.
+ */
+export function hasVaultConfig(app: App): boolean {
+	return Boolean(
+		(app.vault as unknown as { config?: unknown } | undefined)?.config,
+	);
+}
+

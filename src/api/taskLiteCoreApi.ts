@@ -46,34 +46,67 @@ export interface ListTasksOptions {
 	query?: string;
 }
 
+/**
+ * Date fields accepted by create/edit task inputs.
+ *
+ * All values must be an ISO date string in `YYYY-MM-DD` format, optionally
+ * followed by a time component: `YYYY-MM-DD HH:mm` or `YYYY-MM-DD h:mmam`.
+ * Pass `null` to explicitly clear a field.
+ */
+export interface TaskDateInput {
+	/** 🛫 Date the task becomes available to start working on. */
+	start?: string | null;
+	/** ⏳ Date the task is scheduled to be worked on. */
+	scheduled?: string | null;
+	/** 📅 Date the task must be completed by. */
+	due?: string | null;
+	/** ⏰ Reminder date/time (supports time component, e.g. `"2026-06-10 9:00am"`). */
+	remind?: string | null;
+	/** ✅ Date the task was completed. Usually set automatically by the plugin. */
+	done?: string | null;
+	/** ❌ Date the task was cancelled. Usually set automatically by the plugin. */
+	cancelled?: string | null;
+	/** ➕ Date the task was created. */
+	created?: string | null;
+}
+
 export interface CreateTaskInput {
+	/** Task body text (required, must not be empty). */
 	description: string;
+	/**
+	 * Initial status symbol (e.g. `" "` for TODO, `"x"` for DONE).
+	 * Defaults to `" "` (TODO) when omitted.
+	 */
 	status?: string;
+	/**
+	 * Task priority.
+	 * Accepts either a `TaskPriority` keyword (`"high"`, `"medium"`, etc.)
+	 * or the corresponding emoji (`"⏫"`, `"🔼"`, etc.).
+	 */
 	priority?: TaskPriority | string | null;
-	dates?: {
-		start?: string | null;
-		scheduled?: string | null;
-		due?: string | null;
-		remind?: string | null;
-	};
+	/** Date fields for this task. */
+	dates?: TaskDateInput;
 	recurrence?: string | null;
 	onCompletion?: OnCompletionAction | null;
 	id?: string | null;
 	dependsOn?: string | null;
 	assignee?: string[];
+	/** Vault-relative path of the file to append the task to. Defaults to `"Tasks/New_Tasks.md"`. */
 	path?: string;
+	/** Line number of an existing task to nest this task under as a child. */
 	parentLineNumber?: number;
 }
 
 export type EditTaskPatch = {
+	/** New task body text. Omit to leave unchanged. */
 	description?: string;
+	/**
+	 * New priority. Accepts either a `TaskPriority` keyword or the corresponding emoji.
+	 * Pass `null` to clear.
+	 */
 	priority?: TaskPriority | string | null;
-	dates?: {
-		start?: string | null;
-		scheduled?: string | null;
-		due?: string | null;
-		remind?: string | null;
-	};
+	/** Date fields to update. Only keys present in this object are changed. */
+	dates?: TaskDateInput;
 	recurrence?: string | null;
 	onCompletion?: OnCompletionAction | null;
 	id?: string | null;
@@ -315,11 +348,11 @@ async function createTask({
 			priority: normalizePriority(input.priority),
 			dates: {
 				start: input.dates?.start ?? null,
-				created: null,
+				created: input.dates?.created ?? null,
 				scheduled: input.dates?.scheduled ?? null,
 				due: input.dates?.due ?? null,
-				done: null,
-				cancelled: null,
+				done: input.dates?.done ?? null,
+				cancelled: input.dates?.cancelled ?? null,
 				remind: input.dates?.remind ?? null,
 			},
 			recurrence: input.recurrence ?? null,
@@ -486,6 +519,9 @@ async function editFileTask({
 			if (d.scheduled !== undefined) data.dates.scheduled = d.scheduled;
 			if (d.due !== undefined) data.dates.due = d.due;
 			if (d.remind !== undefined) data.dates.remind = d.remind;
+			if (d.done !== undefined) data.dates.done = d.done;
+			if (d.cancelled !== undefined) data.dates.cancelled = d.cancelled;
+			if (d.created !== undefined) data.dates.created = d.created;
 		}
 
 		const fmPatch = buildFrontmatterPatch(
@@ -519,6 +555,9 @@ async function editFileTask({
 		if (d.scheduled !== undefined) data.dates.scheduled = d.scheduled;
 		if (d.due !== undefined) data.dates.due = d.due;
 		if (d.remind !== undefined) data.dates.remind = d.remind;
+		if (d.done !== undefined) data.dates.done = d.done;
+		if (d.cancelled !== undefined) data.dates.cancelled = d.cancelled;
+		if (d.created !== undefined) data.dates.created = d.created;
 	}
 
 	const updatedTask: TaskLine = { ...node.task, data };

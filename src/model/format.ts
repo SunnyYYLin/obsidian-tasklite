@@ -126,7 +126,8 @@ export function createStringExtractor<
 			);
 			const match = description.match(regex);
 			if (!match) return [description, false];
-			(data as unknown as Record<string, unknown>)[key] = (
+			// data[key] is always a `string | null` field; cast is safe
+			(data as Record<K, string | null>)[key] = (
 				match[1] ?? ""
 			).trim();
 			return [
