@@ -97,6 +97,10 @@ export interface CreateTaskInput {
 	parentLineNumber?: number;
 	/** If true, the task will be created as a file-level task (encoded in YAML frontmatter). */
 	isFileTask?: boolean;
+	/** Task detailed body/notes text. */
+	bodyText?: string;
+	/** Task reference/link (e.g. [[Note]] or external link). */
+	refLink?: string;
 }
 
 
@@ -115,6 +119,7 @@ export type EditTaskPatch = {
 	id?: string | null;
 	dependsOn?: string | null;
 	assignee?: string[];
+	refLink?: string | null;
 };
 
 export interface TaskLiteCoreApi {
@@ -345,11 +350,15 @@ async function createTask({
 }): Promise<void> {
 	const statusSymbol = input.status ?? " ";
 	const statusConfig = registry.get(statusSymbol);
+	let description = input.description;
+	if (input.refLink) {
+		description += ` ${input.refLink}`;
+	}
 	const taskLine: TaskLine = {
 		listMarker: "-",
 		data: {
 			status: statusConfig.type,
-			description: input.description,
+			description,
 			priority: normalizePriority(input.priority),
 			dates: {
 				start: input.dates?.start ?? null,
@@ -366,6 +375,7 @@ async function createTask({
 			id: input.id ?? null,
 			assignee: input.assignee ?? [],
 			blockLink: null,
+			refLink: null,
 			tags: [],
 			unmatched: null,
 		},
@@ -409,6 +419,9 @@ async function createTask({
 		if (input.assignee !== undefined && input.assignee.length > 0) {
 			fmPatch["assignee"] = input.assignee;
 		}
+		if (input.refLink !== undefined && input.refLink !== null) {
+			fmPatch["refLink"] = input.refLink;
+		}
 		if (input.dates) {
 			const d = input.dates;
 			if (d.start !== undefined && d.start !== null) fmPatch["start"] = d.start;
@@ -421,6 +434,12 @@ async function createTask({
 		}
 
 		await applyFrontmatterPatch(app.fileManager, file, fmPatch);
+		if (input.bodyText) {
+			const currentContent = await app.vault.read(file);
+			const separator = currentContent.length > 0 && !currentContent.endsWith("\n") ? "\n" : "";
+			const nextContent = `${currentContent}${separator}\n${input.bodyText}\n`;
+			await app.vault.modify(file, nextContent);
+		}
 		documentStore?.invalidate(file.path);
 		return;
 	}
@@ -442,9 +461,12 @@ async function createTask({
 	const indentPrefix = parentNode ? `${parentPrefix}${oneLevelIndent}` : "";
 	const line = serializeTaskLine(taskLine, indentPrefix, registry);
 
-	const insertion = parentNode
+	let insertion = parentNode
 		? `${parentPrefix}${oneLevelIndent}${line.trimStart()}`
 		: line;
+	if (input.bodyText) {
+		insertion += `\n\n${input.bodyText}`;
+	}
 	if (
 		typeof input.parentLineNumber === "number" &&
 		input.parentLineNumber >= 0 &&
@@ -563,6 +585,7 @@ async function editFileTask({
 		if (patch.id !== undefined) data.id = patch.id;
 		if (patch.dependsOn !== undefined) data.dependsOn = patch.dependsOn;
 		if (patch.assignee !== undefined) data.assignee = patch.assignee;
+		if (patch.refLink !== undefined) data.refLink = patch.refLink;
 		if (patch.dates) {
 			const d = patch.dates;
 			if (d.start !== undefined) data.dates.start = d.start;
@@ -599,6 +622,7 @@ async function editFileTask({
 	if (patch.id !== undefined) data.id = patch.id;
 	if (patch.dependsOn !== undefined) data.dependsOn = patch.dependsOn;
 	if (patch.assignee !== undefined) data.assignee = patch.assignee;
+	if (patch.refLink !== undefined) data.refLink = patch.refLink;
 	if (patch.dates) {
 		const d = patch.dates;
 		if (d.start !== undefined) data.dates.start = d.start;

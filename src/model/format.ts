@@ -49,6 +49,7 @@ export interface TaskData {
 	id: string | null;
 	assignee: string[];
 	blockLink: string | null;
+	refLink: string | null;
 	tags: string[];
 	/** Raw remaining text not matched by any extractor. */
 	unmatched: string | null;
@@ -286,6 +287,7 @@ export function parseTaskBody(
 		id: null,
 		assignee: [],
 		blockLink,
+		refLink: null,
 		tags: [],
 		unmatched: null,
 	};
@@ -377,6 +379,7 @@ export function copyTaskData(data: TaskData): TaskData {
 		id: data.id ?? null,
 		assignee: data.assignee ? [...data.assignee] : [],
 		blockLink: data.blockLink ?? null,
+		refLink: data.refLink ?? null,
 		tags: data.tags ? [...data.tags] : [],
 		unmatched: data.unmatched ?? null,
 	};
