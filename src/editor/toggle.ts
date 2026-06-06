@@ -97,15 +97,7 @@ export function toggleTaskAtLine({
 
 	const symbol = registry.getByType(node.task.data.status).symbol;
 	const targetStatus = registry.next(registry.get(symbol));
-	return changeTaskStatusAtLine({
-		lines,
-		lineNumber,
-		metadata,
-		app,
-		registry,
-		settings,
-		targetStatusSymbol: targetStatus.symbol,
-	});
+	return changeTaskStatusWithTree(tree, {...{lines, lineNumber, metadata, app, registry, settings}, targetStatusSymbol: targetStatus.symbol}, node);
 }
 
 export function changeTaskStatusAtLine(
@@ -113,6 +105,15 @@ export function changeTaskStatusAtLine(
 ): ToggleResult | null {
 	const tree = buildTaskTree(input.lines, input.metadata, input.registry);
 	const node = tree.byLine.get(input.lineNumber);
+	return changeTaskStatusWithTree(tree, input, node);
+}
+
+/** Internal: operates on an already-built tree to avoid redundant rebuilds. */
+function changeTaskStatusWithTree(
+	tree: ReturnType<typeof buildTaskTree>,
+	input: TaskStatusMutationInput & { targetStatusSymbol: string },
+	node: ReturnType<typeof buildTaskTree>["byLine"] extends Map<number, infer N> ? N | undefined : never,
+): ToggleResult | null {
 	if (!node) return null;
 
 	if (!node.task) {
@@ -128,19 +129,19 @@ export function changeTaskStatusAtLine(
 	}
 
 	if (targetStatus.type === "DONE") {
-		return applyTaskBehaviorAtLine({...input, behavior: "finish"});
+		return applyTaskBehaviorWithTree(tree, {...input, behavior: "finish"}, node);
 	}
 	if (targetStatus.type === "CANCELLED") {
-		return applyTaskBehaviorAtLine({...input, behavior: "cancel"});
+		return applyTaskBehaviorWithTree(tree, {...input, behavior: "cancel"}, node);
 	}
 	if (targetStatus.type === "TODO") {
 		if (node.task.data.status === "CANCELLED") {
-			return applyTaskBehaviorAtLine({...input, behavior: "uncancel"});
+			return applyTaskBehaviorWithTree(tree, {...input, behavior: "uncancel"}, node);
 		}
-		return applyTaskBehaviorAtLine({...input, behavior: "unfinish"});
+		return applyTaskBehaviorWithTree(tree, {...input, behavior: "unfinish"}, node);
 	}
 
-	return updateSingleTaskStatusAtLine({...input, status: targetStatus});
+	return updateSingleTaskStatusWithTree(tree, {...input, status: targetStatus}, node);
 }
 
 export function finishTaskAtLine(input: TaskStatusMutationInput): ToggleResult | null {
@@ -163,39 +164,31 @@ export function clickTaskCheckboxAtLine(input: TaskStatusMutationInput): ToggleR
 	const tree = buildTaskTree(input.lines, input.metadata, input.registry);
 	const node = tree.byLine.get(input.lineNumber);
 	if (!node?.task) return node ? togglePlainCheckbox(node, input.registry) : null;
-	if (node.task.data.status === "DONE") return unfinishTaskAtLine(input);
-	if (node.task.data.status === "CANCELLED") return uncancelTaskAtLine(input);
-	return finishTaskAtLine(input);
+	const sym = node.task.data.status === "DONE" ? " " : node.task.data.status === "CANCELLED" ? " " : "x";
+	return changeTaskStatusWithTree(tree, {...input, targetStatusSymbol: sym}, node);
 }
 
 export function rightClickTaskCheckboxAtLine(input: TaskStatusMutationInput): ToggleResult | null {
 	const tree = buildTaskTree(input.lines, input.metadata, input.registry);
 	const node = tree.byLine.get(input.lineNumber);
 	if (!node?.task) return null;
-	if (node.task.data.status === "CANCELLED") return uncancelTaskAtLine(input);
-	return cancelTaskAtLine(input);
+	const sym = node.task.data.status === "CANCELLED" ? " " : "-";
+	return changeTaskStatusWithTree(tree, {...input, targetStatusSymbol: sym}, node);
 }
 
-function applyTaskBehaviorAtLine({
-	lines,
-	lineNumber,
-	metadata,
-	app,
-	registry,
-	settings,
-	behavior,
-}: {
-	lines: string[];
-	lineNumber: number;
-	metadata: CachedMetadata | null | undefined;
-	app?: App;
-	registry: StatusRegistry;
-	settings: TaskLiteSettings;
-	behavior: TaskBehavior;
-}): ToggleResult | null {
-	const tree = buildTaskTree(lines, metadata, registry);
-	const node = tree.byLine.get(lineNumber);
-	if (!node?.task) return null;
+/** Internal: operates on a pre-built tree, avoiding redundant rebuilds. */
+function applyTaskBehaviorWithTree(
+	tree: ReturnType<typeof buildTaskTree>,
+	{
+		lines,
+		app,
+		registry,
+		settings,
+		behavior,
+	}: TaskStatusMutationInput & {behavior: TaskBehavior},
+	node: NonNullable<ReturnType<ReturnType<typeof buildTaskTree>["byLine"]["get"]>>,
+): ToggleResult | null {
+	if (!node.task) return null;
 
 	const changedTasks = new Map<number, TaskData>();
 	const replacementByLine = new Map<number, string>();
@@ -221,18 +214,18 @@ function applyTaskBehaviorAtLine({
 	});
 }
 
-function updateSingleTaskStatusAtLine({
-	lines,
-	lineNumber,
-	metadata,
-	app,
-	registry,
-	settings,
-	status,
-}: TaskStatusMutationInput & {status: StatusConfiguration}): ToggleResult | null {
-	const tree = buildTaskTree(lines, metadata, registry);
-	const node = tree.byLine.get(lineNumber);
-	if (!node?.task) return null;
+function updateSingleTaskStatusWithTree(
+	_tree: ReturnType<typeof buildTaskTree>,
+	{
+		lines,
+		app,
+		registry,
+		settings,
+		status,
+	}: TaskStatusMutationInput & {status: StatusConfiguration},
+	node: NonNullable<ReturnType<ReturnType<typeof buildTaskTree>["byLine"]["get"]>>,
+): ToggleResult | null {
+	if (!node.task) return null;
 	if (node.task.data.status === status.type && !needsMissingStatusDate(node.task.data, status)) return null;
 
 	const changedTask = applyTaskStatus(node.task.data, status.type, settings, {fillMissingStatusDate: true});

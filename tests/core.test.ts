@@ -1739,7 +1739,11 @@ describe("TaskLite core", () => {
 	});
 
 	test("frontmatter task supports status keywords and preserves them on update", async () => {
-		let updatedContent = "";
+		let fmState: Record<string, unknown> = {
+			task: true,
+			status: "todo",
+			description: "Project Keyword",
+		};
 		const file = createTestFile("Work/project.md", "project");
 		const api = createTestCoreApi({
 			vault: {
@@ -1758,19 +1762,18 @@ describe("TaskLite core", () => {
 					"description: Project Keyword",
 					"---",
 				].join("\n")),
-				modify: (f: unknown, content: string) => {
-					updatedContent = content;
+				getAbstractFileByPath: () => file,
+			},
+			fileManager: {
+				// Simulate Obsidian's processFrontMatter: pass fm to callback, persist result
+				processFrontMatter: (_f: unknown, fn: (fm: Record<string, unknown>) => void) => {
+					fn(fmState);
 					return Promise.resolve();
 				},
-				getAbstractFileByPath: () => file,
 			},
 			metadataCache: {
 				getFileCache: () => ({
-					frontmatter: {
-						task: true,
-						status: "todo",
-						description: "Project Keyword",
-					},
+					frontmatter: { ...fmState },
 				}),
 			},
 		});
@@ -1779,15 +1782,15 @@ describe("TaskLite core", () => {
 		expect(listed).toHaveLength(1);
 		expect(listed[0]?.task.status).toBe("TODO");
 
-		// Toggle it to DONE
+		// Toggle it to DONE — processFrontMatter should update fmState.status
 		const result = await api.updateTaskStatus("Work/project.md", -1, "x");
 		expect(result).toBe(true);
-		expect(updatedContent).toContain("status: done");
+		expect(fmState.status).toBe("done");
 
 		// Toggle it back to TODO
 		const result2 = await api.updateTaskStatus("Work/project.md", -1, " ");
 		expect(result2).toBe(true);
-		expect(updatedContent).toContain("status: todo");
+		expect(fmState.status).toBe("todo");
 	});
 });
 

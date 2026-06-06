@@ -30,7 +30,7 @@ import type {
 import {
 	parseFrontmatterTask,
 	buildFrontmatterPatch,
-	applyFrontmatterPatchToContent,
+	applyFrontmatterPatch,
 } from "../model/frontmatterTask";
 import { filterTaskRecordsByQuery } from "../model/taskQuery";
 import { type StatusRegistry, type StatusType } from "../model/status";
@@ -409,12 +409,8 @@ async function deleteFileTask({
 		const metadata = app.metadataCache.getFileCache(file);
 		if (!metadata?.frontmatter?.task) return false;
 		const fmPatch = { task: null };
-		const nextContent = applyFrontmatterPatchToContent(
-			lines.join("\n"),
-			fmPatch,
-		);
-		await app.vault.modify(file, nextContent);
-		await documentStore?.replaceDocumentContent(file, nextContent);
+		await applyFrontmatterPatch(app.fileManager, file, fmPatch);
+		documentStore?.invalidate(file.path);
 		return true;
 	}
 
@@ -498,12 +494,8 @@ async function editFileTask({
 			registry,
 			fmRecord.rawStatus,
 		);
-		const nextContent = applyFrontmatterPatchToContent(
-			lines.join("\n"),
-			fmPatch,
-		);
-		await app.vault.modify(file, nextContent);
-		await documentStore?.replaceDocumentContent(file, nextContent);
+		await applyFrontmatterPatch(app.fileManager, file, fmPatch);
+		documentStore?.invalidate(file.path);
 		return true;
 	}
 
@@ -637,12 +629,8 @@ async function updateFileTask({
 			registry,
 			fmRecord.rawStatus,
 		);
-		const nextContent = applyFrontmatterPatchToContent(
-			lines.join("\n"),
-			fmPatch,
-		);
-		await app.vault.modify(file, nextContent);
-		await documentStore?.replaceDocumentContent(file, nextContent);
+		await applyFrontmatterPatch(app.fileManager, file, fmPatch);
+		documentStore?.invalidate(file.path);
 		return true;
 	}
 
@@ -736,12 +724,8 @@ async function updateFileTask({
 					registry,
 					fmRecord.rawStatus,
 				);
-				const finalContent = applyFrontmatterPatchToContent(
-					lines.join("\n"),
-					fmPatch,
-				);
-				await app.vault.modify(file, finalContent);
-				await documentStore?.replaceDocumentContent(file, finalContent);
+				await applyFrontmatterPatch(app.fileManager, file, fmPatch);
+				documentStore?.invalidate(file.path);
 				return true;
 			}
 		}

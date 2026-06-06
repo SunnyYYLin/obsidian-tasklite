@@ -87,41 +87,6 @@ export function toggleEditorTaskCancellation({
 	return mutateEditorTask({editor, app, path, registry, settings, documentStore, mutate: rightClickTaskCheckboxAtLine});
 }
 
-export async function toggleFileTask({
-	app,
-	path,
-	lineNumber,
-	registry,
-	settings,
-	documentStore,
-}: {
-	app: App;
-	path: string;
-	lineNumber: number;
-	registry: StatusRegistry;
-	settings: TaskLiteSettings;
-	documentStore?: TaskDocumentStore;
-}): Promise<boolean> {
-	return mutateFileTask({app, path, lineNumber, registry, settings, documentStore, mutate: clickTaskCheckboxAtLine});
-}
-
-export async function toggleFileTaskCancellation({
-	app,
-	path,
-	lineNumber,
-	registry,
-	settings,
-	documentStore,
-}: {
-	app: App;
-	path: string;
-	lineNumber: number;
-	registry: StatusRegistry;
-	settings: TaskLiteSettings;
-	documentStore?: TaskDocumentStore;
-}): Promise<boolean> {
-	return mutateFileTask({app, path, lineNumber, registry, settings, documentStore, mutate: rightClickTaskCheckboxAtLine});
-}
 
 async function mutateFileTask({
 	app,
@@ -153,7 +118,10 @@ async function mutateFileTask({
 	if (!result) return false;
 
 	lines.splice(result.fromLine, result.toLine - result.fromLine + 1, ...result.replacement);
-	await app.vault.modify(file, lines.join("\n"));
+	const nextContent = lines.join("\n");
+	await app.vault.modify(file, nextContent);
+	// Keep documentStore in sync so subsequent reads see up-to-date content
+	await documentStore?.replaceDocumentContent(file, nextContent);
 	if (result.warning) new Notice(result.warning);
 	return true;
 }

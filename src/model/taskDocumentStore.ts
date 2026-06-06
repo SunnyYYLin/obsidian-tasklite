@@ -130,8 +130,10 @@ export class TaskDocumentStore {
 
 	private async ensureAllFilesIndexed(): Promise<void> {
 		if (this.indexedAllFiles) return;
-		for (const file of this.app.vault.getMarkdownFiles()) {
-			await this.getDocument(file);
+		const CONCURRENCY = 20;
+		const files = this.app.vault.getMarkdownFiles();
+		for (let i = 0; i < files.length; i += CONCURRENCY) {
+			await Promise.all(files.slice(i, i + CONCURRENCY).map((f) => this.getDocument(f)));
 		}
 		this.indexedAllFiles = true;
 	}

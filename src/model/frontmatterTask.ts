@@ -1,4 +1,4 @@
-import type { CachedMetadata, TFile } from "obsidian";
+import type { App, CachedMetadata, FileManager, TFile } from "obsidian";
 import type { StatusRegistry } from "./status";
 import type { TaskPriority, OnCompletionAction, TaskData } from "./format";
 
@@ -250,11 +250,33 @@ export function buildFrontmatterPatch(
 }
 
 /**
- * Apply a key→value patch to the raw YAML frontmatter block of a file's
- * content string, returning the updated content.
+ * Apply a frontmatter patch to a file using Obsidian's official
+ * `fileManager.processFrontMatter()` API.
  *
- * Only existing frontmatter keys are updated; new keys are appended.
- * `null` values remove the key.
+ * This correctly handles multi-line values, YAML arrays, and special characters
+ * that the legacy string-manipulation approach could not.
+ * `null` values remove the key from frontmatter.
+ */
+export async function applyFrontmatterPatch(
+	fileManager: FileManager,
+	file: TFile,
+	patch: Record<string, unknown>,
+): Promise<void> {
+	await fileManager.processFrontMatter(file, (fm) => {
+		for (const [key, value] of Object.entries(patch)) {
+			if (value === null || value === undefined) {
+				delete fm[key];
+			} else {
+				fm[key] = value;
+			}
+		}
+	});
+}
+
+/**
+ * @deprecated Use {@link applyFrontmatterPatch} instead.
+ * This function uses fragile string manipulation that cannot handle
+ * multi-line YAML values or array fields correctly.
  */
 export function applyFrontmatterPatchToContent(
 	content: string,
@@ -285,14 +307,12 @@ export function applyFrontmatterPatchToContent(
 				if (newVal !== "") {
 					resultLines.push(`${key}: ${newVal}`);
 				}
-				// null → omit the line entirely
 				continue;
 			}
 		}
 		resultLines.push(line);
 	}
 
-	// Append new keys that were not already in the frontmatter
 	for (const [key, value] of updated) {
 		if (!handled.has(key) && value !== "") {
 			resultLines.push(`${key}: ${value}`);
