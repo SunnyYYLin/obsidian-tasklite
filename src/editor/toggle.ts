@@ -1,11 +1,36 @@
+/**
+ * toggle.ts — Public API for task-status mutations.
+ *
+ * Each exported function accepts the raw document lines + metadata and returns
+ * a ToggleResult describing exactly which lines to replace (or null when there
+ * is nothing to do).  Internal behaviour dispatch and line-building logic lives
+ * in toggleMutation.ts.
+ */
+
 import type { App, CachedMetadata } from "obsidian";
-import { serializeTaskLine, copyTaskData, type TaskLine, type TaskData } from "../model/format";
-import { getSubtreeLineRange, getSubtreeNodes, buildTaskTree, taskDepth, type TaskTreeNode } from "../model/tree";
+import { serializeTaskLine, type TaskData } from "../model/format";
+import { getSubtreeLineRange, buildTaskTree, taskDepth, type TaskTreeNode } from "../model/tree";
 import { applyTaskStatus } from "../model/taskState";
-import type { StatusConfiguration, StatusRegistry, StatusType } from "../model/status";
+import type { StatusConfiguration, StatusRegistry } from "../model/status";
 import type { TaskLiteSettings } from "../settings";
-import { buildRecurringTaskOccurrence } from "./recurrenceOccurrence";
 import { getVaultIndentConfig } from "./editorUtils";
+import {
+	type MutationCtx,
+	type TaskBehavior,
+	type TaskMutationContext,
+	applyBehaviorToSubtree,
+	applyBehaviorToTarget,
+	applyBehaviorToParents,
+	shouldCascade,
+	shouldPropagateToParent,
+	buildTaskMutationResult,
+	needsMissingStatusDate,
+	replaceTaskStatus,
+} from "./toggleMutation";
+
+// ---------------------------------------------------------------------------
+// Public types
+// ---------------------------------------------------------------------------
 
 export interface ToggleResult {
 	fromLine: number;
@@ -14,18 +39,7 @@ export interface ToggleResult {
 	warning?: string;
 }
 
-interface TaskMutationContext {
-	lines: string[];
-	node: TaskTreeNode;
-	changedTasks: Map<number, TaskData>;
-	replacementByLine: Map<number, string>;
-	app?: App;
-	registry: StatusRegistry;
-	settings: TaskLiteSettings;
-	unsupportedRecurrenceWarning: string;
-}
-
-interface TaskStatusMutationInput {
+export interface TaskStatusMutationInput {
 	lines: string[];
 	lineNumber: number;
 	metadata: CachedMetadata | null | undefined;
@@ -34,18 +48,18 @@ interface TaskStatusMutationInput {
 	settings: TaskLiteSettings;
 }
 
-type TaskBehavior = "finish" | "unfinish" | "cancel" | "uncancel";
+// ---------------------------------------------------------------------------
+// Indentation helper (used by toggleMutation.ts and external callers)
+// ---------------------------------------------------------------------------
 
 export function getIndentPrefix(depth: number, app?: App, lines?: string[]): string {
 	if (depth <= 0) return "";
 
 	// 1. Try to read from app vault config
 	if (app) {
-		const { useTab, tabSize } = getVaultIndentConfig(app);
-		// getVaultIndentConfig returns defaults when vault.config is absent;
-		// only trust it when vault.config actually exists on the vault object.
+		const {useTab, tabSize} = getVaultIndentConfig(app);
 		const hasConfig = Boolean(
-			(app.vault as unknown as { config?: unknown } | undefined)?.config,
+			(app.vault as unknown as {config?: unknown} | undefined)?.config,
 		);
 		if (hasConfig) {
 			const oneLevelIndent = useTab ? "\t" : " ".repeat(tabSize);
@@ -53,17 +67,14 @@ export function getIndentPrefix(depth: number, app?: App, lines?: string[]): str
 		}
 	}
 
-	// 2. Fallback: detect indentation from document content (useful in tests and mixed vaults)
+	// 2. Fallback: detect indentation from document content (useful in tests)
 	if (lines && lines.length > 0) {
 		for (const line of lines) {
 			const match = line.match(/^([\s\t]+)/);
 			if (match && match[1]) {
 				const firstIndent = match[1];
-				if (firstIndent.startsWith(" ")) {
-					return firstIndent.repeat(depth);
-				} else if (firstIndent.startsWith("\t")) {
-					return "\t".repeat(depth);
-				}
+				if (firstIndent.startsWith(" ")) return firstIndent.repeat(depth);
+				if (firstIndent.startsWith("\t")) return "\t".repeat(depth);
 			}
 		}
 	}
@@ -72,6 +83,10 @@ export function getIndentPrefix(depth: number, app?: App, lines?: string[]): str
 	return "\t".repeat(depth);
 }
 
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
 export function toggleTaskAtLine({
 	lines,
 	lineNumber,
@@ -79,69 +94,23 @@ export function toggleTaskAtLine({
 	app,
 	registry,
 	settings,
-}: {
-	lines: string[];
-	lineNumber: number;
-	metadata: CachedMetadata | null | undefined;
-	app?: App;
-	registry: StatusRegistry;
-	settings: TaskLiteSettings;
-}): ToggleResult | null {
+}: TaskStatusMutationInput): ToggleResult | null {
 	const tree = buildTaskTree(lines, metadata, registry);
 	const node = tree.byLine.get(lineNumber);
 	if (!node) return null;
-
-	if (!node.task) {
-		return togglePlainCheckbox(node, registry);
-	}
+	if (!node.task) return togglePlainCheckbox(node, registry);
 
 	const symbol = registry.getByType(node.task.data.status).symbol;
 	const targetStatus = registry.next(registry.get(symbol));
-	return changeTaskStatusWithTree(tree, {...{lines, lineNumber, metadata, app, registry, settings}, targetStatusSymbol: targetStatus.symbol}, node);
+	return changeTaskStatusWithTree(tree, {lines, lineNumber, metadata, app, registry, settings, targetStatusSymbol: targetStatus.symbol}, node);
 }
 
 export function changeTaskStatusAtLine(
-	input: TaskStatusMutationInput & { targetStatusSymbol: string }
+	input: TaskStatusMutationInput & {targetStatusSymbol: string},
 ): ToggleResult | null {
 	const tree = buildTaskTree(input.lines, input.metadata, input.registry);
 	const node = tree.byLine.get(input.lineNumber);
 	return changeTaskStatusWithTree(tree, input, node);
-}
-
-/** Internal: operates on an already-built tree to avoid redundant rebuilds. */
-function changeTaskStatusWithTree(
-	tree: ReturnType<typeof buildTaskTree>,
-	input: TaskStatusMutationInput & { targetStatusSymbol: string },
-	node: ReturnType<typeof buildTaskTree>["byLine"] extends Map<number, infer N> ? N | undefined : never,
-): ToggleResult | null {
-	if (!node) return null;
-
-	if (!node.task) {
-		if (node.statusCharacter === null) return null;
-		const nextSymbol = input.targetStatusSymbol;
-		const replacement = node.original.replace(/\[(.)\]/u, `[${nextSymbol}]`);
-		return {fromLine: node.lineNumber, toLine: node.lineNumber, replacement: [replacement]};
-	}
-
-	const targetStatus = input.registry.get(input.targetStatusSymbol);
-	if (node.task.data.status === targetStatus.type && !needsMissingStatusDate(node.task.data, targetStatus)) {
-		return null;
-	}
-
-	if (targetStatus.type === "DONE") {
-		return applyTaskBehaviorWithTree(tree, {...input, behavior: "finish"}, node);
-	}
-	if (targetStatus.type === "CANCELLED") {
-		return applyTaskBehaviorWithTree(tree, {...input, behavior: "cancel"}, node);
-	}
-	if (targetStatus.type === "TODO") {
-		if (node.task.data.status === "CANCELLED") {
-			return applyTaskBehaviorWithTree(tree, {...input, behavior: "uncancel"}, node);
-		}
-		return applyTaskBehaviorWithTree(tree, {...input, behavior: "unfinish"}, node);
-	}
-
-	return updateSingleTaskStatusWithTree(tree, {...input, status: targetStatus}, node);
 }
 
 export function finishTaskAtLine(input: TaskStatusMutationInput): ToggleResult | null {
@@ -176,150 +145,94 @@ export function rightClickTaskCheckboxAtLine(input: TaskStatusMutationInput): To
 	return changeTaskStatusWithTree(tree, {...input, targetStatusSymbol: sym}, node);
 }
 
-/** Internal: operates on a pre-built tree, avoiding redundant rebuilds. */
-function applyTaskBehaviorWithTree(
+// ---------------------------------------------------------------------------
+// Internal helpers (not exported)
+// ---------------------------------------------------------------------------
+
+/** Core dispatch: operates on an already-built tree (avoids redundant rebuilds). */
+function changeTaskStatusWithTree(
 	tree: ReturnType<typeof buildTaskTree>,
-	{
-		lines,
-		app,
-		registry,
-		settings,
-		behavior,
-	}: TaskStatusMutationInput & {behavior: TaskBehavior},
-	node: NonNullable<ReturnType<ReturnType<typeof buildTaskTree>["byLine"]["get"]>>,
+	input: TaskStatusMutationInput & {targetStatusSymbol: string},
+	node: TaskTreeNode | undefined,
+): ToggleResult | null {
+	if (!node) return null;
+
+	if (!node.task) {
+		if (node.statusCharacter === null) return null;
+		const replacement = node.original.replace(/\[(.)\]/u, `[${input.targetStatusSymbol}]`);
+		return {fromLine: node.lineNumber, toLine: node.lineNumber, replacement: [replacement]};
+	}
+
+	const targetStatus = input.registry.get(input.targetStatusSymbol);
+	if (node.task.data.status === targetStatus.type && !needsMissingStatusDate(node.task.data, targetStatus)) {
+		return null;
+	}
+
+	const ctx: MutationCtx = {lines: input.lines, app: input.app, registry: input.registry, settings: input.settings};
+
+	if (targetStatus.type === "DONE") return applyBehaviorWithNode(ctx, "finish", node, tree);
+	if (targetStatus.type === "CANCELLED") return applyBehaviorWithNode(ctx, "cancel", node, tree);
+	if (targetStatus.type === "TODO") {
+		const behavior = node.task.data.status === "CANCELLED" ? "uncancel" : "unfinish";
+		return applyBehaviorWithNode(ctx, behavior, node, tree);
+	}
+
+	return updateSingleStatus(ctx, targetStatus, node);
+}
+
+function applyBehaviorWithNode(
+	ctx: MutationCtx,
+	behavior: TaskBehavior,
+	node: TaskTreeNode,
+	_tree: ReturnType<typeof buildTaskTree>,
 ): ToggleResult | null {
 	if (!node.task) return null;
-
 	const changedTasks = new Map<number, TaskData>();
 	const replacementByLine = new Map<number, string>();
-	if (shouldCascade(behavior, settings)) {
-		applyBehaviorToSubtree(node, behavior, changedTasks, replacementByLine, registry, settings, app, lines);
+
+	if (shouldCascade(behavior, ctx.settings)) {
+		applyBehaviorToSubtree(node, behavior, changedTasks, replacementByLine, ctx);
 	} else {
-		applyBehaviorToTarget(node, behavior, changedTasks, replacementByLine, registry, settings, app, lines);
+		applyBehaviorToTarget(node, behavior, changedTasks, replacementByLine, ctx);
 	}
-	if (shouldPropagateToParent(behavior, settings)) {
-		applyBehaviorToParents(node, behavior, changedTasks, replacementByLine, registry, settings, app, lines);
+	if (shouldPropagateToParent(behavior, ctx.settings)) {
+		applyBehaviorToParents(node, behavior, changedTasks, replacementByLine, ctx);
 	}
 	if (changedTasks.size === 0) return null;
 
-	return buildTaskMutationResult({
-		lines,
+	const mutCtx: TaskMutationContext = {
+		...ctx,
 		node,
 		changedTasks,
 		replacementByLine,
-		app,
-		registry,
-		settings,
 		unsupportedRecurrenceWarning: "TaskLite: unsupported recurrence rule; updated without creating the next copy.",
-	});
+	};
+	return buildTaskMutationResult(mutCtx);
 }
 
-function updateSingleTaskStatusWithTree(
-	_tree: ReturnType<typeof buildTaskTree>,
-	{
-		lines,
-		app,
-		registry,
-		settings,
-		status,
-	}: TaskStatusMutationInput & {status: StatusConfiguration},
-	node: NonNullable<ReturnType<ReturnType<typeof buildTaskTree>["byLine"]["get"]>>,
+function updateSingleStatus(
+	ctx: MutationCtx,
+	status: StatusConfiguration,
+	node: TaskTreeNode,
 ): ToggleResult | null {
 	if (!node.task) return null;
 	if (node.task.data.status === status.type && !needsMissingStatusDate(node.task.data, status)) return null;
 
-	const changedTask = applyTaskStatus(node.task.data, status.type, settings, {fillMissingStatusDate: true});
+	const changedTask = applyTaskStatus(node.task.data, status.type, ctx.settings, {fillMissingStatusDate: true});
 	const changedTasks = new Map<number, TaskData>([[node.lineNumber, changedTask]]);
-	const depth = taskDepth(node);
-	const indent = getIndentPrefix(depth, app, lines);
-	const replacementByLine = new Map<number, string>([[node.lineNumber, serializeTaskLine({...node.task, data: changedTask}, indent, registry)]]);
-	return buildTaskMutationResult({
-		lines,
+	const indent = getIndentPrefix(taskDepth(node), ctx.app, ctx.lines);
+	const replacementByLine = new Map<number, string>([
+		[node.lineNumber, serializeTaskLine({...node.task, data: changedTask}, indent, ctx.registry)],
+	]);
+
+	const mutCtx: TaskMutationContext = {
+		...ctx,
 		node,
 		changedTasks,
 		replacementByLine,
-		app,
-		registry,
-		settings,
 		unsupportedRecurrenceWarning: "TaskLite: unsupported recurrence rule; toggled without creating the next copy.",
-	});
-}
-
-function buildTaskMutationResult({
-	lines,
-	node,
-	changedTasks,
-	replacementByLine,
-	app,
-	registry,
-	settings,
-	unsupportedRecurrenceWarning,
-}: TaskMutationContext): ToggleResult {
-	const baseRange = getSubtreeLineRange(node);
-	const recurringNode = findRecurringTerminatedNode(node, changedTasks);
-	const recurringRange = recurringNode ? getSubtreeLineRange(recurringNode) : null;
-	const replacementRange = getReplacementRange(recurringRange ?? baseRange, replacementByLine);
-	const originalLines = lines
-		.slice(replacementRange.from, replacementRange.to + 1)
-		.map((line, index) => replacementByLine.get(replacementRange.from + index) ?? line);
-
-	if (!recurringNode?.task) {
-		const completedNode = findTerminatedNode(node, changedTasks);
-		if (completedNode?.task?.data.onCompletion === "delete") {
-			const deleteRange = getSubtreeLineRange(completedNode);
-			return {fromLine: deleteRange.from, toLine: deleteRange.to, replacement: []};
-		}
-		return {fromLine: replacementRange.from, toLine: replacementRange.to, replacement: originalLines};
-	}
-
-	const completedTask = changedTasks.get(recurringNode.lineNumber);
-	if (!completedTask) {
-		return {fromLine: replacementRange.from, toLine: replacementRange.to, replacement: originalLines};
-	}
-
-	const occurrence = buildRecurringTaskOccurrence({
-		lines,
-		recurringNode,
-		terminatedTask: completedTask,
-		app,
-		registry,
-		settings,
-		unsupportedWarning: unsupportedRecurrenceWarning,
-	});
-	if (!occurrence) {
-		return {fromLine: replacementRange.from, toLine: replacementRange.to, replacement: originalLines};
-	}
-	const onDelete = recurringNode.task.data.onCompletion === "delete";
-
-	if (occurrence.warning) {
-		return {
-			fromLine: replacementRange.from,
-			toLine: replacementRange.to,
-			replacement: originalLines,
-			warning: occurrence.warning,
-		};
-	}
-	if (occurrence.skippedBecauseExisting && !onDelete) {
-		return {fromLine: replacementRange.from, toLine: replacementRange.to, replacement: originalLines};
-	}
-
-	if (onDelete) {
-		return {
-			fromLine: recurringRange!.from,
-			toLine: recurringRange!.to,
-			replacement: occurrence.skippedBecauseExisting ? [] : occurrence.nextLines,
-		};
-	}
-
-	return {
-		fromLine: replacementRange.from,
-		toLine: replacementRange.to,
-		replacement: [...occurrence.nextLines, ...originalLines],
 	};
-}
-
-function needsMissingStatusDate(task: TaskData, status: { symbol: string; type: StatusType }): boolean {
-	return (status.type === "DONE" && !task.dates.done) || (status.type === "CANCELLED" && !task.dates.cancelled);
+	return buildTaskMutationResult(mutCtx);
 }
 
 function togglePlainCheckbox(node: TaskTreeNode, registry: StatusRegistry): ToggleResult | null {
@@ -330,191 +243,5 @@ function togglePlainCheckbox(node: TaskTreeNode, registry: StatusRegistry): Togg
 	return {fromLine: node.lineNumber, toLine: node.lineNumber, replacement: [replacement]};
 }
 
-function applyBehaviorToSubtree(
-	node: TaskTreeNode,
-	behavior: TaskBehavior,
-	changedTasks: Map<number, TaskData>,
-	replacementByLine: Map<number, string>,
-	registry: StatusRegistry,
-	settings: TaskLiteSettings,
-	app?: App,
-	lines?: string[],
-): void {
-	for (const current of getSubtreeNodes(node)) {
-		if (!current.task) continue;
-		const nextStatus = statusForSubtreeBehavior(current, behavior, registry, changedTasks, settings);
-		if (!nextStatus) continue;
-		replaceTaskStatus(current, nextStatus, changedTasks, replacementByLine, settings, app, registry, lines);
-	}
-}
-
-function applyBehaviorToTarget(
-	node: TaskTreeNode,
-	behavior: TaskBehavior,
-	changedTasks: Map<number, TaskData>,
-	replacementByLine: Map<number, string>,
-	registry: StatusRegistry,
-	settings: TaskLiteSettings,
-	app?: App,
-	lines?: string[],
-): void {
-	if (!node.task) return;
-	const nextStatus = statusForSubtreeBehavior(node, behavior, registry, changedTasks, settings);
-	if (!nextStatus) return;
-	replaceTaskStatus(node, nextStatus, changedTasks, replacementByLine, settings, app, registry, lines);
-}
-
-function applyBehaviorToParents(
-	node: TaskTreeNode,
-	behavior: TaskBehavior,
-	changedTasks: Map<number, TaskData>,
-	replacementByLine: Map<number, string>,
-	registry: StatusRegistry,
-	settings: TaskLiteSettings,
-	app?: App,
-	lines?: string[],
-): void {
-	let parent = node.parent;
-	while (parent?.task) {
-		const nextStatus = statusForParentBehavior(parent, behavior, changedTasks, registry);
-		if (!nextStatus) break;
-		replaceTaskStatus(parent, nextStatus, changedTasks, replacementByLine, settings, app, registry, lines);
-		parent = parent.parent;
-	}
-}
-
-function statusForSubtreeBehavior(
-	node: TaskTreeNode,
-	behavior: TaskBehavior,
-	registry: StatusRegistry,
-	changedTasks: Map<number, TaskData>,
-	settings: TaskLiteSettings,
-): StatusConfiguration | null {
-	const type = node.task!.data.status;
-	if (behavior === "finish") return type === "CANCELLED" ? null : registry.get("x");
-	if (behavior === "cancel") {
-		if (type === "DONE") return null;
-		if (settings.toggleBehavior.parentOnCancel && node.children.length > 0 && areNonCancelledChildrenDone(node, changedTasks)) return registry.get("x");
-		return registry.get("-");
-	}
-	if (behavior === "unfinish") return registry.get(" ");
-	return type === "CANCELLED" ? registry.get(" ") : null;
-}
-
-function statusForParentBehavior(
-	parent: TaskTreeNode,
-	behavior: TaskBehavior,
-	changedTasks: Map<number, TaskData>,
-	registry: StatusRegistry,
-): StatusConfiguration | null {
-	if (!parent.task) return null;
-	const type = parent.task.data.status;
-	if (behavior === "finish") {
-		if (type === "CANCELLED" || type === "DONE") return null;
-		return areAllTaskChildrenTerminated(parent, changedTasks) ? registry.get("x") : null;
-	}
-	if (behavior === "cancel") {
-		if (type === "DONE" || type === "CANCELLED") return null;
-		return areNonCancelledChildrenDone(parent, changedTasks) ? registry.get("x") : null;
-	}
-	if (behavior === "unfinish") {
-		return type === "DONE" || type === "CANCELLED" ? registry.get(" ") : null;
-	}
-	return type === "CANCELLED" ? registry.get(" ") : null;
-}
-
-function replaceTaskStatus(
-	node: TaskTreeNode,
-	status: StatusConfiguration,
-	changedTasks: Map<number, TaskData>,
-	replacementByLine: Map<number, string>,
-	settings: TaskLiteSettings,
-	app: App | undefined,
-	registry: StatusRegistry,
-	lines: string[] | undefined,
-): void {
-	if (!node.task) return;
-	const currentTask = changedTasks.get(node.lineNumber) ?? node.task.data;
-	if (currentTask.status === status.type && !needsMissingStatusDate(currentTask, status)) return;
-	const updatedTask = applyTaskStatus(currentTask, status.type, settings, {fillMissingStatusDate: true});
-	changedTasks.set(node.lineNumber, updatedTask);
-	const depth = taskDepth(node);
-	const indent = getIndentPrefix(depth, app, lines);
-	replacementByLine.set(node.lineNumber, serializeTaskLine({...node.task, data: updatedTask}, indent, registry));
-}
-
-function findRecurringTerminatedNode(node: TaskTreeNode, changedTasks: Map<number, TaskData>): TaskTreeNode | null {
-	let current: TaskTreeNode | null = node;
-	while (current) {
-		const changedTask = changedTasks.get(current.lineNumber);
-		const statusType = changedTask ? changedTask.status : current.task?.data.status;
-		if (current.task?.data.recurrence && isTerminalStatus(statusType) && !isTerminalStatus(current.task.data.status)) {
-			return current;
-		}
-		current = current.parent;
-	}
-	return null;
-}
-
-function findTerminatedNode(node: TaskTreeNode, changedTasks: Map<number, TaskData>): TaskTreeNode | null {
-	const changedTask = changedTasks.get(node.lineNumber);
-	if (node.task && isTerminalStatus(changedTask?.status) && !isTerminalStatus(node.task.data.status)) {
-		return node;
-	}
-	return null;
-}
-
-function areAllTaskChildrenTerminated(parent: TaskTreeNode, changedTasks: Map<number, TaskData>): boolean {
-	const taskChildren = parent.children.filter((child) => child.task);
-	if (taskChildren.length === 0) return false;
-	return taskChildren.every((child) => {
-		if (!child.task) return false;
-		const changedTask = changedTasks.get(child.lineNumber);
-		const statusType = changedTask ? changedTask.status : child.task.data.status;
-		return isTerminalStatus(statusType);
-	});
-}
-
-function isTerminalStatus(type: StatusType | undefined): boolean {
-	return type === "DONE" || type === "CANCELLED";
-}
-
-function shouldCascade(behavior: TaskBehavior, settings: TaskLiteSettings): boolean {
-	if (behavior === "finish") return settings.toggleBehavior.cascadeFinish;
-	if (behavior === "cancel") return settings.toggleBehavior.cascadeCancel;
-	if (behavior === "unfinish") return settings.toggleBehavior.cascadeUnfinish;
-	return settings.toggleBehavior.cascadeUncancel;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function shouldPropagateToParent(behavior: TaskBehavior, settings: TaskLiteSettings): boolean {
-	if (behavior === "finish") return settings.toggleBehavior.parentOnFinish;
-	if (behavior === "cancel") return settings.toggleBehavior.parentOnCancel;
-	if (behavior === "unfinish") return settings.toggleBehavior.parentOnUnfinish;
-	return settings.toggleBehavior.parentOnUncancel;
-}
-
-function areNonCancelledChildrenDone(parent: TaskTreeNode, changedTasks: Map<number, TaskData>): boolean {
-	const taskChildren = parent.children.filter((child) => child.task);
-	for (const child of taskChildren) {
-		if (!child.task) continue;
-		const changedTask = changedTasks.get(child.lineNumber);
-		const statusType = changedTask ? changedTask.status : child.task.data.status;
-		if (statusType === "CANCELLED") continue;
-		if (statusType !== "DONE") return false;
-	}
-	return true;
-}
-
-function getReplacementRange(
-	range: {from: number; to: number},
-	replacementByLine: Map<number, string>,
-): {from: number; to: number} {
-	let from = range.from;
-	let to = range.to;
-	for (const lineNumber of replacementByLine.keys()) {
-		if (lineNumber < from) from = lineNumber;
-		if (lineNumber > to) to = lineNumber;
-	}
-	return {from, to};
-}
+// Re-export so external callers that reference these by name continue to work
+export {replaceTaskStatus, getSubtreeLineRange};
