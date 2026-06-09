@@ -2216,6 +2216,7 @@ describe("TaskLite 0.4.5 Features", () => {
 			() => settings,
 			store
 		);
+		reconciler.register();
 
 		// Now simulate completing Task A
 		const beforeContent = fileContent;
@@ -2231,6 +2232,8 @@ describe("TaskLite 0.4.5 Features", () => {
 		// Since we mocked read, we'll return afterContent
 		app.vault.read = () => Promise.resolve(afterContent);
 		await (reconciler as any).reconcile(file);
+		// Allow async unblockDependentTasks to run
+		await new Promise((resolve) => setTimeout(resolve, 10));
 
 		// The reconciler should have unblocked Task B
 		expect(modifyCalled).toBe(true);
@@ -2278,7 +2281,7 @@ describe("TaskLite 0.4.5 Features", () => {
 		const app = {
 			plugins: {
 				plugins: {
-					"obsidian-tasklite": {
+					"taskslite": {
 						documentStore: mockDocumentStore,
 					}
 				}

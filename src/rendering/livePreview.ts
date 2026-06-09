@@ -1,5 +1,5 @@
 import { ViewPlugin, type EditorView, type PluginValue } from "@codemirror/view";
-import type { App, Plugin } from "obsidian";
+import { Notice, type App, type Plugin } from "obsidian";
 import type { StatusRegistry } from "../model/status";
 import type { TaskDocumentStore } from "../model/taskDocumentStore";
 import type { TaskLiteSettings } from "../settings";
@@ -74,6 +74,9 @@ export function createLivePreviewExtension(
 				});
 				if (activeFile) {
 					void documentStore?.replaceDocumentContent(activeFile, this.view.state.doc.toString());
+				}
+				if (result.warning) {
+					new Notice(result.warning);
 				}
 			}
 		},

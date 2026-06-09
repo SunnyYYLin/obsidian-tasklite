@@ -35,6 +35,7 @@ export class TaskDocumentStore {
 	private indexedAllFiles = false;
 
 	onRecordUpdated?: (path: string, records: TaskDocumentRecord[]) => void;
+	onTasksCompleted?: (completedIds: string[]) => void;
 
 	constructor(
 		private readonly app: App,
@@ -162,6 +163,7 @@ export class TaskDocumentStore {
 			this.forget(file.path);
 			return null;
 		}
+		const oldDoc = this.documents.get(file.path);
 		const lines = content.split("\n");
 		const tree = buildTaskTree(lines, metadata, this.registry);
 		const hasBodyTasks = tree.nodes.some((n) => n.task);
@@ -179,6 +181,37 @@ export class TaskDocumentStore {
 		const records = taskRecordsFromDocument(document);
 		this.recordsByPath.set(file.path, records);
 		this.dirtyPaths.delete(file.path);
+
+		if (oldDoc && this.onTasksCompleted) {
+			const beforeDone = new Set<string>();
+			if (oldDoc.frontmatterTask?.task.id && oldDoc.frontmatterTask.task.status === "DONE") {
+				beforeDone.add(oldDoc.frontmatterTask.task.id);
+			}
+			for (const node of oldDoc.tree.nodes) {
+				if (node.task?.data.id && node.task.data.status === "DONE") {
+					beforeDone.add(node.task.data.id);
+				}
+			}
+
+			const newlyCompleted: string[] = [];
+			if (frontmatterTask?.task.id && frontmatterTask.task.status === "DONE") {
+				if (!beforeDone.has(frontmatterTask.task.id)) {
+					newlyCompleted.push(frontmatterTask.task.id);
+				}
+			}
+			for (const node of tree.nodes) {
+				if (node.task?.data.id && node.task.data.status === "DONE") {
+					if (!beforeDone.has(node.task.data.id)) {
+						newlyCompleted.push(node.task.data.id);
+					}
+				}
+			}
+
+			if (newlyCompleted.length > 0) {
+				this.onTasksCompleted(newlyCompleted);
+			}
+		}
+
 		this.onRecordUpdated?.(file.path, records);
 		return document;
 	}

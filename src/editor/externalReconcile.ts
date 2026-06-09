@@ -29,6 +29,9 @@ export class ExternalTaskReconciler {
 	) {}
 
 	register(): void {
+		this.documentStore.onTasksCompleted = (completedIds) => {
+			void this.unblockDependentTasks(completedIds);
+		};
 		this.plugin.registerEvent(
 			this.app.vault.on("modify", (file) => {
 				if (file instanceof TFile && file.extension === "md") {
@@ -58,9 +61,7 @@ export class ExternalTaskReconciler {
 			settings: this.getSettings(),
 		});
 
-		let finalContent = after;
 		if (reconciled && reconciled !== after) {
-			finalContent = reconciled;
 			this.applying.add(file.path);
 			try {
 				await this.app.vault.modify(file, reconciled);
@@ -68,44 +69,6 @@ export class ExternalTaskReconciler {
 			} finally {
 				this.applying.delete(file.path);
 			}
-		}
-
-		// Check for newly completed task IDs in the final state compared to before
-		const docAfter = this.documentStore.getCachedDocument(file.path);
-		const beforeIds = new Map<string, string>();
-		if (docBefore) {
-			if (docBefore.frontmatterTask?.task.id) {
-				beforeIds.set(docBefore.frontmatterTask.task.id, docBefore.frontmatterTask.task.status);
-			}
-			for (const node of docBefore.tree.nodes) {
-				if (node.task?.data.id) {
-					beforeIds.set(node.task.data.id, node.task.data.status);
-				}
-			}
-		}
-
-		const newlyCompletedIds: string[] = [];
-		if (docAfter) {
-			if (docAfter.frontmatterTask?.task.id) {
-				const id = docAfter.frontmatterTask.task.id;
-				const afterStatus = docAfter.frontmatterTask.task.status;
-				if (afterStatus === "DONE" && beforeIds.get(id) !== "DONE") {
-					newlyCompletedIds.push(id);
-				}
-			}
-			for (const node of docAfter.tree.nodes) {
-				if (node.task?.data.id) {
-					const id = node.task.data.id;
-					const afterStatus = node.task.data.status;
-					if (afterStatus === "DONE" && beforeIds.get(id) !== "DONE") {
-						newlyCompletedIds.push(id);
-					}
-				}
-			}
-		}
-
-		if (newlyCompletedIds.length > 0) {
-			await this.unblockDependentTasks(newlyCompletedIds);
 		}
 	}
 

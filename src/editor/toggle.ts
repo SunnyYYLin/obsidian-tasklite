@@ -155,7 +155,7 @@ export function getUnfinishedDependencies(
 		.filter(Boolean);
 	if (depIds.length === 0) return [];
 
-	const plugin = (app as any).plugins?.plugins?.["obsidian-tasklite"];
+	const plugin = (app as any).plugins?.plugins?.["taskslite"];
 	const documentStore = plugin?.documentStore;
 	if (!documentStore) return [];
 
