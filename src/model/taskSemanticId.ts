@@ -58,14 +58,14 @@ export function generateSemanticId(
 		if (pinyinlite && /[\u4e00-\u9fa5]/.test(char)) {
 			// Flush current English word if any
 			if (currentWord) {
-				tokens.push(currentWord.toLowerCase());
+				tokens.push(currentWord[0]!.toLowerCase());
 				currentWord = "";
 			}
 			const pinyins = pinyinlite(char);
 			if (pinyins && pinyins[0] && pinyins[0].length > 0) {
 				const firstPinyin = pinyins[0][0];
 				if (firstPinyin) {
-					tokens.push(firstPinyin.toLowerCase());
+					tokens.push(firstPinyin[0]!.toLowerCase());
 				}
 			}
 		} else if (/[a-zA-Z0-9]/.test(char)) {
@@ -73,13 +73,13 @@ export function generateSemanticId(
 		} else {
 			// separator
 			if (currentWord) {
-				tokens.push(currentWord.toLowerCase());
+				tokens.push(currentWord[0]!.toLowerCase());
 				currentWord = "";
 			}
 		}
 	}
 	if (currentWord) {
-		tokens.push(currentWord.toLowerCase());
+		tokens.push(currentWord[0]!.toLowerCase());
 	}
 
 	// Filter out empty tokens
@@ -87,8 +87,8 @@ export function generateSemanticId(
 
 	let base = "";
 	if (filtered.length > 0) {
-		const fullBase = filtered.join("-");
-		base = fullBase.slice(0, 8).replace(/-+$/, "");
+		const fullBase = filtered.join("");
+		base = fullBase.slice(0, 8);
 	}
 
 	if (!base) {
