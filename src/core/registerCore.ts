@@ -1,6 +1,7 @@
 import { MarkdownView, Notice, TFile, type Editor } from "obsidian";
 import type TaskLitePlugin from "../main";
-import { normalizeLineIndentation } from "../model/format";
+import { normalizeLineIndentation, serializeTaskLine, parseLineWithStatus } from "../model/format";
+import { generateSemanticId } from "../model/taskSemanticId";
 import { cancelEditorTask, toggleEditorTask, toggleEditorTaskCancellation, uncancelEditorTask } from "../editor/apply";
 import { ExternalTaskReconciler } from "../editor/externalReconcile";
 import { createLivePreviewExtension } from "../rendering/livePreview";
@@ -118,6 +119,34 @@ export function registerTaskLiteCore(plugin: TaskLitePlugin): void {
 			})().catch((err) => {
 				console.error(err);
 			});
+			return true;
+		},
+	});
+
+	plugin.addCommand({
+		id: "generate-semantic-id",
+		name: t("command.generateSemanticId"),
+		editorCheckCallback: (checking: boolean, editor: Editor, view) => {
+			if (!(view instanceof MarkdownView)) return false;
+			if (checking) return true;
+			const cursor = editor.getCursor();
+			const line = editor.getLine(cursor.line);
+			const registry = plugin.statusRegistry;
+			const parsed = parseLineWithStatus(line, registry);
+			if (!parsed) {
+				new Notice(t("notice.notATaskLine"));
+				return true;
+			}
+			if (parsed.data.id) {
+				new Notice(t("notice.taskIdAlreadyExists"));
+				return true;
+			}
+			const semanticId = generateSemanticId(parsed.data.description);
+			parsed.data.id = semanticId;
+			const indent = line.match(/^([\s\t>]*)/)?.[0] ?? "";
+			const newLine = serializeTaskLine(parsed, indent, registry);
+			editor.setLine(cursor.line, newLine);
+			new Notice(t("notice.taskIdGenerated").replace("{id}", semanticId));
 			return true;
 		},
 	});

@@ -171,6 +171,10 @@ export interface TaskLiteCoreApi {
 	 * without an open editor, use the async `updateTaskStatus` method instead.
 	 */
 	executeTasksToggleCommand(line: string, path: string): string;
+	/**
+	 * Return the set of all unique assignees across all tasks in the vault, sorted alphabetically.
+	 */
+	listAssignees(): Promise<string[]>;
 }
 
 interface TaskLiteCoreApiOptions {
@@ -262,6 +266,26 @@ export function createTaskLiteCoreApi({
 				settings: getSettings(),
 			});
 			return result?.replacement.join("\n") ?? line;
+		},
+		listAssignees: async () => {
+			const tasks = await listTasks({
+				app,
+				registry,
+				documentStore,
+				options: { includeCompleted: true, includeCancelled: true, includeChildren: true }
+			});
+			const assignees = new Set<string>();
+			for (const r of tasks) {
+				if (r.task.assignee) {
+					for (const a of r.task.assignee) {
+						const trimmed = a.trim();
+						if (trimmed) {
+							assignees.add(trimmed);
+						}
+					}
+				}
+			}
+			return Array.from(assignees).sort();
 		},
 	};
 }

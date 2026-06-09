@@ -19,6 +19,7 @@
    - [editTask](#25-edittask)
    - [updateTaskStatus](#26-updatetaskstatus)
    - [executeTasksToggleCommand](#27-executetaskstogglecommand)
+   - [listAssignees](#28-listassignees)
 3. [数据结构参考](#3-数据结构参考)
    - [TaskLiteTaskRecord](#tasklitetaskrecord)
    - [TaskData](#taskdata)
@@ -99,6 +100,7 @@ interface TaskLiteCoreApi {
   editTask(path: string, lineNumber: number, patch: EditTaskPatch): Promise<boolean>;
   updateTaskStatus(path: string, lineNumber: number, statusSymbol: string): Promise<boolean>;
   executeTasksToggleCommand(line: string, path: string): string;
+  listAssignees(): Promise<string[]>;
 }
 ```
 
@@ -404,6 +406,25 @@ const toggled = api.executeTasksToggleCommand(original, "Work/Tasks.md");
 ```
 
 > 这个方法主要用于**兼容 Tasks 插件的 Dataview 渲染场景**。如果你只是想操作 Vault 文件中的任务，请优先使用 `updateTaskStatus` 方法。
+
+---
+
+### 2.8 `listAssignees`
+
+获取整个 Vault 中所有任务中出现的唯一负责人（assignee）集合，按字母顺序排序。
+
+```typescript
+listAssignees(): Promise<string[]>
+```
+
+**返回**：`string[]` 负责人名称数组。
+
+**示例：**
+
+```typescript
+const assignees = await api.listAssignees();
+console.log("库中所有负责人：", assignees); // ['Alice', 'Bob', 'Sunny']
+```
 
 ---
 
@@ -753,6 +774,7 @@ async function archiveCompletedTasks(app: App, api: TaskLiteCoreApi) {
 
 | 版本 | 新增 API |
 |------|---------|
+| 0.4.5 | 新增 `listAssignees` API，返回库中所有负责人的去重集合 |
 | 0.4.3-alpha.0 | `listTasks` 现在返回所有任务（包括 Frontmatter 定义的文件级任务和普通行级任务） |
 | 0.4.2-alpha.0 | 新增 DQL-like 查询过滤：`listTasks({ query })` 和 `filterTasks(records, query)`，支持常用字段比较、`contains`、`=~`、`AND`/`OR`/`NOT` 与括号 |
 | 0.4.1-alpha.4 | 状态管理重构：统一状态变更 API 接口为 `updateTaskStatus` 并支持传入状态符号（包含级联逻辑及循环功能），移除冗余的 `finishTask`/`unfinishTask`/`cancelTask`/`uncancelTask` 方法，且从 `editTask` 中去除了临时状态修改属性 |

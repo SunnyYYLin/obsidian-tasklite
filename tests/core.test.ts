@@ -1,4 +1,22 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, mock } from "bun:test";
+
+mock.module("obsidian", () => {
+	class TFile {
+		path: string = "";
+		basename: string = "";
+		extension: string = "md";
+	}
+	class Notice {
+		constructor(message: string) {
+			console.log("Mock Notice:", message);
+		}
+	}
+	return {
+		TFile,
+		Notice,
+	};
+});
+
 import { parseTaskLine, TASK_SYMBOLS, normalizeLineIndentation } from "../src/model/format";
 import { StatusRegistry } from "../src/model/status";
 import { buildTaskTree } from "../src/model/tree";
@@ -7,6 +25,7 @@ import { TaskDocumentStore, type TaskDocumentRecord } from "../src/model/taskDoc
 import { filterTaskRecordsByQuery } from "../src/model/taskQuery";
 import { cancelTaskAtLine, clickTaskCheckboxAtLine, rightClickTaskCheckboxAtLine, toggleTaskAtLine, unfinishTaskAtLine } from "../src/editor/toggle";
 import { reconcileExternalTaskCompletion } from "../src/editor/externalReconcileCore";
+import { generateSemanticId } from "../src/model/taskSemanticId";
 import { createTaskLiteCoreApi } from "../src/api/taskLiteCoreApi";
 import type TaskLitePlugin from "../src/main";
 import type { TaskLiteSettings } from "../src/settings";
@@ -2068,5 +2087,109 @@ describe("indentation normalization", () => {
 	test("does nothing to non-list lines", () => {
 		expect(normalizeLineIndentation("just some text", true, 4)).toBe("just some text");
 		expect(normalizeLineIndentation("  just indented text", true, 4)).toBe("  just indented text");
+	});
+});
+
+describe("TaskLite 0.4.5 Features", () => {
+	test("generateSemanticId handles English and Chinese and limits to 15 tokens", () => {
+		expect(generateSemanticId("feat: support blocking and ID")).toBe("feat-support-blocking-and-id");
+		expect(generateSemanticId("自动生成带语义ID（英语+hyphen，中文拼音）")).toBe("zi-dong-sheng-cheng-dai-yu-yi-id-ying-yu-hyphen-zhong-wen-pin-yin");
+		expect(generateSemanticId("feat: 添加API返回assignee集合")).toBe("feat-tian-jia-api-fan-hui-assignee-ji-he");
+		expect(generateSemanticId("")).toContain("task-");
+	});
+
+	test("listAssignees returns sorted unique assignees", async () => {
+		const registry = new StatusRegistry();
+		const file = createTestFile("tasks.md", "tasks");
+		const app = {
+			vault: {
+				getMarkdownFiles: () => [file],
+				cachedRead: () => Promise.resolve([
+					"- [ ] Task 1 👤 Alice & Bob",
+					"- [ ] Task 2 👤 Bob & Charlie",
+					"- [ ] Task 3 👤 Alice",
+				].join("\n")),
+			},
+			metadataCache: {
+				getFileCache: () => null,
+			},
+		};
+		const store = new TaskDocumentStore(app as any, registry);
+		// Pre-populate store
+		await store.getDocument(file as any);
+
+		const api = createTaskLiteCoreApi({
+			app: app as any,
+			registry,
+			getSettings: () => settings,
+			documentStore: store,
+		});
+
+		const assignees = await api.listAssignees();
+		expect(assignees).toEqual(["Alice", "Bob", "Charlie"]);
+	});
+
+	test("unblockDependentTasks completes dependency and unblocks blocking tasks", async () => {
+		const { ExternalTaskReconciler } = await import("../src/editor/externalReconcile");
+		const registry = new StatusRegistry();
+		const file = createTestFile("tasks.md", "tasks");
+		let fileContent = [
+			"- [ ] Task A 🆔 task-a",
+			"- [ ] Task B ⛔ task-a",
+		].join("\n");
+		let modifyCalled = false;
+
+		const app = {
+			vault: {
+				getMarkdownFiles: () => [file],
+				cachedRead: () => Promise.resolve(fileContent),
+				read: () => Promise.resolve(fileContent),
+				modify: (f: any, nextContent: string) => {
+					fileContent = nextContent;
+					modifyCalled = true;
+					return Promise.resolve();
+				},
+				getAbstractFileByPath: () => file,
+				on: () => {},
+			},
+			metadataCache: {
+				getFileCache: () => null,
+				on: () => {},
+			},
+			fileManager: {},
+		};
+
+		const store = new TaskDocumentStore(app as any, registry);
+		// Load document into cache
+		await store.getDocument(file as any);
+
+		const reconciler = new ExternalTaskReconciler(
+			{ registerEvent: () => {} } as any,
+			app as any,
+			registry,
+			() => settings,
+			store
+		);
+
+		// Now simulate completing Task A
+		const beforeContent = fileContent;
+		const afterContent = [
+			"- [x] Task A 🆔 task-a ✅ 2026-05-16",
+			"- [ ] Task B ⛔ task-a",
+		].join("\n");
+
+		// Set cached document content to mock before state
+		await store.replaceDocumentContent(file as any, beforeContent);
+
+		// Call reconcile manually to trigger check
+		// Since we mocked read, we'll return afterContent
+		app.vault.read = () => Promise.resolve(afterContent);
+		await (reconciler as any).reconcile(file);
+
+		// The reconciler should have unblocked Task B
+		expect(modifyCalled).toBe(true);
+		expect(fileContent).toContain("- [x] Task A 🆔 task-a ✅ 2026-05-16");
+		expect(fileContent).toContain("- [ ] Task B");
+		expect(fileContent).not.toContain("⛔ task-a");
 	});
 });

@@ -7,7 +7,8 @@ import {
 	type TFile,
 } from "obsidian";
 import type TaskLitePlugin from "../main";
-import { taskLineRegex, TASK_SYMBOLS } from "../model/format";
+import { taskLineRegex, TASK_SYMBOLS, parseLineWithStatus } from "../model/format";
+import { generateSemanticId } from "../model/taskSemanticId";
 import {
 	getDateSuggestions,
 	parseDateShorthand,
@@ -35,7 +36,13 @@ interface RecurrenceSuggestion {
 	insert: string;
 }
 
-type Suggestion = EmojiSuggestion | DateSuggestion | RecurrenceSuggestion;
+interface DependsOnSuggestion {
+	kind: "dependsOn";
+	id: string;
+	description: string;
+}
+
+type Suggestion = EmojiSuggestion | DateSuggestion | RecurrenceSuggestion | DependsOnSuggestion;
 
 const EMOJI_SUGGESTIONS: EmojiSuggestion[] = [
 	{
@@ -194,7 +201,11 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 		const recurrenceSymbol = TASK_SYMBOLS.recurrence;
 		const recurrenceIndex = beforeCursor.lastIndexOf(recurrenceSymbol);
 
-		const maxIndex = Math.max(atIndex, lastDateSymbolIdx, recurrenceIndex);
+		// Find the last index of dependsOn symbol
+		const dependsOnSymbol = TASK_SYMBOLS.dependsOn;
+		const dependsOnIndex = beforeCursor.lastIndexOf(dependsOnSymbol);
+
+		const maxIndex = Math.max(atIndex, lastDateSymbolIdx, recurrenceIndex, dependsOnIndex);
 		if (maxIndex === -1) return null;
 
 		if (maxIndex === atIndex) {
@@ -239,6 +250,22 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 					}
 				}
 			}
+		} else if (maxIndex === dependsOnIndex) {
+			// Mode 4: dependsOn emoji followed by space -> dependsOn ID suggestions
+			const afterSymbolIdx = dependsOnIndex + dependsOnSymbol.length;
+			if (beforeCursor.charAt(afterSymbolIdx) === " ") {
+				const queryStart = afterSymbolIdx + 1;
+				if (cursor.ch >= queryStart) {
+					const queryText = beforeCursor.slice(queryStart);
+					if (!containsDelimiter(queryText)) {
+						return {
+							start: { line: cursor.line, ch: queryStart },
+							end: cursor,
+							query: `depends:${queryText.toLowerCase()}`,
+						};
+					}
+				}
+			}
 		}
 
 		return null;
@@ -278,6 +305,29 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 			).slice(0, 8);
 		}
 
+		// ---- dependsOn autocomplete mode ----
+		if (query.startsWith("depends:")) {
+			const q = query.slice(8).trim();
+			const records = this.plugin.documentStore.listCachedRecords();
+			const ids = new Map<string, string>(); // id -> description
+			for (const r of records) {
+				if (r.task.id) {
+					ids.set(r.task.id, r.task.description);
+				}
+			}
+			const matches: DependsOnSuggestion[] = [];
+			for (const [id, desc] of ids.entries()) {
+				if (!q || id.toLowerCase().includes(q) || desc.toLowerCase().includes(q)) {
+					matches.push({
+						kind: "dependsOn",
+						id,
+						description: desc,
+					});
+				}
+			}
+			return matches.slice(0, 8);
+		}
+
 		return [];
 	}
 
@@ -295,6 +345,12 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 				cls: "taskslite-suggest-token",
 			});
 			el.createSpan({ text: value.label });
+		} else if (value.kind === "dependsOn") {
+			el.createSpan({
+				text: value.id,
+				cls: "taskslite-suggest-token",
+			});
+			el.createSpan({ text: value.description });
 		} else {
 			// Only show "text -> replacement text"
 			el.createSpan({ text: value.entry.localLabel });
@@ -304,14 +360,29 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 	selectSuggestion(value: Suggestion): void {
 		if (!this.context) return;
 		if (value.kind === "emoji") {
+			let insertText = value.insert;
+			if (value.insert === `${TASK_SYMBOLS.id} `) {
+				const line = this.context.editor.getLine(this.context.start.line);
+				const beforeAt = line.slice(0, this.context.start.ch);
+				const parsed = parseLineWithStatus(beforeAt, this.plugin.statusRegistry);
+				const description = parsed?.data.description ?? beforeAt.replace(/^[\s\t>]*([-*+]|[0-9]+[.)])( +\[.\])? */u, "").trim();
+				const semanticId = generateSemanticId(description);
+				insertText = `${TASK_SYMBOLS.id} ${semanticId} `;
+			}
 			this.context.editor.replaceRange(
-				value.insert,
+				insertText,
 				this.context.start,
 				this.context.end,
 			);
 		} else if (value.kind === "recurrence") {
 			this.context.editor.replaceRange(
 				value.insert,
+				this.context.start,
+				this.context.end,
+			);
+		} else if (value.kind === "dependsOn") {
+			this.context.editor.replaceRange(
+				value.id,
 				this.context.start,
 				this.context.end,
 			);

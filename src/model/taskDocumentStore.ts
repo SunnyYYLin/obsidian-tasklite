@@ -117,6 +117,18 @@ export class TaskDocumentStore {
 		return records;
 	}
 
+	listCachedRecords(): TaskDocumentRecord[] {
+		const records: TaskDocumentRecord[] = [];
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			records.push(...(this.recordsByPath.get(file.path) ?? []));
+		}
+		return records;
+	}
+
+	getCachedDocument(path: string): TaskDocument | null {
+		return this.documents.get(path) ?? null;
+	}
+
 	private queueRebuild(file: TFile): void {
 		this.invalidate(file.path);
 		const existingTimer = this.rebuildTimers.get(file.path);
