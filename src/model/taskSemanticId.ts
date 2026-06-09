@@ -1,8 +1,9 @@
-import * as pinyinliteModule from "pinyinlite";
+import * as pinyinliteModule from "pinyinlite/index_full.js";
 
 // Safe wrapper for pinyinlite to prevent crash on ESM/CommonJS bundler wrapper mismatch
 const pinyinliteFn = (pinyinliteModule as any).default || pinyinliteModule;
 const pinyinlite = typeof pinyinliteFn === "function" ? pinyinliteFn : null;
+
 
 function getCurrentDateStr(): string {
 	const momentFactory = typeof window !== "undefined" ? (window as any).moment : undefined;
