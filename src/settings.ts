@@ -22,6 +22,7 @@ export interface TaskLiteSettings {
 	copySubtasksOnRecurrence: boolean;
 	autoSuggestInEditor: boolean;
 	toggleBehavior: ToggleBehaviorSettings;
+	assignees: string[];
 }
 
 export const DEFAULT_TOGGLE_BEHAVIOR: ToggleBehaviorSettings = {
@@ -42,6 +43,7 @@ export const DEFAULT_SETTINGS: TaskLiteSettings = {
 	copySubtasksOnRecurrence: true,
 	autoSuggestInEditor: true,
 	toggleBehavior: DEFAULT_TOGGLE_BEHAVIOR,
+	assignees: [],
 };
 
 export class TaskLiteSettingTab extends PluginSettingTab {
@@ -191,6 +193,7 @@ function pickKnownKeys(obj: Partial<TaskLiteSettings>): Partial<TaskLiteSettings
 		copySubtasksOnRecurrence,
 		autoSuggestInEditor,
 		toggleBehavior,
+		assignees,
 	} = obj;
 	return {
 		setCreatedDate,
@@ -199,5 +202,6 @@ function pickKnownKeys(obj: Partial<TaskLiteSettings>): Partial<TaskLiteSettings
 		copySubtasksOnRecurrence,
 		autoSuggestInEditor,
 		toggleBehavior,
+		assignees,
 	};
 }

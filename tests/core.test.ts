@@ -2115,13 +2115,27 @@ describe("TaskLite 0.4.5 Features", () => {
 			},
 		};
 		const store = new TaskDocumentStore(app as any, registry);
-		// Pre-populate store
+		const testSettings = { ...settings, assignees: [] as string[] };
+		store.onRecordUpdated = (_path, records) => {
+			const assignees = new Set<string>(testSettings.assignees);
+			for (const r of records) {
+				if (r.task.assignee) {
+					for (const a of r.task.assignee) {
+						const trimmed = a.trim();
+						if (trimmed) assignees.add(trimmed);
+					}
+				}
+			}
+			testSettings.assignees = Array.from(assignees).sort();
+		};
+
+		// Pre-populate store which triggers onRecordUpdated
 		await store.getDocument(file as any);
 
 		const api = createTaskLiteCoreApi({
 			app: app as any,
 			registry,
-			getSettings: () => settings,
+			getSettings: () => testSettings,
 			documentStore: store,
 		});
 

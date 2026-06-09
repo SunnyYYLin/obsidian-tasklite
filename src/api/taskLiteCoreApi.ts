@@ -268,24 +268,7 @@ export function createTaskLiteCoreApi({
 			return result?.replacement.join("\n") ?? line;
 		},
 		listAssignees: async () => {
-			const tasks = await listTasks({
-				app,
-				registry,
-				documentStore,
-				options: { includeCompleted: true, includeCancelled: true, includeChildren: true }
-			});
-			const assignees = new Set<string>();
-			for (const r of tasks) {
-				if (r.task.assignee) {
-					for (const a of r.task.assignee) {
-						const trimmed = a.trim();
-						if (trimmed) {
-							assignees.add(trimmed);
-						}
-					}
-				}
-			}
-			return Array.from(assignees).sort();
+			return getSettings().assignees || [];
 		},
 	};
 }

@@ -34,6 +34,8 @@ export class TaskDocumentStore {
 	private readonly rebuildTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	private indexedAllFiles = false;
 
+	onRecordUpdated?: (path: string, records: TaskDocumentRecord[]) => void;
+
 	constructor(
 		private readonly app: App,
 		private readonly registry: StatusRegistry,
@@ -174,8 +176,10 @@ export class TaskDocumentStore {
 			frontmatterTask,
 		};
 		this.documents.set(file.path, document);
-		this.recordsByPath.set(file.path, taskRecordsFromDocument(document));
+		const records = taskRecordsFromDocument(document);
+		this.recordsByPath.set(file.path, records);
 		this.dirtyPaths.delete(file.path);
+		this.onRecordUpdated?.(file.path, records);
 		return document;
 	}
 
