@@ -144,6 +144,35 @@ export function rightClickTaskCheckboxAtLine(input: TaskStatusMutationInput): To
 // Internal helpers (not exported)
 // ---------------------------------------------------------------------------
 
+export function getUnfinishedDependencies(
+	dependsOn: string | null,
+	app?: App
+): string[] {
+	if (!dependsOn || !app) return [];
+	const depIds = dependsOn
+		.split(",")
+		.map((id) => id.trim())
+		.filter(Boolean);
+	if (depIds.length === 0) return [];
+
+	const plugin = (app as any).plugins?.plugins?.["obsidian-tasklite"];
+	const documentStore = plugin?.documentStore;
+	if (!documentStore) return [];
+
+	const records = documentStore.listCachedRecords();
+	const unfinished = new Set<string>();
+
+	for (const r of records) {
+		if (r.task.id && depIds.includes(r.task.id)) {
+			const status = r.task.status; // status type
+			if (status !== "DONE" && status !== "CANCELLED") {
+				unfinished.add(r.task.id);
+			}
+		}
+	}
+	return Array.from(unfinished);
+}
+
 /** Core dispatch: operates on an already-built tree (avoids redundant rebuilds). */
 function changeTaskStatusWithTree(
 	tree: ReturnType<typeof buildTaskTree>,
@@ -165,7 +194,18 @@ function changeTaskStatusWithTree(
 
 	const ctx: MutationCtx = {lines: input.lines, app: input.app, registry: input.registry, settings: input.settings};
 
-	if (targetStatus.type === "DONE") return applyBehaviorWithNode(ctx, "finish", node, tree);
+	if (targetStatus.type === "DONE") {
+		const unfinished = getUnfinishedDependencies(node.task.data.dependsOn, input.app);
+		if (unfinished.length > 0) {
+			return {
+				fromLine: node.lineNumber,
+				toLine: node.lineNumber,
+				replacement: [node.original],
+				warning: `Task is blocked by unfinished dependencies: ${unfinished.join(", ")}`,
+			};
+		}
+		return applyBehaviorWithNode(ctx, "finish", node, tree);
+	}
 	if (targetStatus.type === "CANCELLED") return applyBehaviorWithNode(ctx, "cancel", node, tree);
 	if (targetStatus.type === "TODO") {
 		const behavior = node.task.data.status === "CANCELLED" ? "uncancel" : "unfinish";

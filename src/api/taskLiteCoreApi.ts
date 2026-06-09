@@ -3,6 +3,7 @@ import {
 	changeTaskStatusAtLine,
 	toggleTaskAtLine,
 	getIndentPrefix,
+	getUnfinishedDependencies,
 	type ToggleResult,
 } from "../editor/toggle";
 import { findOpenMarkdownEditor, getVaultIndentConfig } from "../editor/editorUtils";
@@ -197,9 +198,43 @@ export function createTaskLiteCoreApi({
 			filterTaskRecordsByQuery(records, query),
 		listFrontmatterTasks: () =>
 			listFrontmatterTasks({ app, registry, documentStore }),
-		updateTaskStatus: (path, lineNumber, statusSymbol) => {
+		updateTaskStatus: async (path, lineNumber, statusSymbol) => {
 			validatePath(path);
 			validateLineNumber(lineNumber);
+
+			const statusConfig = registry.get(statusSymbol);
+			if (statusConfig.type === "DONE") {
+				if (lineNumber === -1) {
+					const file = app.vault.getAbstractFileByPath(path);
+					if (isTFile(file)) {
+						const metadata = app.metadataCache.getFileCache(file);
+						const document = await documentStore?.getDocumentByPath(path);
+						const lines = document ? document.lines : [];
+						const tree = buildTaskTree(lines, metadata, registry);
+						const hasBodyTasks = tree.nodes.some((n) => n.task);
+						const fmRecord = parseFrontmatterTask(file, metadata, registry, hasBodyTasks);
+						if (fmRecord) {
+							const unfinished = getUnfinishedDependencies(fmRecord.task.dependsOn, app);
+							if (unfinished.length > 0) {
+								throw new Error(`Task is blocked by unfinished dependencies: ${unfinished.join(", ")}`);
+							}
+						}
+					}
+				} else {
+					const document = await documentStore?.getDocumentByPath(path);
+					const line = document?.lines[lineNumber];
+					if (line) {
+						const parsed = parseLineWithStatus(line, registry);
+						if (parsed) {
+							const unfinished = getUnfinishedDependencies(parsed.data.dependsOn, app);
+							if (unfinished.length > 0) {
+								throw new Error(`Task is blocked by unfinished dependencies: ${unfinished.join(", ")}`);
+							}
+						}
+					}
+				}
+			}
+
 			return updateFileTask({
 				app,
 				path,
@@ -246,6 +281,18 @@ export function createTaskLiteCoreApi({
 			});
 		},
 		executeTasksToggleCommand: (line, path) => {
+			const parsed = parseLineWithStatus(line, registry);
+			if (parsed) {
+				const sym = parsed.data.status === "DONE" ? " " : parsed.data.status === "CANCELLED" ? " " : "x";
+				const statusConfig = registry.get(sym);
+				if (statusConfig.type === "DONE") {
+					const unfinished = getUnfinishedDependencies(parsed.data.dependsOn, app);
+					if (unfinished.length > 0) {
+						throw new Error(`Task is blocked by unfinished dependencies: ${unfinished.join(", ")}`);
+					}
+				}
+			}
+
 			const context = findOpenEditorTaskContext(
 				app,
 				line,

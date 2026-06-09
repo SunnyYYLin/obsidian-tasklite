@@ -2238,4 +2238,88 @@ describe("TaskLite 0.4.5 Features", () => {
 		expect(fileContent).toContain("- [ ] Task B");
 		expect(fileContent).not.toContain("⛔ task-a");
 	});
+
+	test("blocked task cannot be completed and shows warning or throws error", async () => {
+		const registry = new StatusRegistry();
+		const file = createTestFile("tasks.md", "tasks");
+		let fileContent = [
+			"- [ ] Task A 🆔 task-a",
+			"- [ ] Task B ⛔ task-a",
+		].join("\n");
+
+		const mockDocumentStore = {
+			listCachedRecords: () => [
+				{
+					path: "tasks.md",
+					lineNumber: 0,
+					task: {
+						id: "task-a",
+						status: "TODO", // Not finished
+						description: "Task A",
+					}
+				},
+				{
+					path: "tasks.md",
+					lineNumber: 1,
+					task: {
+						id: null,
+						status: "TODO",
+						dependsOn: "task-a",
+						description: "Task B",
+					}
+				}
+			],
+			getDocumentByPath: () => Promise.resolve({
+				lines: fileContent.split("\n"),
+				content: fileContent,
+			}),
+		};
+
+		const app = {
+			plugins: {
+				plugins: {
+					"obsidian-tasklite": {
+						documentStore: mockDocumentStore,
+					}
+				}
+			},
+			vault: {
+				getMarkdownFiles: () => [file],
+				read: () => Promise.resolve(fileContent),
+				cachedRead: () => Promise.resolve(fileContent),
+				getAbstractFileByPath: () => file,
+			},
+			metadataCache: {
+				getFileCache: () => null,
+			}
+		};
+
+		// 1. Check in toggle logic (clickTaskCheckboxAtLine)
+		const result = clickTaskCheckboxAtLine({
+			lines: fileContent.split("\n"),
+			lineNumber: 1, // Task B
+			metadata: null,
+			app: app as any,
+			registry,
+			settings,
+		});
+
+		expect(result).not.toBeNull();
+		// State should not change
+		expect(result?.replacement[0]).toBe("- [ ] Task B ⛔ task-a");
+		expect(result?.warning).toContain("Task is blocked by unfinished dependencies: task-a");
+
+		// 2. Check in API (updateTaskStatus)
+		const api = createTaskLiteCoreApi({
+			app: app as any,
+			registry,
+			getSettings: () => settings,
+			documentStore: mockDocumentStore as any,
+		});
+
+		expect(
+			api.updateTaskStatus("tasks.md", 1, "x")
+		).rejects.toThrow("Task is blocked by unfinished dependencies: task-a");
+	});
 });
+

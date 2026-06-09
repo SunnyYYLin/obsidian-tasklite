@@ -348,6 +348,7 @@ updateTaskStatus(path: string, lineNumber: number, statusSymbol: string): Promis
 **不同状态符号的行为（受用户设置影响）：**
 * **`"x"` (完成状态)**:
   - 将任务状态改为 `DONE`。
+  - **阻塞约束 (Strict Blocking)**: 若任务有依赖项且存在未完成的依赖（通过 `⛔ dependsOn` 关联），在尝试修改状态为 `DONE` 时将**抛出 Error 异常**并阻止操作。
   - 若设置了 `setDoneDate: true`，自动填写当天日期到 `✅` 字段。
   - 若 `cascadeFinish: true`，递归地将所有子任务也标记为完成。
   - 若 `parentOnFinish: true`，当所有兄弟子任务都完成后，自动将父任务也标记为完成。
@@ -372,7 +373,12 @@ updateTaskStatus(path: string, lineNumber: number, statusSymbol: string): Promis
 const record = (await api.listTasks())[0];
 
 // 标记为完成（触发级联与循环逻辑）
-await api.updateTaskStatus(record.path, record.lineNumber, "x");
+try {
+  await api.updateTaskStatus(record.path, record.lineNumber, "x");
+} catch (err) {
+  // 若该任务受到前置任务阻塞，将抛出 Error 异常
+  console.error("更新状态失败:", err.message);
+}
 
 // 标记为进行中（仅更新本行复选框符号）
 await api.updateTaskStatus(record.path, record.lineNumber, "/");
@@ -396,6 +402,8 @@ executeTasksToggleCommand(line: string, path: string): string
 - `path`：任务所在文件的路径（用于查找已打开的编辑器，以获取最新的文件内容）。
 
 **返回**：修改后的行文本（可能是多行，用 `\n` 连接，例如生成了重复任务时）。
+
+**阻塞约束**：若任务行带有 `⛔ dependsOn` 且其依赖的前置任务尚未在 Vault 中完成，当尝试勾选完成时，将**抛出 Error 异常**并阻止切换。
 
 **示例：**
 
