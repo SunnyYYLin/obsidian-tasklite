@@ -363,10 +363,27 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 			let insertText = value.insert;
 			if (value.insert === `${TASK_SYMBOLS.id} `) {
 				const line = this.context.editor.getLine(this.context.start.line);
-				const beforeAt = line.slice(0, this.context.start.ch);
-				const parsed = parseLineWithStatus(beforeAt, this.plugin.statusRegistry);
-				const description = parsed?.data.description ?? beforeAt.replace(/^[\s\t>]*([-*+]|[0-9]+[.)])( +\[.\])? */u, "").trim();
-				const semanticId = generateSemanticId(description);
+				const beforeTrigger = line.slice(0, this.context.start.ch);
+				const afterTrigger = line.slice(this.context.end.ch);
+				const cleanLine = (beforeTrigger + afterTrigger).trim();
+
+				const parsed = parseLineWithStatus(cleanLine, this.plugin.statusRegistry);
+				const description = parsed?.data.description ?? cleanLine.replace(/^[\s\t>]*([-*+]|[0-9]+[.)])( +\[.\])? */u, "").trim();
+				const isRecurring = !!parsed?.data.recurrence;
+				const dueDate = parsed?.data.dates.due ?? null;
+
+				const existingIds = new Set<string>();
+				for (const r of this.plugin.documentStore.listCachedRecords()) {
+					if (r.task.id) {
+						existingIds.add(r.task.id);
+					}
+				}
+
+				const semanticId = generateSemanticId(description, {
+					isRecurring,
+					dueDate,
+					existingIds,
+				});
 				insertText = `${TASK_SYMBOLS.id} ${semanticId} `;
 			}
 			this.context.editor.replaceRange(

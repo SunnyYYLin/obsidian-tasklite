@@ -2091,11 +2091,43 @@ describe("indentation normalization", () => {
 });
 
 describe("TaskLite 0.4.5 Features", () => {
-	test("generateSemanticId handles English and Chinese and limits to 15 tokens", () => {
-		expect(generateSemanticId("feat: support blocking and ID")).toBe("feat-support-blocking-and-id");
-		expect(generateSemanticId("自动生成带语义ID（英语+hyphen，中文拼音）")).toBe("zi-dong-sheng-cheng-dai-yu-yi-id-ying-yu-hyphen-zhong-wen-pin-yin");
-		expect(generateSemanticId("feat: 添加API返回assignee集合")).toBe("feat-tian-jia-api-fan-hui-assignee-ji-he");
-		expect(generateSemanticId("")).toContain("task-");
+	test("generateSemanticId limits base ID to 8 characters and strips trailing hyphen", () => {
+		expect(generateSemanticId("feat: support blocking and ID")).toBe("feat-sup");
+		expect(generateSemanticId("自动生成带语义ID（英语+hyphen，中文拼音）")).toBe("zi-dong");
+		expect(generateSemanticId("feat: 添加API返回assignee集合")).toBe("feat-tia");
+		expect(generateSemanticId("")).toHaveLength(8);
+	});
+
+	test("generateSemanticId appends date suffix for recurring tasks", () => {
+		// With explicit due date
+		expect(generateSemanticId("feat: support blocking", {
+			isRecurring: true,
+			dueDate: "2026-06-13",
+		})).toBe("feat-sup-2026-06-13");
+
+		// Without due date (uses fallback date format YYYY-MM-DD)
+		const idWithoutDue = generateSemanticId("feat: support blocking", {
+			isRecurring: true,
+		});
+		expect(idWithoutDue).toMatch(/^feat-sup-\d{4}-\d{2}-\d{2}$/);
+	});
+
+	test("generateSemanticId resolves duplicates in vault using 4-character random suffix", () => {
+		const existingIds = new Set(["feat-sup", "feat-sup-2026-06-13"]);
+		
+		// Normal task duplicate
+		const normalId = generateSemanticId("feat: support blocking", { existingIds });
+		expect(normalId).not.toBe("feat-sup");
+		expect(normalId).toMatch(/^feat-sup-[a-z0-9]{4}$/);
+
+		// Recurring task duplicate
+		const recurringId = generateSemanticId("feat: support blocking", {
+			isRecurring: true,
+			dueDate: "2026-06-13",
+			existingIds,
+		});
+		expect(recurringId).not.toBe("feat-sup-2026-06-13");
+		expect(recurringId).toMatch(/^feat-sup-2026-06-13-[a-z0-9]{4}$/);
 	});
 
 	test("listAssignees returns sorted unique assignees", async () => {

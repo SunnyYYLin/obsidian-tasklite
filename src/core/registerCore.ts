@@ -141,7 +141,17 @@ export function registerTaskLiteCore(plugin: TaskLitePlugin): void {
 				new Notice(t("notice.taskIdAlreadyExists"));
 				return true;
 			}
-			const semanticId = generateSemanticId(parsed.data.description);
+			const existingIds = new Set<string>();
+			for (const r of plugin.documentStore.listCachedRecords()) {
+				if (r.task.id) {
+					existingIds.add(r.task.id);
+				}
+			}
+			const semanticId = generateSemanticId(parsed.data.description, {
+				isRecurring: !!parsed.data.recurrence,
+				dueDate: parsed.data.dates.due,
+				existingIds,
+			});
 			parsed.data.id = semanticId;
 			const indent = line.match(/^([\s\t>]*)/)?.[0] ?? "";
 			const newLine = serializeTaskLine(parsed, indent, registry);
