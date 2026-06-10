@@ -2,7 +2,7 @@ import { Plugin } from "obsidian";
 import { createTaskLiteCoreApi, type TaskLiteCoreApi } from "./api/taskLiteCoreApi";
 import { registerTaskLiteCore } from "./core/registerCore";
 import { StatusRegistry } from "./model/status";
-import { TaskDocumentStore, type TaskDocumentRecord } from "./model/taskDocumentStore";
+import { TaskDocumentStore, type TaskDocumentRecord, getAssigneesFromRecords } from "./model/taskDocumentStore";
 import {
 	DEFAULT_SETTINGS,
 	mergeSettings,
@@ -24,9 +24,6 @@ export default class TaskLitePlugin extends Plugin {
 			documentStore: this.documentStore,
 		});
 		this.documentStore.register(this);
-		this.documentStore.onRecordUpdated = (_path, records) => {
-			void this.handleRecordsUpdated(records);
-		};
 		registerTaskLiteCore(this);
 
 		this.app.workspace.onLayoutReady(async () => {
@@ -47,40 +44,9 @@ export default class TaskLitePlugin extends Plugin {
 		await this.saveData(this.settings);
 	}
 
-	async handleRecordsUpdated(records: TaskDocumentRecord[]): Promise<void> {
-		const assignees = new Set<string>(this.settings.assignees || []);
-		let changed = false;
-		for (const r of records) {
-			if (r.task.assignee) {
-				for (const a of r.task.assignee) {
-					const trimmed = a.trim();
-					if (trimmed && !assignees.has(trimmed)) {
-						assignees.add(trimmed);
-						changed = true;
-					}
-				}
-			}
-		}
-		if (changed) {
-			this.settings.assignees = Array.from(assignees).sort();
-			await this.saveData(this.settings);
-		}
-	}
-
 	async updateAssigneesFromVault(): Promise<void> {
 		const records = await this.documentStore.listRecords();
-		const assignees = new Set<string>();
-		for (const r of records) {
-			if (r.task.assignee) {
-				for (const a of r.task.assignee) {
-					const trimmed = a.trim();
-					if (trimmed) {
-						assignees.add(trimmed);
-					}
-				}
-			}
-		}
-		const sorted = Array.from(assignees).sort();
+		const sorted = getAssigneesFromRecords(records);
 		const current = this.settings.assignees || [];
 		if (JSON.stringify(sorted) !== JSON.stringify(current)) {
 			this.settings.assignees = sorted;

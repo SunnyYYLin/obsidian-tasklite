@@ -7,6 +7,7 @@ import {
 	type TFile,
 } from "obsidian";
 import type TaskLitePlugin from "../main";
+import { getAssigneesFromRecords } from "../model/taskDocumentStore";
 import { taskLineRegex, TASK_SYMBOLS, parseLineWithStatus } from "../model/format";
 import { generateSemanticId } from "../model/taskSemanticId";
 import {
@@ -175,6 +176,14 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 		super(plugin.app);
 	}
 
+	private getPluginAssignees(): string[] {
+		if (this.plugin.documentStore) {
+			const records = this.plugin.documentStore.listCachedRecords();
+			return getAssigneesFromRecords(records);
+		}
+		return this.plugin.settings.assignees || [];
+	}
+
 	onTrigger(
 		cursor: EditorPosition,
 		editor: Editor,
@@ -314,7 +323,7 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 				if (cursor.ch >= queryStart) {
 					const queryText = beforeCursor.slice(queryStart);
 					const trimmed = queryText.trim();
-					const assignees = new Set(this.plugin.settings.assignees || []);
+					const assignees = new Set(this.getPluginAssignees());
 					if (assignees.has(trimmed)) {
 						return null;
 					}
@@ -392,7 +401,7 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 		// ---- assignee autocomplete mode ----
 		if (query.startsWith("assignee:")) {
 			const q = query.slice(9).trim();
-			const assignees = this.plugin.settings.assignees || [];
+			const assignees = this.getPluginAssignees();
 			const matches: AssigneeSuggestion[] = [];
 			for (const name of assignees) {
 				if (!q || name.toLowerCase().includes(q)) {

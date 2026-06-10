@@ -25,6 +25,7 @@ import {
 	getTaskParentLine,
 	getSubtreeLineRange,
 } from "../model/tree";
+import { getAssigneesFromRecords } from "../model/taskDocumentStore";
 import type {
 	TaskDocumentStore,
 	TaskDocumentRecord,
@@ -315,7 +316,11 @@ export function createTaskLiteCoreApi({
 			return result?.replacement.join("\n") ?? line;
 		},
 		listAssignees: async () => {
-			return getSettings().assignees || [];
+			if (!documentStore) {
+				return getSettings().assignees || [];
+			}
+			const records = await documentStore.listRecords();
+			return getAssigneesFromRecords(records);
 		},
 	};
 }

@@ -273,3 +273,19 @@ function shouldIgnoreFile(metadata: CachedMetadata | null): boolean {
 function isPathFile(value: unknown): value is {path: string} {
 	return Boolean(value && typeof value === "object" && "path" in value && typeof (value as {path?: unknown}).path === "string");
 }
+
+export function getAssigneesFromRecords(records: TaskDocumentRecord[]): string[] {
+	const assignees = new Set<string>();
+	for (const r of records) {
+		if (r.task.assignee) {
+			for (const a of r.task.assignee) {
+				const trimmed = a.trim();
+				if (trimmed) {
+					assignees.add(trimmed);
+				}
+			}
+		}
+	}
+	return Array.from(assignees).sort();
+}
+
