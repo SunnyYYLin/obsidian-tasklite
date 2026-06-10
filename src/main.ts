@@ -2,7 +2,7 @@ import { Plugin } from "obsidian";
 import { createTaskLiteCoreApi, type TaskLiteCoreApi } from "./api/taskLiteCoreApi";
 import { registerTaskLiteCore } from "./core/registerCore";
 import { StatusRegistry } from "./model/status";
-import { TaskDocumentStore, type TaskDocumentRecord, getAssigneesFromRecords } from "./model/taskDocumentStore";
+import { TaskDocumentStore, type TaskDocumentRecord } from "./model/taskDocumentStore";
 import {
 	DEFAULT_SETTINGS,
 	mergeSettings,
@@ -46,7 +46,18 @@ export default class TaskLitePlugin extends Plugin {
 
 	async updateAssigneesFromVault(): Promise<void> {
 		const records = await this.documentStore.listRecords();
-		const sorted = getAssigneesFromRecords(records);
+		const assignees = new Set<string>();
+		for (const r of records) {
+			if (r.task.assignee) {
+				for (const a of r.task.assignee) {
+					const trimmed = a.trim();
+					if (trimmed) {
+						assignees.add(trimmed);
+					}
+				}
+			}
+		}
+		const sorted = Array.from(assignees).sort();
 		const current = this.settings.assignees || [];
 		if (JSON.stringify(sorted) !== JSON.stringify(current)) {
 			this.settings.assignees = sorted;
