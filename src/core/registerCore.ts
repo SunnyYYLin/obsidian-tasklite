@@ -161,6 +161,20 @@ export function registerTaskLiteCore(plugin: TaskLitePlugin): void {
 		},
 	});
 
+	plugin.addCommand({
+		id: "rebuild-cache",
+		name: t("command.rebuildCache"),
+		callback: () => {
+			(async () => {
+				plugin.documentStore.invalidateAll();
+				await plugin.updateAssigneesFromVault();
+				new Notice(t("notice.cacheRebuilt"));
+			})().catch((err) => {
+				console.error(err);
+			});
+		},
+	});
+
 
 	new ExternalTaskReconciler(plugin, plugin.app, plugin.statusRegistry, () => plugin.settings, plugin.documentStore).register();
 	plugin.registerEditorExtension(createLivePreviewExtension(plugin.app, plugin.statusRegistry, () => plugin.settings, plugin.documentStore));
