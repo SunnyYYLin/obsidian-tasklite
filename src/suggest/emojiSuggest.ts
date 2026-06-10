@@ -234,6 +234,9 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 				const queryStart = afterSymbolIdx + 1;
 				if (cursor.ch >= queryStart) {
 					const queryText = beforeCursor.slice(queryStart);
+					if (/^\d{4}-\d{2}-\d{2}/u.test(queryText)) {
+						return null;
+					}
 					if (!containsDelimiter(queryText)) {
 						return {
 							start: { line: cursor.line, ch: queryStart },
@@ -250,6 +253,11 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 				const queryStart = afterSymbolIdx + 1;
 				if (cursor.ch >= queryStart) {
 					const queryText = beforeCursor.slice(queryStart);
+					const trimmed = queryText.trim();
+					const knownRules = ["every day", "every weekday", "every week", "every month", "every year"];
+					if (knownRules.includes(trimmed) || /^every\s+\d+\s+(?:days?|weeks?|months?|years?)$/u.test(trimmed)) {
+						return null;
+					}
 					if (!containsDelimiter(queryText)) {
 						return {
 							start: { line: cursor.line, ch: queryStart },
@@ -266,6 +274,16 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 				const queryStart = afterSymbolIdx + 1;
 				if (cursor.ch >= queryStart) {
 					const queryText = beforeCursor.slice(queryStart);
+					const trimmed = queryText.trim();
+					const existingIds = new Set<string>();
+					for (const r of this.plugin.documentStore.listCachedRecords()) {
+						if (r.task.id) {
+							existingIds.add(r.task.id);
+						}
+					}
+					if (existingIds.has(trimmed)) {
+						return null;
+					}
 					if (!containsDelimiter(queryText)) {
 						return {
 							start: { line: cursor.line, ch: queryStart },
@@ -295,6 +313,11 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 
 				if (cursor.ch >= queryStart) {
 					const queryText = beforeCursor.slice(queryStart);
+					const trimmed = queryText.trim();
+					const assignees = new Set(this.plugin.settings.assignees || []);
+					if (assignees.has(trimmed)) {
+						return null;
+					}
 					if (!containsDelimiter(queryText)) {
 						return {
 							start: { line: cursor.line, ch: queryStart },
