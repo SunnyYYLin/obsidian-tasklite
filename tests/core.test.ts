@@ -2388,6 +2388,11 @@ describe("TaskLite 0.4.5 Features", () => {
 		const suggestions6_1 = getDateSuggestions("6-1");
 		expect(suggestions6_1.length).toBeGreaterThan(0);
 		expect(suggestions6_1[0].resolved).toBe(`${currentYear}-06-01`);
+
+		// Test that date suggestions for "06-01" do NOT return hints whose resolved dates match but description doesn't
+		const suggestions06_01 = getDateSuggestions("06-01");
+		expect(suggestions06_01.length).toBe(1);
+		expect(suggestions06_01[0].resolved).toBe(`${currentYear}-06-01`);
 	});
 });
 

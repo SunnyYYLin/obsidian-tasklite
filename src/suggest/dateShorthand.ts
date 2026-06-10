@@ -306,9 +306,10 @@ function getHintEntries(): DateSuggestionEntry[] {
 }
 
 function hintMatchesQuery(hint: DateSuggestionEntry, q: string): boolean {
+	const labelPart = hint.localLabel.split("  →  ")[0] ?? "";
 	return (
 		hint.englishText.includes(q) ||
-		hint.localLabel.toLowerCase().includes(q)
+		labelPart.toLowerCase().includes(q)
 	);
 }
 
