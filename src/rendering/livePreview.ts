@@ -75,6 +75,19 @@ export function createLivePreviewExtension(
 				if (activeFile) {
 					void documentStore?.replaceDocumentContent(activeFile, this.view.state.doc.toString());
 				}
+
+				const replacementIdx = (line.number - 1) - result.fromLine;
+				const replacementLine = result.replacement[replacementIdx];
+				if (replacementLine !== undefined) {
+					const match = replacementLine.match(/\[(.)\]/u);
+					const symbol = match?.[1] ?? " ";
+					const statusConfig = registry.get(symbol);
+					const isChecked = statusConfig.type === "DONE";
+					setTimeout(() => {
+						target.checked = isChecked;
+					}, 0);
+				}
+
 				if (result.warning) {
 					new Notice(result.warning);
 				}
