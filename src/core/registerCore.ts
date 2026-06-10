@@ -166,6 +166,7 @@ export function registerTaskLiteCore(plugin: TaskLitePlugin): void {
 		name: t("command.rebuildCache"),
 		callback: () => {
 			(async () => {
+				await plugin.loadSettings();
 				plugin.documentStore.invalidateAll();
 				await plugin.updateAssigneesFromVault();
 				new Notice(t("notice.cacheRebuilt"));
