@@ -450,6 +450,7 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 
 	selectSuggestion(value: Suggestion): void {
 		if (!this.context) return;
+		let insertedText = "";
 		if (value.kind === "emoji") {
 			let insertText = value.insert;
 			if (value.insert === `${TASK_SYMBOLS.id} `) {
@@ -477,37 +478,29 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 				});
 				insertText = `${TASK_SYMBOLS.id} ${semanticId} `;
 			}
-			this.context.editor.replaceRange(
-				insertText,
-				this.context.start,
-				this.context.end,
-			);
+			insertedText = insertText;
 		} else if (value.kind === "recurrence") {
-			this.context.editor.replaceRange(
-				value.insert,
-				this.context.start,
-				this.context.end,
-			);
+			insertedText = value.insert;
 		} else if (value.kind === "dependsOn") {
-			this.context.editor.replaceRange(
-				value.id,
-				this.context.start,
-				this.context.end,
-			);
+			insertedText = value.id;
 		} else if (value.kind === "assignee") {
-			this.context.editor.replaceRange(
-				value.name,
-				this.context.start,
-				this.context.end,
-			);
+			insertedText = value.name;
 		} else {
-			// Write the resolved YYYY-MM-DD date into the note
-			this.context.editor.replaceRange(
-				value.entry.resolved,
-				this.context.start,
-				this.context.end,
-			);
+			insertedText = value.entry.resolved;
 		}
+
+		this.context.editor.replaceRange(
+			insertedText,
+			this.context.start,
+			this.context.end,
+		);
+
+		// Explicitly move cursor to the end of the replaced range
+		const newCursor = {
+			line: this.context.start.line,
+			ch: this.context.start.ch + insertedText.length,
+		};
+		this.context.editor.setCursor(newCursor);
 	}
 }
 
