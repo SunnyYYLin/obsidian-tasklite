@@ -2363,5 +2363,31 @@ describe("TaskLite 0.4.5 Features", () => {
 		expect(suggestions.length).toBe(1);
 		expect(suggestions[0].name).toBe("Bob");
 	});
+
+	test("date shorthand autocomplete parses M-D and D patterns", async () => {
+		const { parseDateShorthand, getDateSuggestions } = await import("../src/suggest/dateShorthand");
+		const now = new Date();
+		const currentYear = now.getFullYear();
+		const currentMonth = (now.getMonth() + 1).toString().padStart(2, "0");
+
+		// Test 6-1
+		const resolved6_1 = parseDateShorthand("6-1");
+		expect(resolved6_1).toBe(`${currentYear}-06-01`);
+
+		// Test 11
+		const resolved11 = parseDateShorthand("11");
+		expect(resolved11).toBe(`${currentYear}-${currentMonth}-11`);
+
+		// Test invalid dates
+		expect(parseDateShorthand("2-30")).toBeNull();
+		expect(parseDateShorthand("13-1")).toBeNull();
+		expect(parseDateShorthand("6-32")).toBeNull();
+		expect(parseDateShorthand("32")).toBeNull();
+
+		// Test getDateSuggestions results contains the resolved entries
+		const suggestions6_1 = getDateSuggestions("6-1");
+		expect(suggestions6_1.length).toBeGreaterThan(0);
+		expect(suggestions6_1[0].resolved).toBe(`${currentYear}-06-01`);
+	});
 });
 

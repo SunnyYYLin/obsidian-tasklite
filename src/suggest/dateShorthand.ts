@@ -121,6 +121,33 @@ export function parseDateShorthand(input: string): string | null {
 	// YYYY-MM-DD passthrough
 	if (/^\d{4}-\d{2}-\d{2}$/u.test(s)) return s;
 
+	// MM-DD or M-D (e.g. 6-1 or 12-25)
+	const monthDayMatch = s.match(/^(\d{1,2})-(\d{1,2})$/u);
+	if (monthDayMatch) {
+		const year = todayUtc().getUTCFullYear();
+		const m = Number.parseInt(monthDayMatch[1] ?? "0", 10);
+		const d = Number.parseInt(monthDayMatch[2] ?? "0", 10);
+		if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+			if (isValidDate(year, m, d)) {
+				return `${year}-${m.toString().padStart(2, "0")}-${d.toString().padStart(2, "0")}`;
+			}
+		}
+	}
+
+	// DD or D (e.g. 11 or 5)
+	const dayMatch = s.match(/^(\d{1,2})$/u);
+	if (dayMatch) {
+		const today = todayUtc();
+		const year = today.getUTCFullYear();
+		const month = today.getUTCMonth() + 1;
+		const d = Number.parseInt(dayMatch[1] ?? "0", 10);
+		if (d >= 1 && d <= 31) {
+			if (isValidDate(year, month, d)) {
+				return `${year}-${month.toString().padStart(2, "0")}-${d.toString().padStart(2, "0")}`;
+			}
+		}
+	}
+
 	// next week / last week
 	if (s === "next week") return nextWeekdayFromToday(1, 1);
 	if (s === "last week") return nextWeekdayFromToday(1, -1);
@@ -454,6 +481,11 @@ function formatDate(date: Date): string {
 	const m = (date.getUTCMonth() + 1).toString().padStart(2, "0");
 	const d = date.getUTCDate().toString().padStart(2, "0");
 	return `${y}-${m}-${d}`;
+}
+
+function isValidDate(year: number, month: number, day: number): boolean {
+	const d = new Date(Date.UTC(year, month - 1, day));
+	return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day;
 }
 
 // ---------------------------------------------------------------------------
