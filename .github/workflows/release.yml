@@ -34,3 +34,18 @@ jobs:
             manifest.json
             main.js
             styles.css
+
+      - name: Clean up pre-releases
+        if: ${{ !contains(github.ref_name, '-') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Fetching releases..."
+          gh release list --limit 200 | while read -r line; do
+            tag=$(echo "$line" | cut -f3)
+            type=$(echo "$line" | cut -f2)
+            if [ "$type" = "Pre-release" ]; then
+              echo "Deleting pre-release: $tag"
+              gh release delete "$tag" -y --cleanup-tag
+            fi
+          done
