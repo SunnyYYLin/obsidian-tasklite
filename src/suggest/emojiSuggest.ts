@@ -42,7 +42,12 @@ interface DependsOnSuggestion {
 	description: string;
 }
 
-type Suggestion = EmojiSuggestion | DateSuggestion | RecurrenceSuggestion | DependsOnSuggestion;
+interface AssigneeSuggestion {
+	kind: "assignee";
+	name: string;
+}
+
+type Suggestion = EmojiSuggestion | DateSuggestion | RecurrenceSuggestion | DependsOnSuggestion | AssigneeSuggestion;
 
 const EMOJI_SUGGESTIONS: EmojiSuggestion[] = [
 	{
@@ -205,7 +210,11 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 		const dependsOnSymbol = TASK_SYMBOLS.dependsOn;
 		const dependsOnIndex = beforeCursor.lastIndexOf(dependsOnSymbol);
 
-		const maxIndex = Math.max(atIndex, lastDateSymbolIdx, recurrenceIndex, dependsOnIndex);
+		// Find the last index of assignee symbol
+		const assigneeSymbol = TASK_SYMBOLS.assignee;
+		const assigneeIndex = beforeCursor.lastIndexOf(assigneeSymbol);
+
+		const maxIndex = Math.max(atIndex, lastDateSymbolIdx, recurrenceIndex, dependsOnIndex, assigneeIndex);
 		if (maxIndex === -1) return null;
 
 		if (maxIndex === atIndex) {
@@ -262,6 +271,35 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 							start: { line: cursor.line, ch: queryStart },
 							end: cursor,
 							query: `depends:${queryText.toLowerCase()}`,
+						};
+					}
+				}
+			}
+		} else if (maxIndex === assigneeIndex) {
+			// Mode 5: assignee emoji followed by space -> assignee suggestions
+			const afterSymbolIdx = assigneeIndex + assigneeSymbol.length;
+			if (beforeCursor.charAt(afterSymbolIdx) === " ") {
+				let queryStart = afterSymbolIdx + 1;
+				const fieldText = beforeCursor.slice(queryStart);
+				
+				// Support multi-assignee separated by &
+				const lastAndIdx = fieldText.lastIndexOf("&");
+				if (lastAndIdx !== -1) {
+					queryStart += lastAndIdx + 1;
+				}
+				
+				// Strip leading spaces
+				while (queryStart < cursor.ch && beforeCursor.charAt(queryStart) === " ") {
+					queryStart++;
+				}
+
+				if (cursor.ch >= queryStart) {
+					const queryText = beforeCursor.slice(queryStart);
+					if (!containsDelimiter(queryText)) {
+						return {
+							start: { line: cursor.line, ch: queryStart },
+							end: cursor,
+							query: `assignee:${queryText.toLowerCase()}`,
 						};
 					}
 				}
@@ -328,6 +366,22 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 			return matches.slice(0, 8);
 		}
 
+		// ---- assignee autocomplete mode ----
+		if (query.startsWith("assignee:")) {
+			const q = query.slice(9).trim();
+			const assignees = this.plugin.settings.assignees || [];
+			const matches: AssigneeSuggestion[] = [];
+			for (const name of assignees) {
+				if (!q || name.toLowerCase().includes(q)) {
+					matches.push({
+						kind: "assignee",
+						name,
+					});
+				}
+			}
+			return matches.slice(0, 8);
+		}
+
 		return [];
 	}
 
@@ -351,6 +405,11 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 				cls: "taskslite-suggest-token",
 			});
 			el.createSpan({ text: value.description });
+		} else if (value.kind === "assignee") {
+			el.createSpan({
+				text: value.name,
+				cls: "taskslite-suggest-token",
+			});
 		} else {
 			// Only show "text -> replacement text"
 			el.createSpan({ text: value.entry.localLabel });
@@ -400,6 +459,12 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 		} else if (value.kind === "dependsOn") {
 			this.context.editor.replaceRange(
 				value.id,
+				this.context.start,
+				this.context.end,
+			);
+		} else if (value.kind === "assignee") {
+			this.context.editor.replaceRange(
+				value.name,
 				this.context.start,
 				this.context.end,
 			);

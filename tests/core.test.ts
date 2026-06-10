@@ -11,9 +11,13 @@ mock.module("obsidian", () => {
 			console.log("Mock Notice:", message);
 		}
 	}
+	class EditorSuggest {
+		constructor(app: any) {}
+	}
 	return {
 		TFile,
 		Notice,
+		EditorSuggest,
 	};
 });
 
@@ -2323,6 +2327,41 @@ describe("TaskLite 0.4.5 Features", () => {
 		expect(
 			api.updateTaskStatus("tasks.md", 1, "x")
 		).rejects.toThrow("Task is blocked by unfinished dependencies: task-a");
+	});
+
+	test("assignee autocomplete suggestions trigger and filter correctly", async () => {
+		const { TaskLiteEmojiSuggest } = await import("../src/suggest/emojiSuggest");
+		const mockPlugin = {
+			settings: {
+				autoSuggestInEditor: true,
+				assignees: ["Alice", "Bob", "Charlie"],
+			},
+			app: {},
+		};
+		const suggest = new TaskLiteEmojiSuggest(mockPlugin as any);
+
+		// Mock editor and file
+		const file = { path: "test.md" };
+		const editor = {
+			getLine: (lineNum: number) => "- [ ] Task 👤 Alice & Bo",
+		};
+
+		// Cursor at the end: "- [ ] Task 👤 Alice & Bo" (length 24)
+		const triggerInfo = suggest.onTrigger(
+			{ line: 0, ch: 24 },
+			editor as any,
+			file as any
+		);
+
+		expect(triggerInfo).not.toBeNull();
+		expect(triggerInfo?.query).toBe("assignee:bo");
+		expect(triggerInfo?.start.ch).toBe(22); // starts precisely at "B"
+
+		// Get suggestions for the query
+		const context = { query: "assignee:bo" };
+		const suggestions = suggest.getSuggestions(context as any);
+		expect(suggestions.length).toBe(1);
+		expect(suggestions[0].name).toBe("Bob");
 	});
 });
 
