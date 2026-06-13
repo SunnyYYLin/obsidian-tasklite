@@ -20,6 +20,7 @@
    - [updateTaskStatus](#26-updatetaskstatus)
    - [executeTasksToggleCommand](#27-executetaskstogglecommand)
    - [listAssignees](#28-listassignees)
+   - [generateTaskId](#29-generatetaskid)
 3. [数据结构参考](#3-数据结构参考)
    - [TaskLiteTaskRecord](#tasklitetaskrecord)
    - [TaskData](#taskdata)
@@ -101,6 +102,7 @@ interface TaskLiteCoreApi {
   updateTaskStatus(path: string, lineNumber: number, statusSymbol: string): Promise<boolean>;
   executeTasksToggleCommand(line: string, path: string): string;
   listAssignees(): Promise<string[]>;
+  generateTaskId(description: string, options?: { isRecurring?: boolean; dueDate?: string | null }): string;
 }
 ```
 
@@ -433,6 +435,56 @@ listAssignees(): Promise<string[]>
 const assignees = await api.listAssignees();
 console.log("库中所有负责人：", assignees); // ['Alice', 'Bob', 'Sunny']
 ```
+
+---
+
+### 2.9 `generateTaskId`
+
+根据任务描述生成语义化 ID。英文单词取首字母转小写并用连字符连接，中文字符转拼音首字母并用连字符连接，基础 ID 长度限制为 8 字符。循环任务会添加日期后缀，Vault 中已存在的重复 ID 会添加随机 4 字符后缀。
+
+```typescript
+generateTaskId(description: string, options?: {
+  isRecurring?: boolean;
+  dueDate?: string | null;
+}): string
+```
+
+**参数：**
+- `description`：任务描述文本。
+- `options`：可选配置。
+  - `isRecurring`：是否为循环任务，若是则添加日期后缀。
+  - `dueDate`：截止日期，格式 `YYYY-MM-DD`，若未提供则使用当前日期。
+
+**返回**：生成的语义化 ID 字符串。
+
+**行为：**
+- 英文单词取首字母（如 `"Review PR"` → `"rp"`）。
+- 中文字符转拼音首字母（如 `"写周报"` → `"xzb"`）。
+- 基础 ID 最长 8 字符。
+- 循环任务追加日期后缀（如 `"rp-2026-06-13"`）。
+- 若 ID 在 Vault 中已存在，追加随机 4 字符后缀（如 `"rp-a3b2"`）。
+
+**示例：**
+
+```typescript
+// 基本用法
+const id1 = api.generateTaskId("Review PR");
+// 可能返回 "rp"
+
+// 循环任务
+const id2 = api.generateTaskId("站会", { isRecurring: true, dueDate: "2026-06-15" });
+// 可能返回 "zh-2026-06-15"
+
+// 结合 createTask 使用
+const id = api.generateTaskId("写周报", { isRecurring: true });
+await api.createTask({
+  description: "写周报",
+  id: id,
+  recurrence: "every week",
+});
+```
+
+> **提示**：此方法会自动检测 Vault 中已存在的任务 ID，确保生成的 ID 唯一。适合在创建任务前调用，将返回的 ID 传入 `createTask` 的 `id` 字段。
 
 ---
 
@@ -782,6 +834,7 @@ async function archiveCompletedTasks(app: App, api: TaskLiteCoreApi) {
 
 | 版本 | 新增 API |
 |------|---------|
+| 0.4.6 | 新增 `generateTaskId` API，根据任务描述生成语义化 ID |
 | 0.4.5 | 新增 `listAssignees` API，返回库中所有负责人的去重集合 |
 | 0.4.3-alpha.0 | `listTasks` 现在返回所有任务（包括 Frontmatter 定义的文件级任务和普通行级任务） |
 | 0.4.2-alpha.0 | 新增 DQL-like 查询过滤：`listTasks({ query })` 和 `filterTasks(records, query)`，支持常用字段比较、`contains`、`=~`、`AND`/`OR`/`NOT` 与括号 |

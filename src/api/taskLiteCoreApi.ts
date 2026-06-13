@@ -36,6 +36,7 @@ import {
 } from "../model/frontmatterTask";
 import { filterTaskRecordsByQuery } from "../model/taskQuery";
 import { type StatusRegistry, type StatusType } from "../model/status";
+import { generateSemanticId } from "../model/taskSemanticId";
 import type { TaskLiteSettings } from "../settings";
 
 /** TaskLiteTaskRecord 与 TaskDocumentRecord 共享同一个形状，此处直接复用，避免类型重复定义 */
@@ -176,6 +177,25 @@ export interface TaskLiteCoreApi {
 	 * Return the set of all unique assignees across all tasks in the vault, sorted alphabetically.
 	 */
 	listAssignees(): Promise<string[]>;
+	/**
+	 * Generate a semantic task ID from the description.
+	 * English words are converted to lowercase and separated by hyphens.
+	 * Chinese characters are converted to pinyin and separated by hyphens.
+	 * The length of the base ID is limited to 8 characters.
+	 * Recurring tasks get a date suffix.
+	 * Duplicates in the vault get a random 4-character suffix.
+	 *
+	 * @param description - Task description text
+	 * @param options - Optional settings for ID generation
+	 * @returns Generated semantic ID string
+	 */
+	generateTaskId(
+		description: string,
+		options?: {
+			isRecurring?: boolean;
+			dueDate?: string | null;
+		},
+	): string;
 }
 
 interface TaskLiteCoreApiOptions {
@@ -316,6 +336,21 @@ export function createTaskLiteCoreApi({
 		},
 		listAssignees: async () => {
 			return getSettings().assignees || [];
+		},
+		generateTaskId: (description, options) => {
+			const existingIds = new Set<string>();
+			if (documentStore) {
+				for (const r of documentStore.listCachedRecords()) {
+					if (r.task.id) {
+						existingIds.add(r.task.id);
+					}
+				}
+			}
+			return generateSemanticId(description, {
+				isRecurring: options?.isRecurring,
+				dueDate: options?.dueDate,
+				existingIds,
+			});
 		},
 	};
 }
