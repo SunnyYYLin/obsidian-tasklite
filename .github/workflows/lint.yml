@@ -16,7 +16,9 @@ jobs:
               uses: oven-sh/setup-bun@v2
               with:
                 bun-version: "1.2.15"
-            - run: npm install --legacy-peer-deps
+            - run: bun install --frozen-lockfile
+              env:
+                BUN_CONFIG_REGISTRY: "https://registry.npmjs.org"
             - run: bun test
             - run: bun run build
             - run: bun run lint
