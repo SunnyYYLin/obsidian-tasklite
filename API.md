@@ -190,7 +190,7 @@ AND / OR / NOT / 括号
 createTask(input: CreateTaskInput): Promise<void>
 
 interface CreateTaskInput {
-  description?: string;        // 任务描述（行级任务必填，文件级任务可选，默认使用文件标题）
+  description: string;         // 任务描述（必填，文件级任务会成为文件标题）
   status?: string;             // 状态符号，默认 " "（待办）
   priority?: string | null;    // 优先级名称或 emoji，如 "high" 或 "⏫"
   dates?: {
@@ -214,7 +214,7 @@ interface CreateTaskInput {
 - 若提供了 `parentLineNumber`，新任务将插入父任务的正下方，并自动继承父任务的缩进加一个 Tab。
 - 若未提供 `parentLineNumber`，任务追加到文件末尾。
 - 未传的可选字段使用默认值（`null` 或空），不会从文件中推断。
-- **文件级任务**（`isFileTask: true`）：`description` 可选，若未提供则使用文件标题（basename）作为描述。
+- **文件级任务**（`isFileTask: true`）：`description` 会成为文件的标题（frontmatter 中的 description 字段）。
 
 **示例：**
 
@@ -240,8 +240,9 @@ await api.createTask({
   dates: { start: "2026-06-02" },
 });
 
-// 创建文件级任务，description 默认使用文件标题
+// 创建文件级任务，description 成为文件标题
 await api.createTask({
+  description: "项目 Alpha",
   path: "Projects/Alpha.md",
   isFileTask: true,
   dates: { due: "2026-06-30" },

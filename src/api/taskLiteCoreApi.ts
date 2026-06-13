@@ -74,11 +74,8 @@ export interface TaskDateInput {
 }
 
 export interface CreateTaskInput {
-	/**
-	 * Task body text (required for line-level tasks).
-	 * For file-level tasks (`isFileTask: true`), defaults to the file title (basename) when omitted.
-	 */
-	description?: string;
+	/** Task body text (required). For file-level tasks, this becomes the file title. */
+	description: string;
 	/**
 	 * Initial status symbol (e.g. `" "` for TODO, `"x"` for DONE).
 	 * Defaults to `" "` (TODO) when omitted.
@@ -274,8 +271,8 @@ export function createTaskLiteCoreApi({
 			});
 		},
 		createTask: async (input) => {
-			if (!input.isFileTask && !input.description?.trim())
-				throw new TypeError("TaskLite createTask: description must not be empty for line-level tasks.");
+			if (!input.description?.trim())
+				throw new TypeError("TaskLite createTask: description must not be empty.");
 			if (input.isFileTask && typeof input.parentLineNumber === "number")
 				throw new TypeError("TaskLite createTask: file-level tasks cannot have a parentLineNumber.");
 			return createTask({
@@ -478,8 +475,7 @@ async function createTask({
 		const fmPatch: Record<string, unknown> = {
 			task: true,
 		};
-		const description = input.description ?? file.basename;
-		fmPatch["description"] = description;
+		fmPatch["description"] = input.description;
 		fmPatch["status"] = statusConfig.symbol;
 
 		const normPriority = normalizePriority(input.priority);
