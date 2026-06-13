@@ -12,7 +12,9 @@ function isTFile(value: unknown): value is TFile {
 	return (
 		value instanceof TFile ||
 		(Boolean(value) &&
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
 			typeof (value as any).path === "string" &&
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
 			typeof (value as any).extension === "string")
 	);
 }

@@ -1,4 +1,4 @@
-import type { App, CachedMetadata, FileManager, TFile } from "obsidian";
+import type { CachedMetadata, FileManager, TFile } from "obsidian";
 import type { StatusRegistry } from "./status";
 import type { TaskPriority, OnCompletionAction, TaskData } from "./format";
 
@@ -126,13 +126,16 @@ export function parseFrontmatterTask(
 	const statusSymbol = resolveStatusSymbol(fm["status"], registry);
 	const statusConfig = registry.get(statusSymbol);
 
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
 	const rawPriority = fm["priority"];
 	const priority: TaskPriority | null =
 		typeof rawPriority === "string" && rawPriority in PRIORITY_MAP
 			? (PRIORITY_MAP[rawPriority] ?? null)
 			: null;
 
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
 	const rawOnCompletion = fm["onCompletion"] ?? fm["on_completion"];
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
 	const onCompletion: OnCompletionAction | null =
 		rawOnCompletion === "delete" || rawOnCompletion === "keep"
 			? rawOnCompletion
@@ -265,8 +268,10 @@ export async function applyFrontmatterPatch(
 	await fileManager.processFrontMatter(file, (fm) => {
 		for (const [key, value] of Object.entries(patch)) {
 			if (value === null || value === undefined) {
+				// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
 				delete fm[key];
 			} else {
+				// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
 				fm[key] = value;
 			}
 		}
@@ -291,6 +296,7 @@ export function applyFrontmatterPatchToContent(
 
 	const updated = new Map<string, string>();
 	for (const [key, value] of Object.entries(patch)) {
+		// eslint-disable-next-line @typescript-eslint/no-base-to-string
 		updated.set(key, value === null ? "" : String(value));
 	}
 

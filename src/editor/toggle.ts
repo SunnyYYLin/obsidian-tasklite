@@ -155,20 +155,25 @@ export function getUnfinishedDependencies(
 		.filter(Boolean);
 	if (depIds.length === 0) return [];
 
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
 	const plugin = (app as any).plugins?.plugins?.["taskslite"];
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
 	const documentStore = plugin?.documentStore;
 	if (!documentStore) return [];
 
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
 	const records = documentStore.listCachedRecords();
 	const unfinished = new Set<string>();
 
 	for (const r of records) {
+		/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument */
 		if (r.task.id && depIds.includes(r.task.id)) {
 			const status = r.task.status; // status type
 			if (status !== "DONE" && status !== "CANCELLED") {
 				unfinished.add(r.task.id);
 			}
 		}
+		/* eslint-enable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument */
 	}
 	return Array.from(unfinished);
 }

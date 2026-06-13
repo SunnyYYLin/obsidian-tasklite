@@ -1,7 +1,7 @@
 import type { App, CachedMetadata, Plugin, TFile } from "obsidian";
-import { buildTaskTree, taskDepth, getTaskParentLine, type TaskTree, type TaskTreeNode } from "./tree";
+import { buildTaskTree, taskDepth, getTaskParentLine, type TaskTree } from "./tree";
 import type { StatusRegistry } from "./status";
-import type { TaskData, TaskLine } from "./format";
+import type { TaskData } from "./format";
 import { parseFrontmatterTask, type FrontmatterTaskRecord } from "./frontmatterTask";
 
 export type { FrontmatterTaskRecord };

@@ -79,6 +79,7 @@ export function compileTaskQuery(query: string): CompiledTaskQuery {
 	};
 	// Evict the oldest entry when the cache reaches its limit
 	if (compiledQueryCache.size >= COMPILED_QUERY_CACHE_MAX) {
+		// eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unnecessary-type-assertion
 		compiledQueryCache.delete(compiledQueryCache.keys().next().value!);
 	}
 	compiledQueryCache.set(normalizedQuery, compiled);

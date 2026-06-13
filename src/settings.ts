@@ -1,7 +1,7 @@
 import { Notice, PluginSettingTab, Setting, type App } from "obsidian";
 import type TaskLitePlugin from "./main";
 import { t, type I18nKey } from "./i18n";
-import { listItemRegex, normalizeLineIndentation } from "./model/format";
+import { normalizeLineIndentation } from "./model/format";
 import { getVaultIndentConfig } from "./editor/editorUtils";
 
 export interface ToggleBehaviorSettings {

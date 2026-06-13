@@ -14,7 +14,6 @@ import {
 	type TaskLine,
 	type TaskPriority,
 	type OnCompletionAction,
-	type TaskData,
 } from "../model/format";
 import { taskIdentityKey } from "../model/taskIdentity";
 import { applyTaskStatus } from "../model/taskState";
@@ -86,7 +85,7 @@ export interface CreateTaskInput {
 	 * Accepts either a `TaskPriority` keyword (`"high"`, `"medium"`, etc.)
 	 * or the corresponding emoji (`"⏫"`, `"🔼"`, etc.).
 	 */
-	priority?: TaskPriority | string | null;
+	priority?: string | null;
 	/** Date fields for this task. */
 	dates?: TaskDateInput;
 	recurrence?: string | null;
@@ -110,7 +109,7 @@ export type EditTaskPatch = {
 	 * New priority. Accepts either a `TaskPriority` keyword or the corresponding emoji.
 	 * Pass `null` to clear.
 	 */
-	priority?: TaskPriority | string | null;
+	priority?: string | null;
 	/** Date fields to update. Only keys present in this object are changed. */
 	dates?: TaskDateInput;
 	recurrence?: string | null;
@@ -855,9 +854,6 @@ async function updateFileTask({
 					n.task &&
 					n.task.data.status !== "DONE" &&
 					n.task.data.status !== "CANCELLED",
-			);
-			const hasCancelled = rootTasks.some(
-				(n) => n.task && n.task.data.status === "CANCELLED",
 			);
 			const allDoneOrCancelled = rootTasks.every(
 				(n) =>

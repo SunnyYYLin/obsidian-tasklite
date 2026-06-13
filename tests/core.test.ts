@@ -21,7 +21,7 @@ mock.module("obsidian", () => {
 	};
 });
 
-import { parseTaskLine, TASK_SYMBOLS, normalizeLineIndentation } from "../src/model/format";
+import { parseTaskLine, TASK_SYMBOLS, normalizeLineIndentation, type TaskPriority } from "../src/model/format";
 import { StatusRegistry } from "../src/model/status";
 import { buildTaskTree } from "../src/model/tree";
 import { taskIdentityKey } from "../src/model/taskIdentity";

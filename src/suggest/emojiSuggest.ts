@@ -11,7 +11,6 @@ import { taskLineRegex, TASK_SYMBOLS, parseLineWithStatus } from "../model/forma
 import { generateSemanticId } from "../model/taskSemanticId";
 import {
 	getDateSuggestions,
-	parseDateShorthand,
 	type DateSuggestionEntry,
 } from "./dateShorthand";
 

@@ -1,4 +1,4 @@
-import type { StatusConfiguration, StatusRegistry, StatusType } from "./status";
+import type { StatusRegistry, StatusType } from "./status";
 
 /** Priority levels, ordered from highest to lowest. */
 export type TaskPriority = "highest" | "high" | "medium" | "low" | "lowest";

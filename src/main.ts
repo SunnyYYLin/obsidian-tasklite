@@ -2,7 +2,7 @@ import { Plugin } from "obsidian";
 import { createTaskLiteCoreApi, type TaskLiteCoreApi } from "./api/taskLiteCoreApi";
 import { registerTaskLiteCore } from "./core/registerCore";
 import { StatusRegistry } from "./model/status";
-import { TaskDocumentStore, type TaskDocumentRecord } from "./model/taskDocumentStore";
+import { TaskDocumentStore } from "./model/taskDocumentStore";
 import {
 	DEFAULT_SETTINGS,
 	mergeSettings,

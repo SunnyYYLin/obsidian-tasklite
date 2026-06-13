@@ -1,4 +1,4 @@
-import { MarkdownView, Notice, TFile, type Editor } from "obsidian";
+import { MarkdownView, Notice, type Editor } from "obsidian";
 import type TaskLitePlugin from "../main";
 import { normalizeLineIndentation, serializeTaskLine, parseLineWithStatus } from "../model/format";
 import { generateSemanticId } from "../model/taskSemanticId";
