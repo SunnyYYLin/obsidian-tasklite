@@ -156,7 +156,7 @@ const priorityExtractor: FieldExtractor = {
 	},
 };
 
-/** Extractor for assignee field (👤), supports `&`-separated multi-person values. */
+/** Extractor for assignee field (👤), supports `&`- or `-`-separated multi-person values. */
 const assigneeExtractor: FieldExtractor = {
 	label: TASK_SYMBOLS.assignee,
 	extract(description, data) {
@@ -167,7 +167,7 @@ const assigneeExtractor: FieldExtractor = {
 		const raw = (match[1] ?? "").trim();
 		data.assignee = raw
 			? raw
-					.split("&")
+					.split(/[&-]/u)
 					.map((p) => p.trim())
 					.filter(Boolean)
 			: [];

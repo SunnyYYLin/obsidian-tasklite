@@ -68,6 +68,8 @@ const settings: TaskLiteSettings = {
 		parentOnUnfinish: true,
 		parentOnUncancel: true,
 	},
+	statusCycle: [" ", "x", "/", "-"],
+	assignees: [],
 };
 
 describe("TaskLite core", () => {
@@ -78,6 +80,13 @@ describe("TaskLite core", () => {
 		expect(task?.data.description).toBe("Ship MVP");
 		expect(task?.data.dates.due).toBe("2026-05-20");
 		expect(task?.data.recurrence).toBe("every week");
+	});
+
+	test("parses hyphen-separated assignees", () => {
+		const registry = new StatusRegistry();
+		const task = parseTaskLine(`- [ ] Pair task ${TASK_SYMBOLS.assignee} Sunny-Mary`, registry.get(" "));
+
+		expect(task?.data.assignee).toEqual(["Sunny", "Mary"]);
 	});
 
 	test("supports every weekday recurrence", () => {
@@ -464,7 +473,7 @@ describe("TaskLite core", () => {
 		]);
 	});
 
-	test("editor checkbox right click uncancels a cancelled task and parent", () => {
+	test("editor checkbox right click cycles cancelled tasks backward", () => {
 		const registry = new StatusRegistry();
 		const result = rightClickTaskCheckboxAtLine({
 			lines: [
@@ -477,13 +486,31 @@ describe("TaskLite core", () => {
 			settings,
 		});
 
-		expect(result?.replacement).toEqual([
-			"- [ ] Parent",
-			"  - [ ] Child",
-		]);
+		expect(result?.replacement).toEqual(["  - [/] Child"]);
 	});
 
-	test("right click uncancels a single cancelled task", () => {
+	test("editor checkbox clicks cycle through configured statuses", () => {
+		const registry = new StatusRegistry();
+		const forwardFromDone = clickTaskCheckboxAtLine({
+			lines: [`- [x] Task ${TASK_SYMBOLS.done} 2026-05-16`],
+			lineNumber: 0,
+			metadata: null,
+			registry,
+			settings,
+		});
+		expect(forwardFromDone?.replacement).toEqual(["- [/] Task"]);
+
+		const backwardFromTodo = rightClickTaskCheckboxAtLine({
+			lines: ["- [ ] Task"],
+			lineNumber: 0,
+			metadata: null,
+			registry,
+			settings,
+		});
+		expect(backwardFromTodo?.replacement[0]).toContain(`- [-] Task ${TASK_SYMBOLS.cancelled} 2026-05-16`);
+	});
+
+	test("right click cycles a single cancelled task backward", () => {
 		const registry = new StatusRegistry();
 		const result = rightClickTaskCheckboxAtLine({
 			lines: [`- [-] Cancelled task ${TASK_SYMBOLS.cancelled} 2026-05-16`],
@@ -493,7 +520,7 @@ describe("TaskLite core", () => {
 			settings,
 		});
 
-		expect(result?.replacement).toEqual(["- [ ] Cancelled task"]);
+		expect(result?.replacement).toEqual(["- [/] Cancelled task"]);
 	});
 
 	test("unfinish parent only changes parent when cascade is off", () => {
@@ -1306,7 +1333,7 @@ describe("TaskLite core", () => {
 			expect(result?.replacement[0]).toBe("- [ ] cancelled");
 		});
 
-		test("clicking an in-progress task finishes it", () => {
+		test("clicking an in-progress task cycles to cancelled", () => {
 			const registry = new StatusRegistry();
 			const result = clickTaskCheckboxAtLine({
 				lines: ["- [/] in progress"],
@@ -1317,7 +1344,7 @@ describe("TaskLite core", () => {
 			});
 
 			expect(result).not.toBeNull();
-			expect(result?.replacement[0]).toContain("- [x] in progress");
+			expect(result?.replacement[0]).toContain(`- [-] in progress ${TASK_SYMBOLS.cancelled} 2026-05-16`);
 		});
 
 		test("right-clicking a todo task cancels it", () => {
@@ -1903,6 +1930,54 @@ describe("TaskLite core", () => {
 			"- [ ] Other Task",
 		]);
 	});
+
+	test("core API exposes task lookup and status metadata", async () => {
+		const file = createTestFile("tasks.md", "tasks");
+		const api = createTestCoreApi({
+			vault: {
+				getMarkdownFiles: () => [file],
+				cachedRead: () => [
+					`- [ ] Lookup target ${TASK_SYMBOLS.id} lookup-id`,
+					"- [x] Done task",
+				].join("\n"),
+			},
+			metadataCache: {
+				getFileCache: () => null,
+			},
+		});
+
+		expect(api.getStatusCycle()).toEqual([" ", "x", "/", "-"]);
+		expect(api.listStatuses().map((status) => status.symbol)).toContain("/");
+
+		const byLine = await api.getTask("tasks.md", 0);
+		expect(byLine?.task.description).toBe("Lookup target");
+
+		const byId = await api.findTaskById("lookup-id");
+		expect(byId?.lineNumber).toBe(0);
+	});
+
+	test("core API cycles task status using the configured cycle", async () => {
+		let content = "- [x] Cycle me";
+		const file = createTestFile("tasks.md", "tasks");
+		const api = createTestCoreApi({
+			vault: {
+				getMarkdownFiles: () => [file],
+				getAbstractFileByPath: () => file,
+				cachedRead: () => Promise.resolve(content),
+				read: () => Promise.resolve(content),
+				modify: (_file: unknown, nextContent: string) => {
+					content = nextContent;
+					return Promise.resolve();
+				},
+			},
+			metadataCache: {
+				getFileCache: () => null,
+			},
+		});
+
+		expect(await api.cycleTaskStatus("tasks.md", 0, "next")).toBe(true);
+		expect(content).toBe("- [/] Cycle me");
+	});
 });
 
 function createTestCoreApi(app: Record<string, unknown> = {}) {
@@ -2334,7 +2409,7 @@ describe("TaskLite 0.4.5 Features", () => {
 		const mockPlugin = {
 			settings: {
 				autoSuggestInEditor: true,
-				assignees: ["Alice", "Bob", "Charlie"],
+				assignees: ["Alice", "Bob", "Charlie", "Mary", "@Mobile"],
 			},
 			app: {},
 		};
@@ -2362,6 +2437,28 @@ describe("TaskLite 0.4.5 Features", () => {
 		const suggestions = suggest.getSuggestions(context as any);
 		expect(suggestions.length).toBe(1);
 		expect(suggestions[0].name).toBe("Bob");
+
+		const hyphenEditor = {
+			getLine: () => `- [ ] Task ${TASK_SYMBOLS.assignee} Sunny-Ma`,
+		};
+		const hyphenTrigger = suggest.onTrigger(
+			{ line: 0, ch: `- [ ] Task ${TASK_SYMBOLS.assignee} Sunny-Ma`.length },
+			hyphenEditor as any,
+			file as any
+		);
+		expect(hyphenTrigger?.query).toBe("assignee:ma");
+		expect(suggest.getSuggestions({ query: "assignee:ma" } as any)[0].name).toBe("Mary");
+
+		const mobileHandleEditor = {
+			getLine: () => `- [ ] Task ${TASK_SYMBOLS.assignee} @Mo`,
+		};
+		const mobileTrigger = suggest.onTrigger(
+			{ line: 0, ch: `- [ ] Task ${TASK_SYMBOLS.assignee} @Mo`.length },
+			mobileHandleEditor as any,
+			file as any
+		);
+		expect(mobileTrigger?.query).toBe("assignee:@mo");
+		expect(suggest.getSuggestions({ query: "assignee:@mo" } as any)[0].name).toBe("@Mobile");
 	});
 
 	test("date shorthand autocomplete parses M-D and D patterns", async () => {

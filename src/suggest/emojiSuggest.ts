@@ -185,7 +185,7 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 		const beforeCursor = line.slice(0, cursor.ch);
 
 		// Find the last index of '@' or '＠'
-		const atIndex = Math.max(
+		let atIndex = Math.max(
 			beforeCursor.lastIndexOf("@"),
 			beforeCursor.lastIndexOf("＠"),
 		);
@@ -212,6 +212,9 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 		// Find the last index of assignee symbol
 		const assigneeSymbol = TASK_SYMBOLS.assignee;
 		const assigneeIndex = beforeCursor.lastIndexOf(assigneeSymbol);
+		if (assigneeIndex !== -1 && atIndex > assigneeIndex) {
+			atIndex = -1;
+		}
 
 		const maxIndex = Math.max(atIndex, lastDateSymbolIdx, recurrenceIndex, dependsOnIndex, assigneeIndex);
 		if (maxIndex === -1) return null;
@@ -299,10 +302,13 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 				let queryStart = afterSymbolIdx + 1;
 				const fieldText = beforeCursor.slice(queryStart);
 				
-				// Support multi-assignee separated by &
-				const lastAndIdx = fieldText.lastIndexOf("&");
-				if (lastAndIdx !== -1) {
-					queryStart += lastAndIdx + 1;
+				// Support multi-assignee separated by & or -.
+				const lastSeparatorIdx = Math.max(
+					fieldText.lastIndexOf("&"),
+					fieldText.lastIndexOf("-"),
+				);
+				if (lastSeparatorIdx !== -1) {
+					queryStart += lastSeparatorIdx + 1;
 				}
 				
 				// Strip leading spaces
@@ -317,7 +323,7 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 					if (assignees.has(trimmed)) {
 						return null;
 					}
-					if (!containsDelimiter(queryText)) {
+					if (!containsAssigneeDelimiter(queryText)) {
 						return {
 							start: { line: cursor.line, ch: queryStart },
 							end: cursor,
@@ -496,6 +502,34 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 
 function containsDelimiter(text: string): boolean {
 	if (text.includes("#") || text.includes("@") || text.includes("＠")) {
+		return true;
+	}
+	const symbols = [
+		TASK_SYMBOLS.due,
+		TASK_SYMBOLS.scheduled,
+		TASK_SYMBOLS.start,
+		TASK_SYMBOLS.created,
+		TASK_SYMBOLS.done,
+		TASK_SYMBOLS.cancelled,
+		TASK_SYMBOLS.recurrence,
+		TASK_SYMBOLS.onCompletion,
+		TASK_SYMBOLS.dependsOn,
+		TASK_SYMBOLS.id,
+		TASK_SYMBOLS.assignee,
+		TASK_SYMBOLS.priority.highest,
+		TASK_SYMBOLS.priority.high,
+		TASK_SYMBOLS.priority.medium,
+		TASK_SYMBOLS.priority.low,
+		TASK_SYMBOLS.priority.lowest,
+	];
+	for (const sym of symbols) {
+		if (text.includes(sym)) return true;
+	}
+	return false;
+}
+
+function containsAssigneeDelimiter(text: string): boolean {
+	if (text.includes("#")) {
 		return true;
 	}
 	const symbols = [

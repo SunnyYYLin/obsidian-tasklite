@@ -22,6 +22,7 @@ export interface TaskLiteSettings {
 	copySubtasksOnRecurrence: boolean;
 	autoSuggestInEditor: boolean;
 	toggleBehavior: ToggleBehaviorSettings;
+	statusCycle: string[];
 	assignees: string[];
 }
 
@@ -43,6 +44,7 @@ export const DEFAULT_SETTINGS: TaskLiteSettings = {
 	copySubtasksOnRecurrence: true,
 	autoSuggestInEditor: true,
 	toggleBehavior: DEFAULT_TOGGLE_BEHAVIOR,
+	statusCycle: [" ", "x", "/", "-"],
 	assignees: [],
 };
 
@@ -181,6 +183,7 @@ export function mergeSettings(loaded: Partial<TaskLiteSettings> | null | undefin
 		...DEFAULT_SETTINGS,
 		...safe,
 		toggleBehavior,
+		statusCycle: normalizeStatusCycle(safe.statusCycle),
 	};
 }
 
@@ -193,6 +196,7 @@ function pickKnownKeys(obj: Partial<TaskLiteSettings>): Partial<TaskLiteSettings
 		copySubtasksOnRecurrence,
 		autoSuggestInEditor,
 		toggleBehavior,
+		statusCycle,
 		assignees,
 	} = obj;
 	return {
@@ -202,6 +206,15 @@ function pickKnownKeys(obj: Partial<TaskLiteSettings>): Partial<TaskLiteSettings
 		copySubtasksOnRecurrence,
 		autoSuggestInEditor,
 		toggleBehavior,
+		statusCycle,
 		assignees,
 	};
+}
+
+function normalizeStatusCycle(value: unknown): string[] {
+	if (!Array.isArray(value)) return [...DEFAULT_SETTINGS.statusCycle];
+	const cycle = value
+		.filter((symbol): symbol is string => typeof symbol === "string")
+		.filter((symbol, index, array) => array.indexOf(symbol) === index);
+	return cycle.length > 0 ? cycle : [...DEFAULT_SETTINGS.statusCycle];
 }

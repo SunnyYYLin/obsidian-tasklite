@@ -127,17 +127,19 @@ export function uncancelTaskAtLine(input: TaskStatusMutationInput): ToggleResult
 export function clickTaskCheckboxAtLine(input: TaskStatusMutationInput): ToggleResult | null {
 	const tree = buildTaskTree(input.lines, input.metadata, input.registry);
 	const node = tree.byLine.get(input.lineNumber);
-	if (!node?.task) return node ? togglePlainCheckbox(node, input.registry) : null;
-	const sym = node.task.data.status === "DONE" ? " " : node.task.data.status === "CANCELLED" ? " " : "x";
-	return changeTaskStatusWithTree(tree, {...input, targetStatusSymbol: sym}, node);
+	if (!node?.task) return node ? cyclePlainCheckbox(node, input.registry, input.settings, "next") : null;
+	const current = input.registry.getByType(node.task.data.status).symbol;
+	const target = getCycleStatusSymbol(current, input.registry, input.settings, "next");
+	return changeTaskStatusWithTree(tree, {...input, targetStatusSymbol: target}, node);
 }
 
 export function rightClickTaskCheckboxAtLine(input: TaskStatusMutationInput): ToggleResult | null {
 	const tree = buildTaskTree(input.lines, input.metadata, input.registry);
 	const node = tree.byLine.get(input.lineNumber);
-	if (!node?.task) return null;
-	const sym = node.task.data.status === "CANCELLED" ? " " : "-";
-	return changeTaskStatusWithTree(tree, {...input, targetStatusSymbol: sym}, node);
+	if (!node?.task) return node ? cyclePlainCheckbox(node, input.registry, input.settings, "previous") : null;
+	const current = input.registry.getByType(node.task.data.status).symbol;
+	const target = getCycleStatusSymbol(current, input.registry, input.settings, "previous");
+	return changeTaskStatusWithTree(tree, {...input, targetStatusSymbol: target}, node);
 }
 
 // ---------------------------------------------------------------------------
@@ -281,6 +283,41 @@ function togglePlainCheckbox(node: TaskTreeNode, registry: StatusRegistry): Togg
 	const next = registry.next(current);
 	const replacement = node.original.replace(/\[(.)\]/u, `[${next.symbol}]`);
 	return {fromLine: node.lineNumber, toLine: node.lineNumber, replacement: [replacement]};
+}
+
+function cyclePlainCheckbox(
+	node: TaskTreeNode,
+	registry: StatusRegistry,
+	settings: TaskLiteSettings,
+	direction: "next" | "previous",
+): ToggleResult | null {
+	if (node.statusCharacter === null) return null;
+	const target = getCycleStatusSymbol(node.statusCharacter, registry, settings, direction);
+	const replacement = node.original.replace(/\[(.)\]/u, `[${target}]`);
+	return {fromLine: node.lineNumber, toLine: node.lineNumber, replacement: [replacement]};
+}
+
+export function getCycleStatusSymbol(
+	currentSymbol: string,
+	registry: StatusRegistry,
+	settings: TaskLiteSettings,
+	direction: "next" | "previous",
+): string {
+	const cycle = normalizeStatusCycle(settings.statusCycle, registry);
+	const currentIndex = cycle.indexOf(currentSymbol);
+	if (currentIndex < 0) {
+		return direction === "next"
+			? registry.next(registry.get(currentSymbol)).symbol
+			: cycle[cycle.length - 1] ?? " ";
+	}
+	const delta = direction === "next" ? 1 : -1;
+	return cycle[(currentIndex + delta + cycle.length) % cycle.length] ?? " ";
+}
+
+function normalizeStatusCycle(cycle: string[] | undefined, registry: StatusRegistry): string[] {
+	const normalized = (cycle && cycle.length > 0 ? cycle : [" ", "x", "/", "-"])
+		.filter((symbol, index, array) => typeof symbol === "string" && array.indexOf(symbol) === index);
+	return normalized.length > 0 ? normalized : [" ", "x", "/", "-"].filter((symbol) => registry.has(symbol));
 }
 
 // Re-export so external callers that reference these by name continue to work

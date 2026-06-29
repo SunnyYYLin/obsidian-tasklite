@@ -1,6 +1,7 @@
 import type { App, CachedMetadata, TFile } from "obsidian";
 import {
 	changeTaskStatusAtLine,
+	getCycleStatusSymbol,
 	toggleTaskAtLine,
 	getIndentPrefix,
 	getUnfinishedDependencies,
@@ -34,7 +35,7 @@ import {
 	applyFrontmatterPatch,
 } from "../model/frontmatterTask";
 import { filterTaskRecordsByQuery } from "../model/taskQuery";
-import { type StatusRegistry, type StatusType } from "../model/status";
+import { type StatusConfiguration, type StatusRegistry, type StatusType } from "../model/status";
 import { generateSemanticId } from "../model/taskSemanticId";
 import type { TaskLiteSettings } from "../settings";
 
@@ -46,6 +47,10 @@ export interface ListTasksOptions {
 	includeCancelled?: boolean;
 	includeChildren?: boolean;
 	query?: string;
+}
+
+export interface FindTaskOptions extends ListTasksOptions {
+	path?: string;
 }
 
 /**
@@ -134,6 +139,19 @@ export interface TaskLiteCoreApi {
 	 */
 	listFrontmatterTasks(): Promise<TaskLiteTaskRecord[]>;
 	/**
+	 * Return one task by file path and line number, including completed/cancelled
+	 * tasks and children. Returns null when the file or task does not exist.
+	 */
+	getTask(path: string, lineNumber: number): Promise<TaskLiteTaskRecord | null>;
+	/**
+	 * Find a task by its 🆔 metadata field. Options can narrow the search to a path
+	 * or include completed/cancelled/child tasks.
+	 */
+	findTaskById(
+		id: string,
+		options?: FindTaskOptions,
+	): Promise<TaskLiteTaskRecord | null>;
+	/**
 	 * Transition the status of the task at `lineNumber` in `path` to the target status symbol.
 	 * This triggers appropriate tree cascades (e.g. finishing subtasks when set to DONE,
 	 * unfinishing parents when set to TODO) and recurrence rules.
@@ -143,6 +161,14 @@ export interface TaskLiteCoreApi {
 		path: string,
 		lineNumber: number,
 		statusSymbol: string,
+	): Promise<boolean>;
+	/**
+	 * Move a task to the next or previous status in the configured status cycle.
+	 */
+	cycleTaskStatus(
+		path: string,
+		lineNumber: number,
+		direction?: "next" | "previous",
 	): Promise<boolean>;
 	createTask(input: CreateTaskInput): Promise<void>;
 	/**
@@ -176,6 +202,14 @@ export interface TaskLiteCoreApi {
 	 * Return the set of all unique assignees across all tasks in the vault, sorted alphabetically.
 	 */
 	listAssignees(): Promise<string[]>;
+	/**
+	 * Return all registered status definitions.
+	 */
+	listStatuses(): StatusConfiguration[];
+	/**
+	 * Return the configured checkbox status cycle.
+	 */
+	getStatusCycle(): string[];
 	/**
 	 * Generate a semantic task ID from the description.
 	 * English words are converted to lowercase and separated by hyphens.
@@ -217,6 +251,40 @@ export function createTaskLiteCoreApi({
 			filterTaskRecordsByQuery(records, query),
 		listFrontmatterTasks: () =>
 			listFrontmatterTasks({ app, registry, documentStore }),
+		getTask: async (path, lineNumber) => {
+			validatePath(path);
+			validateLineNumber(lineNumber);
+			const records = await listTasks({
+				app,
+				registry,
+				documentStore,
+				options: {
+					includeCompleted: true,
+					includeCancelled: true,
+					includeChildren: true,
+				},
+			});
+			return records.find((record) => record.path === path && record.lineNumber === lineNumber) ?? null;
+		},
+		findTaskById: async (id, options = {}) => {
+			if (typeof id !== "string" || !id.trim()) {
+				throw new TypeError("TaskLite: id must be a non-empty string.");
+			}
+			const records = await listTasks({
+				app,
+				registry,
+				documentStore,
+				options: {
+					...options,
+					includeCompleted: options.includeCompleted ?? true,
+					includeCancelled: options.includeCancelled ?? true,
+					includeChildren: options.includeChildren ?? true,
+				},
+			});
+			return records.find((record) =>
+				record.task.id === id && (!options.path || record.path === options.path),
+			) ?? null;
+		},
 		updateTaskStatus: async (path, lineNumber, statusSymbol) => {
 			validatePath(path);
 			validateLineNumber(lineNumber);
@@ -267,6 +335,37 @@ export function createTaskLiteCoreApi({
 						targetStatusSymbol: statusSymbol,
 					}),
 				statusSymbol,
+			});
+		},
+		cycleTaskStatus: async (path, lineNumber, direction = "next") => {
+			validatePath(path);
+			validateLineNumber(lineNumber);
+			if (direction !== "next" && direction !== "previous") {
+				throw new TypeError("TaskLite: direction must be \"next\" or \"previous\".");
+			}
+			const record = await listTaskByLocation({
+				app,
+				path,
+				lineNumber,
+				registry,
+				documentStore,
+			});
+			if (!record) return false;
+			const currentSymbol = registry.getByType(record.task.status).symbol;
+			const target = getCycleStatusSymbol(currentSymbol, registry, getSettings(), direction);
+			return updateFileTask({
+				app,
+				path,
+				lineNumber,
+				registry,
+				settings: getSettings(),
+				documentStore,
+				mutate: (input) =>
+					changeTaskStatusAtLine({
+						...input,
+						targetStatusSymbol: target,
+					}),
+				statusSymbol: target,
 			});
 		},
 		createTask: async (input) => {
@@ -336,6 +435,8 @@ export function createTaskLiteCoreApi({
 		listAssignees: async () => {
 			return getSettings().assignees || [];
 		},
+		listStatuses: () => registry.getAll(),
+		getStatusCycle: () => [...(getSettings().statusCycle || [])],
 		generateTaskId: (description, options) => {
 			const existingIds = new Set<string>();
 			if (documentStore) {
@@ -352,6 +453,32 @@ export function createTaskLiteCoreApi({
 			});
 		},
 	};
+}
+
+async function listTaskByLocation({
+	app,
+	path,
+	lineNumber,
+	registry,
+	documentStore,
+}: {
+	app: App;
+	path: string;
+	lineNumber: number;
+	registry: StatusRegistry;
+	documentStore?: TaskDocumentStore;
+}): Promise<TaskLiteTaskRecord | null> {
+	const records = await listTasks({
+		app,
+		registry,
+		documentStore,
+		options: {
+			includeCompleted: true,
+			includeCancelled: true,
+			includeChildren: true,
+		},
+	});
+	return records.find((record) => record.path === path && record.lineNumber === lineNumber) ?? null;
 }
 
 /** Validate API path parameter. */

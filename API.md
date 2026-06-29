@@ -1,6 +1,6 @@
 # TaskLite Plugin API
 
-> **Version**: 0.4.3-alpha.0  
+> **Version**: 0.4.7-beta.1
 > **Plugin ID**: `taskslite`
 
 本文档面向希望基于 TaskLite 插件开发新插件的开发者。
@@ -96,12 +96,17 @@ interface TaskLiteCoreApi {
   listTasks(options?: ListTasksOptions): Promise<TaskLiteTaskRecord[]>;
   filterTasks(records: TaskLiteTaskRecord[], query: string): TaskLiteTaskRecord[];
   listFrontmatterTasks(): Promise<TaskLiteTaskRecord[]>;
+  getTask(path: string, lineNumber: number): Promise<TaskLiteTaskRecord | null>;
+  findTaskById(id: string, options?: FindTaskOptions): Promise<TaskLiteTaskRecord | null>;
   createTask(input: CreateTaskInput): Promise<void>;
   deleteTask(path: string, lineNumber: number): Promise<boolean>;
   editTask(path: string, lineNumber: number, patch: EditTaskPatch): Promise<boolean>;
   updateTaskStatus(path: string, lineNumber: number, statusSymbol: string): Promise<boolean>;
+  cycleTaskStatus(path: string, lineNumber: number, direction?: "next" | "previous"): Promise<boolean>;
   executeTasksToggleCommand(line: string, path: string): string;
   listAssignees(): Promise<string[]>;
+  listStatuses(): StatusConfiguration[];
+  getStatusCycle(): string[];
   generateTaskId(description: string, options?: { isRecurring?: boolean; dueDate?: string | null }): string;
 }
 ```
@@ -845,6 +850,7 @@ async function archiveCompletedTasks(app: App, api: TaskLiteCoreApi) {
 
 | 版本 | 新增 API |
 |------|---------|
+| 0.4.7-beta.1 | 新增 `getTask`、`findTaskById`、`cycleTaskStatus`、`listStatuses`、`getStatusCycle`，用于更丰富的任务定位和状态循环控制 |
 | 0.4.6 | 新增 `generateTaskId` API，根据任务描述生成语义化 ID |
 | 0.4.5 | 新增 `listAssignees` API，返回库中所有负责人的去重集合 |
 | 0.4.3-alpha.0 | `listTasks` 现在返回所有任务（包括 Frontmatter 定义的文件级任务和普通行级任务） |

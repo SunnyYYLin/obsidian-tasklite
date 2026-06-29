@@ -23,6 +23,9 @@ export default class TaskLitePlugin extends Plugin {
 			getSettings: () => this.settings,
 			documentStore: this.documentStore,
 		});
+		this.documentStore.onRecordUpdated = (_path, records) => {
+			void this.updateAssigneesFromRecords(records);
+		};
 		this.documentStore.register(this);
 		registerTaskLiteCore(this);
 
@@ -46,7 +49,17 @@ export default class TaskLitePlugin extends Plugin {
 
 	async updateAssigneesFromVault(): Promise<void> {
 		const records = await this.documentStore.listRecords();
+		await this.updateAssigneesFromRecords(records);
+	}
+
+	private async updateAssigneesFromRecords(records: Array<{ task: { assignee?: string[] } }>): Promise<void> {
 		const assignees = new Set<string>();
+		for (const current of this.settings.assignees || []) {
+			const trimmed = current.trim();
+			if (trimmed) {
+				assignees.add(trimmed);
+			}
+		}
 		for (const r of records) {
 			if (r.task.assignee) {
 				for (const a of r.task.assignee) {
