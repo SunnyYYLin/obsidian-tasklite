@@ -8,6 +8,7 @@ import {
 	mergeSettings,
 	type TaskLiteSettings,
 } from "./settings";
+import { normalizeAssignees } from "./model/assignee";
 
 export default class TaskLitePlugin extends Plugin {
 	settings: TaskLiteSettings = DEFAULT_SETTINGS;
@@ -49,6 +50,7 @@ export default class TaskLitePlugin extends Plugin {
 	}
 
 	async saveSettings(): Promise<void> {
+		this.settings.assignees = normalizeAssignees(this.settings.assignees);
 		this.documentStore.invalidateAll();
 		await this.saveData(this.settings);
 	}

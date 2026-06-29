@@ -3,6 +3,7 @@ import type TaskLitePlugin from "./main";
 import { t, type I18nKey } from "./i18n";
 import { normalizeLineIndentation } from "./model/format";
 import { getVaultIndentConfig } from "./editor/editorUtils";
+import { normalizeAssignees } from "./model/assignee";
 
 export interface ToggleBehaviorSettings {
 	cascadeFinish: boolean;
@@ -184,6 +185,7 @@ export function mergeSettings(loaded: Partial<TaskLiteSettings> | null | undefin
 		...safe,
 		toggleBehavior,
 		statusCycle: normalizeStatusCycle(safe.statusCycle),
+		assignees: normalizeAssignees(safe.assignees),
 	};
 }
 

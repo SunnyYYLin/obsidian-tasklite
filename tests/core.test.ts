@@ -33,6 +33,7 @@ import { generateSemanticId } from "../src/model/taskSemanticId";
 import { createTaskLiteCoreApi } from "../src/api/taskLiteCoreApi";
 import type TaskLitePlugin from "../src/main";
 import type { TaskLiteSettings } from "../src/settings";
+import { normalizeAssignees } from "../src/model/assignee";
 import type { CachedMetadata, ListItemCache } from "obsidian";
 
 interface FakeMoment {
@@ -94,6 +95,12 @@ describe("TaskLite core", () => {
 		const task = parseTaskLine(`- [ ] Pair task ${TASK_SYMBOLS.assignee} Sunny-Mary`, registry.get(" "));
 
 		expect(task?.data.assignee).toEqual(["Sunny-Mary"]);
+	});
+
+	test("drops stale spaced-hyphen assignee cache entries", () => {
+		const assignees = normalizeAssignees(["Mary", "Sunny", "Sunny - Sunny", " Sunny "]);
+
+		expect(assignees).toEqual(["Mary", "Sunny"]);
 	});
 
 	test("supports every weekday recurrence", () => {
