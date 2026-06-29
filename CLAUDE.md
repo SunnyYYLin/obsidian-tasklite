@@ -14,7 +14,7 @@ bun test             # 运行测试
 bun run build        # 生产构建（tsc 类型检查 + esbuild 打包）
 bun run dev          # 开发模式（watch）
 bun run lint         # ESLint 检查
-npm version patch    # 发布版本（会同步更新 manifest.json 和 versions.json）
+bun pm version patch # 发布版本（会同步更新 manifest.json 和 versions.json）
 ```
 
 测试文件在 `tests/` 目录，使用 `bun:test` 框架。
@@ -75,9 +75,9 @@ npm version patch    # 发布版本（会同步更新 manifest.json 和 versions
 
 - 当前版本：`0.3.1`（正式版：新增 `👤` 负责人字段、`tasks: ignore` frontmatter、修复日期解析和 stale cache 问题）
 - Agent 规则：每次做出用户可见的优化或打磨变更时，递增 prerelease alpha 版本号
-- `npm version` 会运行 `version-bump.mjs` 同步 `manifest.json` 和 `versions.json`
+- `bun pm version` 会运行 `version-bump.mjs` 同步 `manifest.json` 和 `versions.json`
 - 推送匹配 `x.y.z` 格式的 tag 会触发 `.github/workflows/release.yml` 自动构建发布
-- **发布流程**：`npm version` 之后必须立即 `git push && git push --tags`，确保 alpha 版本自动发布
+- **发布流程**：`bun pm version` 之后必须立即 `git push && git push --tags`，确保 alpha 版本自动发布
 - **API 文档同步**：任何对 `TaskLiteCoreApi`（`src/api/taskLiteCoreApi.ts`）的变更，都必须同步更新 `API.md`，包括：新增方法、删除方法、修改参数/返回值/行为说明、新增或修改导出类型
 
 ## 测试

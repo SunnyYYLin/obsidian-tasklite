@@ -160,7 +160,7 @@ bun run lint         # ESLint check
 Push a tag matching `x.y.z` to trigger automatic GitHub release:
 
 ```bash
-npm version patch    # Bumps version in manifest.json and versions.json
+bun pm version patch # Bumps version in manifest.json and versions.json
 git push && git push --tags
 ```
 
