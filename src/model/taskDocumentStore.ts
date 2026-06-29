@@ -167,7 +167,7 @@ export class TaskDocumentStore {
 		const lines = content.split("\n");
 		const tree = buildTaskTree(lines, metadata, this.registry);
 		const hasBodyTasks = tree.nodes.some((n) => n.task);
-		const frontmatterTask = parseFrontmatterTask(file, metadata, this.registry, hasBodyTasks);
+		const frontmatterTask = parseFrontmatterTask(file, metadata, this.registry, hasBodyTasks, content);
 		const document: TaskDocument = {
 			path: file.path,
 			basename: file.basename,

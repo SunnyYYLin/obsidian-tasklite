@@ -2,7 +2,7 @@ import { Plugin } from "obsidian";
 import { createTaskLiteCoreApi, type TaskLiteCoreApi } from "./api/taskLiteCoreApi";
 import { registerTaskLiteCore } from "./core/registerCore";
 import { StatusRegistry } from "./model/status";
-import { TaskDocumentStore } from "./model/taskDocumentStore";
+import { TaskDocumentStore, type TaskDocumentRecord } from "./model/taskDocumentStore";
 import {
 	DEFAULT_SETTINGS,
 	mergeSettings,
@@ -46,7 +46,11 @@ export default class TaskLitePlugin extends Plugin {
 	}
 
 	async loadSettings(): Promise<void> {
-		this.settings = mergeSettings((await this.loadData()) as Partial<TaskLiteSettings> | null);
+		const loaded = (await this.loadData()) as Partial<TaskLiteSettings> | null;
+		this.settings = mergeSettings(loaded);
+		if (JSON.stringify(loaded?.assignees ?? []) !== JSON.stringify(this.settings.assignees)) {
+			await this.saveData(this.settings);
+		}
 	}
 
 	async saveSettings(): Promise<void> {
@@ -70,7 +74,7 @@ export default class TaskLitePlugin extends Plugin {
 		}, 200);
 	}
 
-	private async updateAssigneesFromRecords(records: Array<{ task: { assignee?: string[] } }>): Promise<void> {
+	private async updateAssigneesFromRecords(records: TaskDocumentRecord[]): Promise<void> {
 		const assignees = new Set<string>();
 		for (const r of records) {
 			if (r.task.assignee) {
@@ -82,10 +86,10 @@ export default class TaskLitePlugin extends Plugin {
 				}
 			}
 		}
-		const sorted = Array.from(assignees).sort();
+		const normalized = normalizeAssignees(Array.from(assignees));
 		const current = this.settings.assignees || [];
-		if (JSON.stringify(sorted) !== JSON.stringify(current)) {
-			this.settings.assignees = sorted;
+		if (JSON.stringify(normalized) !== JSON.stringify(current)) {
+			this.settings.assignees = normalized;
 			await this.saveData(this.settings);
 		}
 	}

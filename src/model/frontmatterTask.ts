@@ -1,6 +1,7 @@
 import type { CachedMetadata, FileManager, TFile } from "obsidian";
 import type { StatusRegistry } from "./status";
 import type { TaskPriority, OnCompletionAction, TaskData } from "./format";
+import { normalizeAssignees } from "./assignee";
 
 /**
  * A task encoded entirely in a file's YAML frontmatter rather than as a
@@ -117,6 +118,7 @@ export function parseFrontmatterTask(
 	metadata: CachedMetadata | null | undefined,
 	registry: StatusRegistry,
 	hasChildren: boolean,
+	content?: string,
 ): FrontmatterTaskRecord | null {
 	const fm = metadata?.frontmatter;
 	if (!fm || !fm["task"]) return null;
@@ -141,7 +143,7 @@ export function parseFrontmatterTask(
 			? rawOnCompletion
 			: null;
 
-	const rawAssignee: unknown =
+	const rawAssignee: unknown = parseFrontmatterAssigneeFromContent(content) ??
 		(fm as Record<string, unknown>)["assignee"] ??
 		(fm as Record<string, unknown>)["person"];
 	let assignee: string[] = [];
@@ -156,6 +158,7 @@ export function parseFrontmatterTask(
 			.map((p) => p.trim())
 			.filter(Boolean);
 	}
+	assignee = normalizeAssignees(assignee);
 
 	const task: TaskData = {
 		status: statusConfig.type,
@@ -194,6 +197,36 @@ export function parseFrontmatterTask(
 		task,
 		rawStatus,
 	};
+}
+
+function parseFrontmatterAssigneeFromContent(content: string | undefined): string[] | null {
+	if (!content) return null;
+	const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u);
+	if (!match) return null;
+
+	const lines = (match[1] ?? "").split(/\r?\n/u);
+	for (let i = 0; i < lines.length; i++) {
+		const keyMatch = lines[i]?.match(/^assignee:\s*(.*)$/u);
+		if (!keyMatch) continue;
+
+		const inlineValue = (keyMatch[1] ?? "").trim();
+		const listValues: string[] = [];
+		for (let j = i + 1; j < lines.length; j++) {
+			const line = lines[j] ?? "";
+			if (/^[^\s].*:/u.test(line)) break;
+			const itemMatch = line.match(/^\s+-\s+(.+)$/u);
+			if (itemMatch) {
+				listValues.push((itemMatch[1] ?? "").trim());
+			}
+		}
+
+		if (inlineValue.length > 0) {
+			return inlineValue.split("&").map((p) => p.trim()).filter(Boolean);
+		}
+		return listValues;
+	}
+
+	return null;
 }
 
 /**
@@ -302,13 +335,22 @@ export function applyFrontmatterPatchToContent(
 
 	const resultLines: string[] = [];
 	const handled = new Set<string>();
+	let skippingContinuation = false;
 
 	for (const line of lines) {
+		if (skippingContinuation) {
+			if (/^\s+/u.test(line)) {
+				continue;
+			}
+			skippingContinuation = false;
+		}
+
 		const keyMatch = line.match(/^([a-zA-Z_][a-zA-Z0-9_]*):\s*(.*)/u);
 		if (keyMatch) {
 			const key = keyMatch[1] ?? "";
 			if (updated.has(key)) {
 				handled.add(key);
+				skippingContinuation = true;
 				const newVal = updated.get(key) ?? "";
 				if (newVal !== "") {
 					resultLines.push(`${key}: ${newVal}`);

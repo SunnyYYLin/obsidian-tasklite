@@ -26,6 +26,7 @@ import { StatusRegistry } from "../src/model/status";
 import { buildTaskTree } from "../src/model/tree";
 import { taskIdentityKey } from "../src/model/taskIdentity";
 import { TaskDocumentStore, type TaskDocumentRecord } from "../src/model/taskDocumentStore";
+import { applyFrontmatterPatchToContent, parseFrontmatterTask } from "../src/model/frontmatterTask";
 import { filterTaskRecordsByQuery } from "../src/model/taskQuery";
 import { cancelTaskAtLine, clickTaskCheckboxAtLine, rightClickTaskCheckboxAtLine, toggleTaskAtLine, unfinishTaskAtLine } from "../src/editor/toggle";
 import { reconcileExternalTaskCompletion } from "../src/editor/externalReconcileCore";
@@ -97,10 +98,46 @@ describe("TaskLite core", () => {
 		expect(task?.data.assignee).toEqual(["Sunny-Mary"]);
 	});
 
-	test("drops stale spaced-hyphen assignee cache entries", () => {
-		const assignees = normalizeAssignees(["Mary", "Sunny", "Sunny - Sunny", "Sunny-Sunny", "Sunny-Mary", " Sunny "]);
+	test("normalizes assignee cache entries without interpreting hyphens", () => {
+		const assignees = normalizeAssignees(["Mary", "Sunny", "Sunny - Sunny", "Sunny-Sunny", "Sunny - Mary", "Sunny-Mary", " Sunny "]);
 
-		expect(assignees).toEqual(["Mary", "Sunny", "Sunny-Mary"]);
+		expect(assignees).toEqual(["Mary", "Sunny", "Sunny - Mary", "Sunny - Sunny", "Sunny-Mary", "Sunny-Sunny"]);
+	});
+
+	test("parses malformed scalar-plus-list frontmatter assignee from source", () => {
+		const registry = new StatusRegistry();
+		const record = parseFrontmatterTask(
+			{ path: "School/Thesis.md", basename: "Thesis", extension: "md" } as any,
+			{ frontmatter: { task: true, assignee: "Sunny - Sunny" } } as any,
+			registry,
+			false,
+			[
+				"---",
+				"task: true",
+				"assignee: Sunny",
+				"  - Sunny",
+				"---",
+				"",
+			].join("\n"),
+		);
+
+		expect(record?.task.assignee).toEqual(["Sunny"]);
+	});
+
+	test("frontmatter string patch removes replaced array continuations", () => {
+		const content = [
+			"---",
+			"task: true",
+			"assignee:",
+			"  - Sunny",
+			"---",
+			"",
+		].join("\n");
+
+		const updated = applyFrontmatterPatchToContent(content, { assignee: "Sunny" });
+
+		expect(updated).toContain("assignee: Sunny");
+		expect(updated).not.toContain("  - Sunny");
 	});
 
 	test("supports every weekday recurrence", () => {
