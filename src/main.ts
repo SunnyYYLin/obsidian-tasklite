@@ -24,6 +24,7 @@ export default class TaskLitePlugin extends Plugin {
 			getSettings: () => this.settings,
 			documentStore: this.documentStore,
 		});
+		await this.updateAssigneesFromVault();
 		this.documentStore.onRecordUpdated = () => {
 			this.queueAssigneeRefresh();
 		};
