@@ -98,9 +98,9 @@ describe("TaskLite core", () => {
 	});
 
 	test("drops stale spaced-hyphen assignee cache entries", () => {
-		const assignees = normalizeAssignees(["Mary", "Sunny", "Sunny - Sunny", " Sunny "]);
+		const assignees = normalizeAssignees(["Mary", "Sunny", "Sunny - Sunny", "Sunny-Sunny", "Sunny-Mary", " Sunny "]);
 
-		expect(assignees).toEqual(["Mary", "Sunny"]);
+		expect(assignees).toEqual(["Mary", "Sunny", "Sunny-Mary"]);
 	});
 
 	test("supports every weekday recurrence", () => {
