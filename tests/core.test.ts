@@ -82,11 +82,18 @@ describe("TaskLite core", () => {
 		expect(task?.data.recurrence).toBe("every week");
 	});
 
-	test("parses hyphen-separated assignees", () => {
+	test("parses ampersand-separated assignees", () => {
+		const registry = new StatusRegistry();
+		const task = parseTaskLine(`- [ ] Pair task ${TASK_SYMBOLS.assignee} Sunny&Mary`, registry.get(" "));
+
+		expect(task?.data.assignee).toEqual(["Sunny", "Mary"]);
+	});
+
+	test("does not split assignees on hyphen", () => {
 		const registry = new StatusRegistry();
 		const task = parseTaskLine(`- [ ] Pair task ${TASK_SYMBOLS.assignee} Sunny-Mary`, registry.get(" "));
 
-		expect(task?.data.assignee).toEqual(["Sunny", "Mary"]);
+		expect(task?.data.assignee).toEqual(["Sunny-Mary"]);
 	});
 
 	test("supports every weekday recurrence", () => {
@@ -2438,6 +2445,17 @@ describe("TaskLite 0.4.5 Features", () => {
 		expect(suggestions.length).toBe(1);
 		expect(suggestions[0].name).toBe("Bob");
 
+		const ampersandEditor = {
+			getLine: () => `- [ ] Task ${TASK_SYMBOLS.assignee} Sunny&Ma`,
+		};
+		const ampersandTrigger = suggest.onTrigger(
+			{ line: 0, ch: `- [ ] Task ${TASK_SYMBOLS.assignee} Sunny&Ma`.length },
+			ampersandEditor as any,
+			file as any
+		);
+		expect(ampersandTrigger?.query).toBe("assignee:ma");
+		expect(suggest.getSuggestions({ query: "assignee:ma" } as any)[0].name).toBe("Mary");
+
 		const hyphenEditor = {
 			getLine: () => `- [ ] Task ${TASK_SYMBOLS.assignee} Sunny-Ma`,
 		};
@@ -2446,8 +2464,8 @@ describe("TaskLite 0.4.5 Features", () => {
 			hyphenEditor as any,
 			file as any
 		);
-		expect(hyphenTrigger?.query).toBe("assignee:ma");
-		expect(suggest.getSuggestions({ query: "assignee:ma" } as any)[0].name).toBe("Mary");
+		expect(hyphenTrigger?.query).toBe("assignee:sunny-ma");
+		expect(suggest.getSuggestions({ query: "assignee:sunny-ma" } as any)).toHaveLength(0);
 
 		const mobileHandleEditor = {
 			getLine: () => `- [ ] Task ${TASK_SYMBOLS.assignee} @Mo`,

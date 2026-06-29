@@ -1,6 +1,6 @@
 # TaskLite Plugin API
 
-> **Version**: 0.4.7-beta.1
+> **Version**: 0.4.7-beta.2
 > **Plugin ID**: `taskslite`
 
 本文档面向希望基于 TaskLite 插件开发新插件的开发者。
@@ -850,6 +850,7 @@ async function archiveCompletedTasks(app: App, api: TaskLiteCoreApi) {
 
 | 版本 | 新增 API |
 |------|---------|
+| 0.4.7-beta.2 | 修正 assignee 建议与解析：多人负责人只使用 `&` 分隔，避免误产生 `Sunny-Mary` 形式 |
 | 0.4.7-beta.1 | 新增 `getTask`、`findTaskById`、`cycleTaskStatus`、`listStatuses`、`getStatusCycle`，用于更丰富的任务定位和状态循环控制 |
 | 0.4.6 | 新增 `generateTaskId` API，根据任务描述生成语义化 ID |
 | 0.4.5 | 新增 `listAssignees` API，返回库中所有负责人的去重集合 |

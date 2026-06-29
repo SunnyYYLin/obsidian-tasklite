@@ -302,11 +302,8 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 				let queryStart = afterSymbolIdx + 1;
 				const fieldText = beforeCursor.slice(queryStart);
 				
-				// Support multi-assignee separated by & or -.
-				const lastSeparatorIdx = Math.max(
-					fieldText.lastIndexOf("&"),
-					fieldText.lastIndexOf("-"),
-				);
+				// Support multi-assignee separated by &.
+				const lastSeparatorIdx = fieldText.lastIndexOf("&");
 				if (lastSeparatorIdx !== -1) {
 					queryStart += lastSeparatorIdx + 1;
 				}
