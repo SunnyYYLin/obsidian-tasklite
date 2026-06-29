@@ -14,6 +14,7 @@ export default class TaskLitePlugin extends Plugin {
 	readonly statusRegistry = new StatusRegistry();
 	readonly documentStore = new TaskDocumentStore(this.app, this.statusRegistry);
 	api!: TaskLiteCoreApi;
+	private assigneeRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -23,8 +24,8 @@ export default class TaskLitePlugin extends Plugin {
 			getSettings: () => this.settings,
 			documentStore: this.documentStore,
 		});
-		this.documentStore.onRecordUpdated = (_path, records) => {
-			void this.updateAssigneesFromRecords(records);
+		this.documentStore.onRecordUpdated = () => {
+			this.queueAssigneeRefresh();
 		};
 		this.documentStore.register(this);
 		registerTaskLiteCore(this);
@@ -35,6 +36,10 @@ export default class TaskLitePlugin extends Plugin {
 	}
 
 	onunload(): void {
+		if (this.assigneeRefreshTimer !== null) {
+			clearTimeout(this.assigneeRefreshTimer);
+			this.assigneeRefreshTimer = null;
+		}
 		this.documentStore.destroy();
 	}
 
@@ -52,14 +57,18 @@ export default class TaskLitePlugin extends Plugin {
 		await this.updateAssigneesFromRecords(records);
 	}
 
+	private queueAssigneeRefresh(): void {
+		if (this.assigneeRefreshTimer !== null) {
+			clearTimeout(this.assigneeRefreshTimer);
+		}
+		this.assigneeRefreshTimer = setTimeout(() => {
+			this.assigneeRefreshTimer = null;
+			void this.updateAssigneesFromVault();
+		}, 200);
+	}
+
 	private async updateAssigneesFromRecords(records: Array<{ task: { assignee?: string[] } }>): Promise<void> {
 		const assignees = new Set<string>();
-		for (const current of this.settings.assignees || []) {
-			const trimmed = current.trim();
-			if (trimmed) {
-				assignees.add(trimmed);
-			}
-		}
 		for (const r of records) {
 			if (r.task.assignee) {
 				for (const a of r.task.assignee) {
