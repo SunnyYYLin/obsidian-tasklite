@@ -91,29 +91,19 @@ export function registerTaskLiteCore(plugin: TaskLitePlugin): void {
 		id: "normalize-indentation",
 		name: t("command.normalizeIndentation"),
 		checkCallback: (checking: boolean) => {
-			const activeFile = plugin.app.workspace.getActiveFile();
-			if (!activeFile) return false;
+			const activeView = plugin.app.workspace.getActiveViewOfType(MarkdownView);
+			const editor = activeView?.editor;
+			const activeFile = activeView?.file;
+			if (!editor || !activeFile) return false;
 			if (checking) return true;
 
 			(async () => {
-				const content = await plugin.app.vault.read(activeFile);
-				const lines = content.length > 0 ? content.split("\n") : [];
-
-				const { useTab, tabSize } = getVaultIndentConfig(plugin.app);
-
-				let changed = false;
-				const newLines = lines.map((line) => {
-					const newLine = normalizeLineIndentation(line, useTab, tabSize);
-					if (newLine !== line) {
-						changed = true;
-					}
-					return newLine;
-				});
-
+				const changed = normalizeEditorIndentation(editor, plugin);
 				if (changed) {
-					const newContent = newLines.join("\n");
-					await plugin.app.vault.modify(activeFile, newContent);
-					await plugin.documentStore.replaceDocumentContent(activeFile, newContent);
+					await plugin.documentStore.replaceDocumentContent(
+						activeFile,
+						editor.getValue(),
+					);
 				}
 				new Notice(t("notice.normalizedIndents"));
 			})().catch((err) => {
@@ -181,5 +171,34 @@ export function registerTaskLiteCore(plugin: TaskLitePlugin): void {
 	plugin.registerEditorExtension(createLivePreviewExtension(plugin.app, plugin.statusRegistry, () => plugin.settings, plugin.documentStore));
 	plugin.registerEditorSuggest(new TaskLiteEmojiSuggest(plugin));
 	plugin.addSettingTab(new TaskLiteSettingTab(plugin.app, plugin));
+}
+
+function normalizeEditorIndentation(
+	editor: Editor,
+	plugin: TaskLitePlugin,
+): boolean {
+	const content = editor.getValue();
+	const lines = content.length > 0 ? content.split("\n") : [];
+	const { useTab, tabSize } = getVaultIndentConfig(plugin.app);
+
+	let changed = false;
+	const newLines = lines.map((line) => {
+		const newLine = normalizeLineIndentation(line, useTab, tabSize);
+		if (newLine !== line) {
+			changed = true;
+		}
+		return newLine;
+	});
+
+	if (!changed) return false;
+
+	const selections = editor.listSelections();
+	const scroll = editor.getScrollInfo();
+	const lastLine = Math.max(editor.lastLine(), 0);
+	const lastCh = editor.getLine(lastLine).length;
+	editor.replaceRange(newLines.join("\n"), { line: 0, ch: 0 }, { line: lastLine, ch: lastCh });
+	editor.setSelections(selections);
+	editor.scrollTo(scroll.left, scroll.top);
+	return true;
 }
 

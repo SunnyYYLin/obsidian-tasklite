@@ -134,6 +134,7 @@ describe("TaskLite core", () => {
 			"",
 		].join("\n");
 
+		// eslint-disable-next-line @typescript-eslint/no-deprecated -- legacy helper remains intentionally covered here
 		const updated = applyFrontmatterPatchToContent(content, { assignee: "Sunny" });
 
 		expect(updated).toContain("assignee: Sunny");
