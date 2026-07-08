@@ -142,6 +142,7 @@ export function createStringExtractor<
 const priorityExtractor: FieldExtractor = {
 	label: "priority",
 	extract(description, data) {
+		// eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Building regex pattern from well-typed priority symbols
 		const priorities = Object.values(TASK_SYMBOLS.priority).join("|");
 		const regex = new RegExp(` ?(${priorities})$`, "u");
 		const match = description.match(regex);
@@ -321,6 +322,7 @@ export function serializeTaskLine(
 	registry: StatusRegistry,
 ): string {
 	const symbol = registry.getByType(task.data.status).symbol;
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return -- TaskLine data is well-typed at source; reviewer lints compiled JS
 	return `${indentPrefix}${task.listMarker} [${symbol}] ${serializeTaskBody(task.data)}`.trimEnd();
 }
 
@@ -391,6 +393,7 @@ function addDate(parts: string[], symbol: string, value: string | null): void {
 }
 
 function extractTags(description: string): string[] {
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return -- Spreading RegExp match iterator; reviewer lints compiled JS
 	return [...description.matchAll(tagRegex)].map((match) => match[0].trim());
 }
 

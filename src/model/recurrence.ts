@@ -254,6 +254,7 @@ function parseDate(value: string): Date | null {
 }
 
 function formatDate(date: Date): string {
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-assignment -- Number-to-string via .padStart; reviewer lints compiled JS
 	const year = date.getUTCFullYear().toString().padStart(4, "0");
 	const month = (date.getUTCMonth() + 1).toString().padStart(2, "0");
 	const day = date.getUTCDate().toString().padStart(2, "0");

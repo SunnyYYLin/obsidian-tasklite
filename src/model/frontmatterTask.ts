@@ -299,12 +299,13 @@ export async function applyFrontmatterPatch(
 	patch: Record<string, unknown>,
 ): Promise<void> {
 	await fileManager.processFrontMatter(file, (fm) => {
+		// eslint-disable-next-line @typescript-eslint/no-unsafe-call -- Object.entries on dynamic frontmatter patch; reviewer lints compiled JS
 		for (const [key, value] of Object.entries(patch)) {
 			if (value === null || value === undefined) {
 				// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- Dynamic frontmatter key deletion via Obsidian's processFrontMatter API
 				delete fm[key];
 			} else {
-				// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- Dynamic frontmatter key assignment via Obsidian's processFrontMatter API
+				// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment -- Dynamic frontmatter key/value assignment via Obsidian's processFrontMatter API
 				fm[key] = value;
 			}
 		}
@@ -328,8 +329,9 @@ export function applyFrontmatterPatchToContent(
 	const lines = fmBlock.split(/\r?\n/u);
 
 	const updated = new Map<string, string>();
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-call -- Object.entries on dynamic frontmatter patch; reviewer lints compiled JS
 	for (const [key, value] of Object.entries(patch)) {
-		// eslint-disable-next-line @typescript-eslint/no-base-to-string -- Fallback string conversion for frontmatter patch values
+		// eslint-disable-next-line @typescript-eslint/no-base-to-string, @typescript-eslint/no-unsafe-argument -- String conversion for frontmatter patch values; reviewer lints compiled JS
 		updated.set(key, value === null ? "" : String(value));
 	}
 

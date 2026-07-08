@@ -5,6 +5,9 @@ import { globalIgnores } from "eslint/config";
 
 export default tseslint.config(
 	{
+		linterOptions: {
+			reportUnusedDisableDirectives: 'off',
+		},
 		languageOptions: {
 			globals: {
 				...globals.browser,

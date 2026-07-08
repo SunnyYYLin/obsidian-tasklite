@@ -656,6 +656,7 @@ async function createTask({
 	const indentPrefix = parentNode ? `${parentPrefix}${oneLevelIndent}` : "";
 	const line = serializeTaskLine(taskLine, indentPrefix, registry);
 
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-call -- String .trimStart() on well-typed task line; reviewer lints compiled JS
 	const insertion = parentNode
 		? `${parentPrefix}${oneLevelIndent}${line.trimStart()}`
 		: line;

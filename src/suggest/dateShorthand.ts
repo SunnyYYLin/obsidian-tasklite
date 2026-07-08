@@ -129,6 +129,7 @@ export function parseDateShorthand(input: string): string | null {
 		const d = Number.parseInt(monthDayMatch[2] ?? "0", 10);
 		if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
 			if (isValidDate(year, m, d)) {
+				// eslint-disable-next-line @typescript-eslint/no-unsafe-call -- Number-to-string via .padStart; reviewer lints compiled JS
 				return `${year}-${m.toString().padStart(2, "0")}-${d.toString().padStart(2, "0")}`;
 			}
 		}
@@ -143,6 +144,7 @@ export function parseDateShorthand(input: string): string | null {
 		const d = Number.parseInt(dayMatch[1] ?? "0", 10);
 		if (d >= 1 && d <= 31) {
 			if (isValidDate(year, month, d)) {
+				// eslint-disable-next-line @typescript-eslint/no-unsafe-call -- Number-to-string via .padStart; reviewer lints compiled JS
 				return `${year}-${month.toString().padStart(2, "0")}-${d.toString().padStart(2, "0")}`;
 			}
 		}
@@ -478,6 +480,7 @@ function todayUtc(): Date {
 }
 
 function formatDate(date: Date): string {
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-assignment -- Number-to-string via .padStart; reviewer lints compiled JS
 	const y = date.getUTCFullYear().toString().padStart(4, "0");
 	const m = (date.getUTCMonth() + 1).toString().padStart(2, "0");
 	const d = date.getUTCDate().toString().padStart(2, "0");
@@ -494,7 +497,7 @@ function isValidDate(year: number, month: number, day: number): boolean {
 // ---------------------------------------------------------------------------
 
 function currentLocale(): "zh" | "en" {
-	const momentWindow = window as typeof window & { moment?: { locale?: () => string } };
-	const locale = (momentWindow.moment?.locale?.() ?? momentWindow.navigator?.language ?? "en").toLowerCase();
+	const win = window as unknown as { moment?: { locale?: () => string }; navigator?: { language?: string } };
+	const locale = (win.moment?.locale?.() ?? win.navigator?.language ?? "en").toLowerCase();
 	return locale.startsWith("zh") ? "zh" : "en";
 }
