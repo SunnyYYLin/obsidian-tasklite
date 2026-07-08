@@ -15,7 +15,7 @@ export default class TaskLitePlugin extends Plugin {
 	readonly statusRegistry = new StatusRegistry();
 	readonly documentStore = new TaskDocumentStore(this.app, this.statusRegistry);
 	api!: TaskLiteCoreApi;
-	private assigneeRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+	private assigneeRefreshTimer: number | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -39,7 +39,7 @@ export default class TaskLitePlugin extends Plugin {
 
 	onunload(): void {
 		if (this.assigneeRefreshTimer !== null) {
-			clearTimeout(this.assigneeRefreshTimer);
+			window.clearTimeout(this.assigneeRefreshTimer);
 			this.assigneeRefreshTimer = null;
 		}
 		this.documentStore.destroy();
@@ -66,9 +66,9 @@ export default class TaskLitePlugin extends Plugin {
 
 	private queueAssigneeRefresh(): void {
 		if (this.assigneeRefreshTimer !== null) {
-			clearTimeout(this.assigneeRefreshTimer);
+			window.clearTimeout(this.assigneeRefreshTimer);
 		}
-		this.assigneeRefreshTimer = setTimeout(() => {
+		this.assigneeRefreshTimer = window.setTimeout(() => {
 			this.assigneeRefreshTimer = null;
 			void this.updateAssigneesFromVault();
 		}, 200);

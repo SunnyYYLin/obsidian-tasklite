@@ -79,7 +79,7 @@ export function compileTaskQuery(query: string): CompiledTaskQuery {
 	};
 	// Evict the oldest entry when the cache reaches its limit
 	if (compiledQueryCache.size >= COMPILED_QUERY_CACHE_MAX) {
-		// eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unnecessary-type-assertion
+		// eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unnecessary-type-assertion -- Evict oldest Map entry; Map.keys().next().value is always defined when size > 0
 		compiledQueryCache.delete(compiledQueryCache.keys().next().value!);
 	}
 	compiledQueryCache.set(normalizedQuery, compiled);

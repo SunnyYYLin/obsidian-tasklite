@@ -128,16 +128,16 @@ export function parseFrontmatterTask(
 	const statusSymbol = resolveStatusSymbol(fm["status"], registry);
 	const statusConfig = registry.get(statusSymbol);
 
-	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- Frontmatter values from Obsidian cache are loosely typed
 	const rawPriority = fm["priority"];
 	const priority: TaskPriority | null =
 		typeof rawPriority === "string" && rawPriority in PRIORITY_MAP
 			? (PRIORITY_MAP[rawPriority] ?? null)
 			: null;
 
-	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- Frontmatter values from Obsidian cache are loosely typed
 	const rawOnCompletion = fm["onCompletion"] ?? fm["on_completion"];
-	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- Frontmatter values from Obsidian cache are loosely typed
 	const onCompletion: OnCompletionAction | null =
 		rawOnCompletion === "delete" || rawOnCompletion === "keep"
 			? rawOnCompletion
@@ -301,10 +301,10 @@ export async function applyFrontmatterPatch(
 	await fileManager.processFrontMatter(file, (fm) => {
 		for (const [key, value] of Object.entries(patch)) {
 			if (value === null || value === undefined) {
-				// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+				// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- Dynamic frontmatter key deletion via Obsidian's processFrontMatter API
 				delete fm[key];
 			} else {
-				// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+				// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- Dynamic frontmatter key assignment via Obsidian's processFrontMatter API
 				fm[key] = value;
 			}
 		}
@@ -329,7 +329,7 @@ export function applyFrontmatterPatchToContent(
 
 	const updated = new Map<string, string>();
 	for (const [key, value] of Object.entries(patch)) {
-		// eslint-disable-next-line @typescript-eslint/no-base-to-string
+		// eslint-disable-next-line @typescript-eslint/no-base-to-string -- Fallback string conversion for frontmatter patch values
 		updated.set(key, value === null ? "" : String(value));
 	}
 

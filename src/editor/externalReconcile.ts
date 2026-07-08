@@ -9,13 +9,11 @@ import { parseTaskLine, serializeTaskLine } from "../model/format";
 import { getIndentPrefix } from "./toggle";
 
 function isTFile(value: unknown): value is TFile {
-	return (
-		value instanceof TFile ||
-		(Boolean(value) &&
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
-			typeof (value as any).path === "string" &&
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
-			typeof (value as any).extension === "string")
+	const file = value as Partial<TFile> | null | undefined;
+	return Boolean(
+		file &&
+		typeof file.path === "string" &&
+		typeof file.extension === "string",
 	);
 }
 

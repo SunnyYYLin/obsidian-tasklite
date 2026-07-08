@@ -1,17 +1,13 @@
 import * as pinyinliteModule from "pinyinlite/index_full.js";
 
 // Safe wrapper for pinyinlite to prevent crash on ESM/CommonJS bundler wrapper mismatch
-// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
-const pinyinliteFn = (pinyinliteModule as any).default || pinyinliteModule;
-// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+const pinyinliteFn = (pinyinliteModule as unknown as Record<string, unknown>).default || pinyinliteModule;
 const pinyinlite = typeof pinyinliteFn === "function" ? pinyinliteFn : null;
 
 
 function getCurrentDateStr(): string {
-	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
-	const momentFactory = typeof window !== "undefined" ? (window as any).moment : undefined;
+	const momentFactory = typeof window !== "undefined" ? (window as unknown as { moment?: () => { format(fmt: string): string } }).moment : undefined;
 	if (momentFactory) {
-		// eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
 		return momentFactory().format("YYYY-MM-DD");
 	}
 	return new Date().toISOString().split("T")[0]!;
@@ -65,14 +61,14 @@ export function generateSemanticId(
 				tokens.push(currentWord[0]!.toLowerCase());
 				currentWord = "";
 			}
-			// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
+			// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call -- Call pinyinlite for Chinese character romanization
 			const pinyins = pinyinlite(char);
-			// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+			// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- Access pinyinlite return value to extract first pinyin
 			if (pinyins && pinyins[0] && pinyins[0].length > 0) {
-				// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+				// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Extract first pinyin segment
 				const firstPinyin = pinyins[0][0];
 				if (firstPinyin) {
-					// eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
+					// eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- Convert pinyin to lowercase for semantic ID
 					tokens.push(firstPinyin[0]!.toLowerCase());
 				}
 			}

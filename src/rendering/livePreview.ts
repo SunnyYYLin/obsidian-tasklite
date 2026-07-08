@@ -97,7 +97,7 @@ export function createLivePreviewExtension(
 					listItem?.setAttribute("data-task", symbol);
 				};
 				this.view.requestMeasure({ read: () => null, write: apply });
-				requestAnimationFrame(apply);
+				window.requestAnimationFrame(apply);
 			}
 		},
 	);

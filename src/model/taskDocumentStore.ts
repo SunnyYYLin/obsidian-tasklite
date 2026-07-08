@@ -31,7 +31,7 @@ export class TaskDocumentStore {
 	private readonly documents = new Map<string, TaskDocument>();
 	private readonly recordsByPath = new Map<string, TaskDocumentRecord[]>();
 	private readonly dirtyPaths = new Set<string>();
-	private readonly rebuildTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	private readonly rebuildTimers = new Map<string, number>();
 	private indexedAllFiles = false;
 
 	onRecordUpdated?: (path: string, records: TaskDocumentRecord[]) => void;
@@ -89,7 +89,7 @@ export class TaskDocumentStore {
 		this.recordsByPath.delete(path);
 		this.dirtyPaths.delete(path);
 		const timer = this.rebuildTimers.get(path);
-		if (timer !== undefined) clearTimeout(timer);
+		if (timer !== undefined) window.clearTimeout(timer);
 		this.rebuildTimers.delete(path);
 	}
 
@@ -135,8 +135,8 @@ export class TaskDocumentStore {
 	private queueRebuild(file: TFile): void {
 		this.invalidate(file.path);
 		const existingTimer = this.rebuildTimers.get(file.path);
-		if (existingTimer !== undefined) clearTimeout(existingTimer);
-		const timer = setTimeout(() => {
+		if (existingTimer !== undefined) window.clearTimeout(existingTimer);
+		const timer = window.setTimeout(() => {
 			this.rebuildTimers.delete(file.path);
 			void this.rebuildFile(file);
 		}, 200);
@@ -219,7 +219,7 @@ export class TaskDocumentStore {
 	/** Cancel all pending debounce timers and clear cached state. Call on plugin unload. */
 	destroy(): void {
 		for (const timer of this.rebuildTimers.values()) {
-			clearTimeout(timer);
+			window.clearTimeout(timer);
 		}
 		this.rebuildTimers.clear();
 		this.documents.clear();
