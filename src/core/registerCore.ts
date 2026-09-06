@@ -1,6 +1,6 @@
 import { MarkdownView, Notice, type Editor } from "obsidian";
 import type TaskLitePlugin from "../main";
-import { normalizeLineIndentation, serializeTaskLine, parseLineWithStatus } from "../model/format";
+import { normalizeDocumentLines, serializeTaskLine, parseLineWithStatus } from "../model/format";
 import { generateSemanticId } from "../model/taskSemanticId";
 import { cancelEditorTask, toggleEditorTask, toggleEditorTaskCancellation, uncancelEditorTask } from "../editor/apply";
 import { ExternalTaskReconciler } from "../editor/externalReconcile";
@@ -152,6 +152,32 @@ export function registerTaskLiteCore(plugin: TaskLitePlugin): void {
 	});
 
 	plugin.addCommand({
+		id: "create-task",
+		name: t("command.createTask"),
+		editorCallback: (editor: Editor) => {
+			const cursor = editor.getCursor();
+			const line = editor.getLine(cursor.line);
+			const defaultAssignee = plugin.getDefaultAssignee();
+			const assigneePart =
+				plugin.settings.autoAssignDefault && defaultAssignee
+					? ` 👤 ${defaultAssignee}`
+					: "";
+			const taskPrefix = "- [ ] ";
+			if (line.trim().length === 0) {
+				const indent = line.match(/^[\s\t>]+/)?.[0] ?? "";
+				const text = `${indent}${taskPrefix}${assigneePart}`;
+				editor.setLine(cursor.line, text);
+				editor.setCursor({ line: cursor.line, ch: text.length });
+			} else {
+				const indent = line.match(/^([\s\t>]*)/)?.[0] ?? "";
+				const text = `\n${indent}${taskPrefix}${assigneePart}`;
+				editor.replaceRange(text, { line: cursor.line, ch: line.length });
+				editor.setCursor({ line: cursor.line + 1, ch: indent.length + taskPrefix.length });
+			}
+		},
+	});
+
+	plugin.addCommand({
 		id: "rebuild-cache",
 		name: t("command.rebuildCache"),
 		callback: () => {
@@ -181,14 +207,14 @@ function normalizeEditorIndentation(
 	const lines = content.length > 0 ? content.split("\n") : [];
 	const { useTab, tabSize } = getVaultIndentConfig(plugin.app);
 
+	const newLines = normalizeDocumentLines(lines, useTab, tabSize);
 	let changed = false;
-	const newLines = lines.map((line) => {
-		const newLine = normalizeLineIndentation(line, useTab, tabSize);
-		if (newLine !== line) {
+	for (let i = 0; i < lines.length; i++) {
+		if (lines[i] !== newLines[i]) {
 			changed = true;
+			break;
 		}
-		return newLine;
-	});
+	}
 
 	if (!changed) return false;
 

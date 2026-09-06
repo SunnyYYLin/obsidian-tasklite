@@ -126,6 +126,11 @@ const EMOJI_SUGGESTIONS: EmojiSuggestion[] = [
 	},
 	{
 		kind: "emoji",
+		label: "Location / 地点",
+		insert: `${TASK_SYMBOLS.location} `,
+	},
+	{
+		kind: "emoji",
 		label: "Remind / 提醒日期",
 		insert: `${TASK_SYMBOLS.remind} `,
 	},
@@ -340,9 +345,34 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 		// ---- emoji mode (@) ----
 		if (query.startsWith("@:")) {
 			const q = query.slice(2).trim();
-			if (!q) return EMOJI_SUGGESTIONS.slice(0, 8);
-			return EMOJI_SUGGESTIONS.filter((s) =>
-				s.label.toLowerCase().includes(q),
+			if (!q) {
+				return EMOJI_SUGGESTIONS.slice(0, 8);
+			}
+
+			const defaultAssignee = typeof this.plugin.getDefaultAssignee === "function"
+				? this.plugin.getDefaultAssignee()
+				: (this.plugin.settings?.defaultAssignee || "");
+			const trimmedDefault = defaultAssignee.trim();
+
+			const suggestions: EmojiSuggestion[] = [];
+			for (const item of EMOJI_SUGGESTIONS) {
+				if (item.insert.startsWith(TASK_SYMBOLS.assignee) && trimmedDefault) {
+					// Put default assignee first so @ass + ENTER selects it directly,
+					// followed by the standalone assignee emoji option.
+					suggestions.push({
+						kind: "emoji",
+						label: `Assignee: ${trimmedDefault} / 负责人：${trimmedDefault}`,
+						insert: `${TASK_SYMBOLS.assignee} ${trimmedDefault} `,
+					});
+					suggestions.push(item);
+				} else {
+					suggestions.push(item);
+				}
+			}
+
+			return suggestions.filter((s) =>
+				s.label.toLowerCase().includes(q) ||
+				s.insert.toLowerCase().includes(q),
 			).slice(0, 8);
 		}
 
@@ -395,8 +425,16 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 		if (query.startsWith("assignee:")) {
 			const q = query.slice(9).trim();
 			const assignees = this.plugin.settings.assignees || [];
+			const defaultAssignee = typeof this.plugin.getDefaultAssignee === "function" ? this.plugin.getDefaultAssignee() : (this.plugin.settings?.defaultAssignee || "");
+			const sortedAssignees = [...assignees];
+			if (defaultAssignee && !sortedAssignees.includes(defaultAssignee)) {
+				sortedAssignees.unshift(defaultAssignee);
+			} else if (defaultAssignee && sortedAssignees.includes(defaultAssignee)) {
+				sortedAssignees.splice(sortedAssignees.indexOf(defaultAssignee), 1);
+				sortedAssignees.unshift(defaultAssignee);
+			}
 			const matches: AssigneeSuggestion[] = [];
-			for (const name of assignees) {
+			for (const name of sortedAssignees) {
 				if (!q || name.toLowerCase().includes(q)) {
 					matches.push({
 						kind: "assignee",
@@ -513,6 +551,7 @@ function containsDelimiter(text: string): boolean {
 		TASK_SYMBOLS.dependsOn,
 		TASK_SYMBOLS.id,
 		TASK_SYMBOLS.assignee,
+		TASK_SYMBOLS.location,
 		TASK_SYMBOLS.priority.highest,
 		TASK_SYMBOLS.priority.high,
 		TASK_SYMBOLS.priority.medium,
@@ -541,6 +580,7 @@ function containsAssigneeDelimiter(text: string): boolean {
 		TASK_SYMBOLS.dependsOn,
 		TASK_SYMBOLS.id,
 		TASK_SYMBOLS.assignee,
+		TASK_SYMBOLS.location,
 		TASK_SYMBOLS.priority.highest,
 		TASK_SYMBOLS.priority.high,
 		TASK_SYMBOLS.priority.medium,

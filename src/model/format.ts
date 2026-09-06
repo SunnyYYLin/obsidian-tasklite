@@ -25,6 +25,7 @@ export const TASK_SYMBOLS = {
 	dependsOn: "⛔",
 	id: "🆔",
 	assignee: "👤",
+	location: "📍",
 	remind: "⏰",
 };
 
@@ -48,6 +49,7 @@ export interface TaskData {
 	dependsOn: string | null;
 	id: string | null;
 	assignee: string[];
+	location?: string | null;
 	blockLink: string | null;
 	tags: string[];
 	/** Raw remaining text not matched by any extractor. */
@@ -63,8 +65,30 @@ export interface TaskLine {
 export const taskLineRegex = /^([\s\t>]*)([-*+]|[0-9]+[.)]) +\[(.)\] *(.*)$/u;
 export const listItemRegex =
 	/^([\s\t>]*)([-*+]|[0-9]+[.)]) *(?:\[(.)\] *)?(.*)$/u;
-const dateRegex =
+export const dateRegex =
 	"\\d{4}-\\d{2}-\\d{2}(?: \\d{1,2}:\\d{2}(?:\\s?[AaPp][Mm])?)?";
+export const timeOnlyPattern = "\\d{1,2}:\\d{2}(?:\\s?[AaPp][Mm])?";
+export const timeOnlyRegex = /^\d{1,2}:\d{2}(?:\s?[AaPp][Mm])?$/u;
+
+/**
+ * If `due` specifies only a time (e.g. "17:30") and `start` contains a date (e.g. "2026-09-07" or "2026-09-07 15:30"),
+ * automatically infer due's date as start's date (e.g. "2026-09-07 17:30").
+ */
+export function resolveDueDateFromStart(
+	due?: string | null,
+	start?: string | null,
+): string | null | undefined {
+	if (!due) return due;
+	const trimmedDue = due.trim();
+	if (timeOnlyRegex.test(trimmedDue) && start) {
+		const startMatch = start.match(/^(\d{4}-\d{2}-\d{2})/u);
+		if (startMatch?.[1]) {
+			return `${startMatch[1]} ${trimmedDue}`;
+		}
+	}
+	return due;
+}
+
 const blockLinkRegex = / \^[a-zA-Z0-9-]+$/u;
 const tagRegex = /(^|\s)#[^ !@#$%^&*(),.?":{}|<>]+/g;
 
@@ -94,12 +118,13 @@ export interface FieldExtractor {
 export function createDateExtractor(
 	key: keyof TaskDates,
 	symbol: string,
+	valuePattern: string = dateRegex,
 ): FieldExtractor {
 	return {
 		label: symbol,
 		extract(description, data) {
 			const regex = new RegExp(
-				`${escapeRegExp(symbol)}\\ufe0f? *(${dateRegex})`,
+				`${escapeRegExp(symbol)}\\ufe0f? *(${valuePattern})`,
 				"u",
 			);
 			const match = description.match(regex);
@@ -162,7 +187,7 @@ const assigneeExtractor: FieldExtractor = {
 	label: TASK_SYMBOLS.assignee,
 	extract(description, data) {
 		const symbol = TASK_SYMBOLS.assignee;
-		const regex = new RegExp(`${escapeRegExp(symbol)}\\ufe0f? *(.+)`, "u");
+		const regex = new RegExp(`${escapeRegExp(symbol)}\\ufe0f?\\s*([^📍👤📅⏳🛫➕✅❌⏰🔁🏁⛔🆔🔺⏫🔼🔽⏬^#]+)`, "u");
 		const match = description.match(regex);
 		if (!match) return [description, false];
 		const raw = (match[1] ?? "").trim();
@@ -172,6 +197,23 @@ const assigneeExtractor: FieldExtractor = {
 					.map((p) => p.trim())
 					.filter(Boolean)
 			: [];
+		return [
+			description.replace(regex, "").replace(/ {2,}/gu, " ").trim(),
+			true,
+		];
+	},
+};
+
+/** Extractor for location field (📍). */
+const locationExtractor: FieldExtractor = {
+	label: TASK_SYMBOLS.location,
+	extract(description, data) {
+		const symbol = TASK_SYMBOLS.location;
+		const regex = new RegExp(`${escapeRegExp(symbol)}\\ufe0f?\\s*([^📍👤📅⏳🛫➕✅❌⏰🔁🏁⛔🆔🔺⏫🔼🔽⏬^#]+)`, "u");
+		const match = description.match(regex);
+		if (!match) return [description, false];
+		const raw = (match[1] ?? "").trim();
+		data.location = raw || null;
 		return [
 			description.replace(regex, "").replace(/ {2,}/gu, " ").trim(),
 			true,
@@ -199,7 +241,11 @@ export const DEFAULT_EXTRACTORS: FieldExtractor[] = [
 	priorityExtractor,
 	createDateExtractor("done", TASK_SYMBOLS.done),
 	createDateExtractor("cancelled", TASK_SYMBOLS.cancelled),
-	createDateExtractor("due", TASK_SYMBOLS.due),
+	createDateExtractor(
+		"due",
+		TASK_SYMBOLS.due,
+		`(?:${dateRegex}|${timeOnlyPattern})`,
+	),
 	createDateExtractor("scheduled", TASK_SYMBOLS.scheduled),
 	createDateExtractor("start", TASK_SYMBOLS.start),
 	createDateExtractor("created", TASK_SYMBOLS.created),
@@ -221,6 +267,7 @@ export const DEFAULT_EXTRACTORS: FieldExtractor[] = [
 	),
 	createStringExtractor("id", TASK_SYMBOLS.id, "[a-zA-Z0-9-_]+"),
 	assigneeExtractor,
+	locationExtractor,
 ];
 
 // ---------------------------------------------------------------------------
@@ -286,6 +333,7 @@ export function parseTaskBody(
 		dependsOn: null,
 		id: null,
 		assignee: [],
+		location: null,
 		blockLink,
 		tags: [],
 		unmatched: null,
@@ -309,6 +357,14 @@ export function parseTaskBody(
 	data.description = remaining.replace(/ {2,}/gu, " ").trim();
 	data.unmatched = remaining.trim() || null;
 	data.tags = extractTags(data.description);
+
+	if (data.dates.due) {
+		const resolved = resolveDueDateFromStart(data.dates.due, data.dates.start);
+		if (resolved) {
+			data.dates.due = resolved;
+		}
+	}
+
 	return data;
 }
 
@@ -353,6 +409,8 @@ export function serializeTaskBody(data: TaskData): string {
 	if (data.id) parts.push(`${TASK_SYMBOLS.id} ${data.id}`);
 	if (data.assignee && data.assignee.length > 0)
 		parts.push(`${TASK_SYMBOLS.assignee} ${data.assignee.join(" & ")}`);
+	if (data.location)
+		parts.push(`${TASK_SYMBOLS.location} ${data.location}`);
 	if (data.blockLink) parts.push(data.blockLink);
 	return parts.filter(Boolean).join(" ");
 }
@@ -378,6 +436,7 @@ export function copyTaskData(data: TaskData): TaskData {
 		dependsOn: data.dependsOn ?? null,
 		id: data.id ?? null,
 		assignee: data.assignee ? [...data.assignee] : [],
+		location: data.location ?? null,
 		blockLink: data.blockLink ?? null,
 		tags: data.tags ? [...data.tags] : [],
 		unmatched: data.unmatched ?? null,
@@ -409,6 +468,116 @@ export function parseLineWithStatus(
 	return parseTaskLine(line, registry.get(statusSymbol).type);
 }
 
+export function splitQuoteAndIndent(rawIndent: string): {
+	quotePart: string;
+	indentPart: string;
+} {
+	const lastQuoteIdx = rawIndent.lastIndexOf(">");
+	if (lastQuoteIdx >= 0) {
+		if (
+			rawIndent[lastQuoteIdx + 1] === " " ||
+			rawIndent[lastQuoteIdx + 1] === "\t"
+		) {
+			return {
+				quotePart: rawIndent.slice(0, lastQuoteIdx + 2),
+				indentPart: rawIndent.slice(lastQuoteIdx + 2),
+			};
+		}
+		return {
+			quotePart: rawIndent.slice(0, lastQuoteIdx + 1),
+			indentPart: rawIndent.slice(lastQuoteIdx + 1),
+		};
+	}
+	return { quotePart: "", indentPart: rawIndent };
+}
+
+/**
+ * Normalize the indentation of a full document's lines using a stack-based
+ * tree parser to reliably infer nesting levels, ensuring reversibility
+ * when switching between different tabSize or tab/space configurations.
+ */
+export function normalizeDocumentLines(
+	lines: string[],
+	useTab: boolean,
+	tabSize: number,
+): string[] {
+	let currentQuotePart = "";
+	let stack: Array<{ visualWidth: number; level: number }> = [
+		{ visualWidth: 0, level: 0 },
+	];
+	let inCodeBlock = false;
+
+	return lines.map((line) => {
+		const trimmed = line.trim();
+		if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+			inCodeBlock = !inCodeBlock;
+			stack = [{ visualWidth: 0, level: 0 }];
+			return line;
+		}
+		if (inCodeBlock) {
+			return line;
+		}
+
+		const match = line.match(listItemRegex);
+		const rawPrefix = line.match(/^([\s\t>]*)/u)?.[0] ?? "";
+		const { quotePart, indentPart } = splitQuoteAndIndent(rawPrefix);
+
+		if (quotePart !== currentQuotePart) {
+			currentQuotePart = quotePart;
+			stack = [{ visualWidth: 0, level: 0 }];
+		}
+
+		if (!match) {
+			const isBlank = trimmed.length === 0;
+			const isIndented = indentPart.length > 0;
+			if (!isBlank && !isIndented) {
+				stack = [{ visualWidth: 0, level: 0 }];
+			}
+			return line;
+		}
+
+		const itemRawIndent = match[1] ?? "";
+		const itemParts = splitQuoteAndIndent(itemRawIndent);
+		const itemIndentPart = itemParts.indentPart;
+
+		// Calculate visual indentation width. Using 4 spaces for a tab visual measurement.
+		const visualWidth = itemIndentPart.replace(/\t/gu, "    ").length;
+
+		let level = 0;
+		const top = stack[stack.length - 1]!;
+		if (visualWidth > top.visualWidth) {
+			level = top.level + 1;
+			stack.push({ visualWidth, level });
+		} else if (visualWidth === top.visualWidth) {
+			level = top.level;
+		} else {
+			while (
+				stack.length > 1 &&
+				stack[stack.length - 1]!.visualWidth > visualWidth
+			) {
+				stack.pop();
+			}
+			const matchedItem = stack[stack.length - 1]!;
+			if (matchedItem.visualWidth === visualWidth) {
+				level = matchedItem.level;
+			} else {
+				level = matchedItem.level + 1;
+				stack.push({ visualWidth, level });
+			}
+		}
+
+		const targetIndentPart = useTab
+			? "\t".repeat(level)
+			: " ".repeat(level * tabSize);
+
+		const newIndent = itemParts.quotePart + targetIndentPart;
+		if (itemRawIndent !== newIndent) {
+			return newIndent + line.slice(itemRawIndent.length);
+		}
+		return line;
+	});
+}
+
 /**
  * Normalize the indentation of a single line of text according to the vault's tab settings.
  */
@@ -421,21 +590,7 @@ export function normalizeLineIndentation(
 	if (!match) return line;
 
 	const rawIndent = match[1] ?? "";
-	const lastQuoteIdx = rawIndent.lastIndexOf(">");
-	let quotePart = "";
-	let indentPart = rawIndent;
-	if (lastQuoteIdx >= 0) {
-		if (
-			rawIndent[lastQuoteIdx + 1] === " " ||
-			rawIndent[lastQuoteIdx + 1] === "\t"
-		) {
-			quotePart = rawIndent.slice(0, lastQuoteIdx + 2);
-			indentPart = rawIndent.slice(lastQuoteIdx + 2);
-		} else {
-			quotePart = rawIndent.slice(0, lastQuoteIdx + 1);
-			indentPart = rawIndent.slice(lastQuoteIdx + 1);
-		}
-	}
+	const { quotePart, indentPart } = splitQuoteAndIndent(rawIndent);
 
 	const spacesCount = indentPart.replace(/\t/gu, " ".repeat(tabSize)).length;
 

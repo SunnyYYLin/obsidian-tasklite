@@ -11,6 +11,7 @@ import { findOpenMarkdownEditor, getVaultIndentConfig } from "../editor/editorUt
 import {
 	copyTaskData,
 	parseLineWithStatus,
+	resolveDueDateFromStart,
 	serializeTaskLine,
 	type TaskLine,
 	type TaskPriority,
@@ -98,6 +99,7 @@ export interface CreateTaskInput {
 	id?: string | null;
 	dependsOn?: string | null;
 	assignee?: string[];
+	location?: string | null;
 	/** Vault-relative path of the file to append the task to. Defaults to `"Tasks/New_Tasks.md"`. */
 	path?: string;
 	/** Line number of an existing task to nest this task under as a child. */
@@ -122,6 +124,7 @@ export type EditTaskPatch = {
 	id?: string | null;
 	dependsOn?: string | null;
 	assignee?: string[];
+	location?: string | null;
 };
 
 export interface TaskLiteCoreApi {
@@ -203,6 +206,14 @@ export interface TaskLiteCoreApi {
 	 */
 	listAssignees(): Promise<string[]>;
 	/**
+	 * Return the configured default assignee identity.
+	 */
+	getDefaultAssignee(): string;
+	/**
+	 * Set the configured default assignee identity.
+	 */
+	setDefaultAssignee(assignee: string): Promise<void>;
+	/**
 	 * Return all registered status definitions.
 	 */
 	listStatuses(): StatusConfiguration[];
@@ -236,6 +247,8 @@ interface TaskLiteCoreApiOptions {
 	registry: StatusRegistry;
 	getSettings: () => TaskLiteSettings;
 	documentStore?: TaskDocumentStore;
+	getDefaultAssignee?: () => string;
+	setDefaultAssignee?: (assignee: string) => Promise<void>;
 }
 
 export function createTaskLiteCoreApi({
@@ -243,6 +256,8 @@ export function createTaskLiteCoreApi({
 	registry,
 	getSettings,
 	documentStore,
+	getDefaultAssignee,
+	setDefaultAssignee,
 }: TaskLiteCoreApiOptions): TaskLiteCoreApi {
 	return {
 		listTasks: (options) =>
@@ -379,6 +394,7 @@ export function createTaskLiteCoreApi({
 				registry,
 				settings: getSettings(),
 				documentStore,
+				defaultAssignee: getDefaultAssignee ? getDefaultAssignee() : getSettings().defaultAssignee,
 			});
 		},
 		deleteTask: (path, lineNumber) => {
@@ -434,6 +450,17 @@ export function createTaskLiteCoreApi({
 		},
 		listAssignees: async () => {
 			return getSettings().assignees || [];
+		},
+		getDefaultAssignee: () => {
+			if (getDefaultAssignee) return getDefaultAssignee();
+			return getSettings().defaultAssignee || "";
+		},
+		setDefaultAssignee: async (assignee: string) => {
+			if (setDefaultAssignee) {
+				await setDefaultAssignee(assignee);
+			} else {
+				getSettings().defaultAssignee = assignee;
+			}
 		},
 		listStatuses: () => registry.getAll(),
 		getStatusCycle: () => [...(getSettings().statusCycle || [])],
@@ -552,15 +579,29 @@ async function createTask({
 	registry,
 	settings,
 	documentStore,
+	defaultAssignee,
 }: {
 	app: App;
 	input: CreateTaskInput;
 	registry: StatusRegistry;
 	settings: TaskLiteSettings;
 	documentStore?: TaskDocumentStore;
+	defaultAssignee?: string;
 }): Promise<void> {
 	const statusSymbol = input.status ?? " ";
 	const statusConfig = registry.get(statusSymbol);
+	let assignee = input.assignee ?? [];
+	if (
+		assignee.length === 0 &&
+		settings.autoAssignDefault &&
+		defaultAssignee
+	) {
+		assignee = [defaultAssignee];
+	}
+	const startDate = input.dates?.start ?? null;
+	const rawDue = input.dates?.due ?? null;
+	const resolvedDue = resolveDueDateFromStart(rawDue, startDate) ?? rawDue;
+
 	const taskLine: TaskLine = {
 		listMarker: "-",
 		data: {
@@ -568,10 +609,10 @@ async function createTask({
 			description: input.description,
 			priority: normalizePriority(input.priority),
 			dates: {
-				start: input.dates?.start ?? null,
+				start: startDate,
 				created: input.dates?.created ?? null,
 				scheduled: input.dates?.scheduled ?? null,
-				due: input.dates?.due ?? null,
+				due: resolvedDue,
 				done: input.dates?.done ?? null,
 				cancelled: input.dates?.cancelled ?? null,
 				remind: input.dates?.remind ?? null,
@@ -580,7 +621,8 @@ async function createTask({
 			onCompletion: input.onCompletion ?? null,
 			dependsOn: input.dependsOn ?? null,
 			id: input.id ?? null,
-			assignee: input.assignee ?? [],
+			assignee,
+			location: input.location ?? null,
 			blockLink: null,
 			tags: [],
 			unmatched: null,
@@ -620,15 +662,18 @@ async function createTask({
 		if (input.dependsOn !== undefined && input.dependsOn !== null) {
 			fmPatch["dependsOn"] = input.dependsOn;
 		}
-		if (input.assignee !== undefined && input.assignee.length > 0) {
-			fmPatch["assignee"] = input.assignee;
+		if (assignee.length > 0) {
+			fmPatch["assignee"] = assignee;
+		}
+		if (input.location !== undefined && input.location !== null) {
+			fmPatch["location"] = input.location;
 		}
 		if (input.dates) {
 			const d = input.dates;
 			if (d.start !== undefined && d.start !== null) fmPatch["start"] = d.start;
 			if (d.created !== undefined && d.created !== null) fmPatch["created"] = d.created;
 			if (d.scheduled !== undefined && d.scheduled !== null) fmPatch["scheduled"] = d.scheduled;
-			if (d.due !== undefined && d.due !== null) fmPatch["due"] = d.due;
+			if (d.due !== undefined && d.due !== null) fmPatch["due"] = resolvedDue;
 			if (d.done !== undefined && d.done !== null) fmPatch["done"] = d.done;
 			if (d.cancelled !== undefined && d.cancelled !== null) fmPatch["cancelled"] = d.cancelled;
 			if (d.remind !== undefined && d.remind !== null) fmPatch["remind"] = d.remind;
@@ -783,11 +828,15 @@ async function editFileTask({
 		if (patch.id !== undefined) data.id = patch.id;
 		if (patch.dependsOn !== undefined) data.dependsOn = patch.dependsOn;
 		if (patch.assignee !== undefined) data.assignee = patch.assignee;
+		if (patch.location !== undefined) data.location = patch.location;
 		if (patch.dates) {
 			const d = patch.dates;
+			const startDate = d.start !== undefined ? d.start : data.dates.start;
 			if (d.start !== undefined) data.dates.start = d.start;
 			if (d.scheduled !== undefined) data.dates.scheduled = d.scheduled;
-			if (d.due !== undefined) data.dates.due = d.due;
+			if (d.due !== undefined) {
+				data.dates.due = resolveDueDateFromStart(d.due, startDate) ?? d.due;
+			}
 			if (d.remind !== undefined) data.dates.remind = d.remind;
 			if (d.done !== undefined) data.dates.done = d.done;
 			if (d.cancelled !== undefined) data.dates.cancelled = d.cancelled;
@@ -819,11 +868,15 @@ async function editFileTask({
 	if (patch.id !== undefined) data.id = patch.id;
 	if (patch.dependsOn !== undefined) data.dependsOn = patch.dependsOn;
 	if (patch.assignee !== undefined) data.assignee = patch.assignee;
+	if (patch.location !== undefined) data.location = patch.location;
 	if (patch.dates) {
 		const d = patch.dates;
+		const startDate = d.start !== undefined ? d.start : data.dates.start;
 		if (d.start !== undefined) data.dates.start = d.start;
 		if (d.scheduled !== undefined) data.dates.scheduled = d.scheduled;
-		if (d.due !== undefined) data.dates.due = d.due;
+		if (d.due !== undefined) {
+			data.dates.due = resolveDueDateFromStart(d.due, startDate) ?? d.due;
+		}
 		if (d.remind !== undefined) data.dates.remind = d.remind;
 		if (d.done !== undefined) data.dates.done = d.done;
 		if (d.cancelled !== undefined) data.dates.cancelled = d.cancelled;

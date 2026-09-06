@@ -1,7 +1,7 @@
 import { Notice, PluginSettingTab, Setting, type App } from "obsidian";
 import type TaskLitePlugin from "./main";
 import { t, type I18nKey } from "./i18n";
-import { normalizeLineIndentation } from "./model/format";
+import { normalizeDocumentLines } from "./model/format";
 import { getVaultIndentConfig } from "./editor/editorUtils";
 import { normalizeAssignees } from "./model/assignee";
 
@@ -25,6 +25,9 @@ export interface TaskLiteSettings {
 	toggleBehavior: ToggleBehaviorSettings;
 	statusCycle: string[];
 	assignees: string[];
+	defaultAssignee: string;
+	autoAssignDefault: boolean;
+	storeDefaultAssigneeLocally: boolean;
 }
 
 export const DEFAULT_TOGGLE_BEHAVIOR: ToggleBehaviorSettings = {
@@ -47,6 +50,9 @@ export const DEFAULT_SETTINGS: TaskLiteSettings = {
 	toggleBehavior: DEFAULT_TOGGLE_BEHAVIOR,
 	statusCycle: [" ", "x", "/", "-"],
 	assignees: [],
+	defaultAssignee: "",
+	autoAssignDefault: true,
+	storeDefaultAssigneeLocally: true,
 };
 
 export class TaskLiteSettingTab extends PluginSettingTab {
@@ -78,6 +84,39 @@ export class TaskLiteSettingTab extends PluginSettingTab {
 				}),
 			);
 
+		this.addHeading(containerEl, "settings.heading.assignee");
+		new Setting(containerEl)
+			.setName(t("settings.defaultAssignee.name"))
+			.setDesc(t("settings.defaultAssignee.desc"))
+			.addText((text) =>
+				text
+					.setPlaceholder("Sunny")
+					.setValue(this.plugin.getDefaultAssignee())
+					.onChange(async (value) => {
+						await this.plugin.setDefaultAssignee(value);
+					}),
+			);
+		this.addToggleSetting(
+			containerEl,
+			"settings.autoAssignDefault.name",
+			"settings.autoAssignDefault.desc",
+			this.plugin.settings.autoAssignDefault,
+			async (v) => {
+				this.plugin.settings.autoAssignDefault = v;
+				await this.plugin.saveSettings();
+			},
+		);
+		this.addToggleSetting(
+			containerEl,
+			"settings.storeDefaultAssigneeLocally.name",
+			"settings.storeDefaultAssigneeLocally.desc",
+			this.plugin.settings.storeDefaultAssigneeLocally,
+			async (v) => {
+				this.plugin.settings.storeDefaultAssigneeLocally = v;
+				await this.plugin.saveSettings();
+			},
+		);
+
 		new Setting(containerEl)
 			.setName(t("settings.normalizeIndentsAll.name"))
 			.setDesc(t("settings.normalizeIndentsAll.desc"))
@@ -101,16 +140,15 @@ export class TaskLiteSettingTab extends PluginSettingTab {
 							const content = await this.app.vault.read(file);
 							const lines = content.length > 0 ? content.split("\n") : [];
 
+							const newLines = normalizeDocumentLines(lines, useTab, tabSize);
 							let fileChanged = false;
 							let fileUpdatedLines = 0;
-							const newLines = lines.map((line) => {
-								const newLine = normalizeLineIndentation(line, useTab, tabSize);
-								if (newLine !== line) {
+							for (let i = 0; i < lines.length; i++) {
+								if (lines[i] !== newLines[i]) {
 									fileChanged = true;
 									fileUpdatedLines++;
 								}
-								return newLine;
-							});
+							}
 
 							if (fileChanged) {
 								const newContent = newLines.join("\n");
@@ -200,6 +238,9 @@ function pickKnownKeys(obj: Partial<TaskLiteSettings>): Partial<TaskLiteSettings
 		toggleBehavior,
 		statusCycle,
 		assignees,
+		defaultAssignee,
+		autoAssignDefault,
+		storeDefaultAssigneeLocally,
 	} = obj;
 	return {
 		setCreatedDate,
@@ -210,6 +251,9 @@ function pickKnownKeys(obj: Partial<TaskLiteSettings>): Partial<TaskLiteSettings
 		toggleBehavior,
 		statusCycle,
 		assignees,
+		defaultAssignee,
+		autoAssignDefault,
+		storeDefaultAssigneeLocally,
 	};
 }
 

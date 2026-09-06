@@ -1,6 +1,7 @@
 import type { CachedMetadata, FileManager, TFile } from "obsidian";
 import type { StatusRegistry } from "./status";
 import type { TaskPriority, OnCompletionAction, TaskData } from "./format";
+import { resolveDueDateFromStart } from "./format";
 import { normalizeAssignees } from "./assignee";
 
 /**
@@ -171,7 +172,11 @@ export function parseFrontmatterTask(
 			start: dateField(fm["start"]),
 			created: dateField(fm["created"]),
 			scheduled: dateField(fm["scheduled"]),
-			due: dateField(fm["due"]),
+			due:
+				resolveDueDateFromStart(
+					dateField(fm["due"]),
+					dateField(fm["start"]),
+				) ?? dateField(fm["due"]),
 			done: dateField(fm["done"]),
 			cancelled: dateField(fm["cancelled"]),
 			remind: dateField(fm["remind"]),
@@ -182,6 +187,10 @@ export function parseFrontmatterTask(
 		id: typeof fm["id"] === "string" ? fm["id"] : null,
 		dependsOn: typeof fm["dependsOn"] === "string" ? fm["dependsOn"] : null,
 		assignee,
+		location:
+			typeof fm["location"] === "string" && fm["location"].trim()
+				? fm["location"].trim()
+				: null,
 		blockLink: null,
 		tags: Array.isArray(fm["tags"]) ? fm["tags"].map(String) : [],
 		unmatched: null,
@@ -261,13 +270,20 @@ export function buildFrontmatterPatch(
 	if (updates.id !== undefined) patch["id"] = updates.id;
 	if (updates.dependsOn !== undefined) patch["dependsOn"] = updates.dependsOn;
 	if (updates.assignee !== undefined) patch["assignee"] = updates.assignee;
+	if (updates.location !== undefined) patch["location"] = updates.location;
 
 	if (updates.dates) {
 		const d = updates.dates;
+		const startDate = d.start !== undefined ? d.start : current.dates.start;
+		const resolvedDue =
+			d.due !== undefined
+				? (resolveDueDateFromStart(d.due, startDate) ?? d.due)
+				: undefined;
+
 		if (d.start !== undefined) patch["start"] = d.start ?? null;
 		if (d.created !== undefined) patch["created"] = d.created ?? null;
 		if (d.scheduled !== undefined) patch["scheduled"] = d.scheduled ?? null;
-		if (d.due !== undefined) patch["due"] = d.due ?? null;
+		if (d.due !== undefined) patch["due"] = resolvedDue ?? null;
 		if (d.done !== undefined) patch["done"] = d.done ?? null;
 		if (d.cancelled !== undefined) patch["cancelled"] = d.cancelled ?? null;
 		if (d.remind !== undefined) patch["remind"] = d.remind ?? null;
@@ -377,7 +393,7 @@ function dateField(value: unknown): string | null {
 	if (typeof value !== "string") return null;
 	return /^\d{4}-\d{2}-\d{2}(?: \d{1,2}:\d{2}(?:\s?[AaPp][Mm])?)?$/u.test(
 		value,
-	)
+	) || /^\d{1,2}:\d{2}(?:\s?[AaPp][Mm])?$/u.test(value)
 		? value
 		: null;
 }

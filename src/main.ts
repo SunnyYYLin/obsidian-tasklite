@@ -24,16 +24,18 @@ export default class TaskLitePlugin extends Plugin {
 			registry: this.statusRegistry,
 			getSettings: () => this.settings,
 			documentStore: this.documentStore,
+			getDefaultAssignee: () => this.getDefaultAssignee(),
+			setDefaultAssignee: (a) => this.setDefaultAssignee(a),
 		});
-		await this.updateAssigneesFromVault();
+		await this.updateMetadataFromVault();
 		this.documentStore.onRecordUpdated = () => {
-			this.queueAssigneeRefresh();
+			this.queueMetadataRefresh();
 		};
 		this.documentStore.register(this);
 		registerTaskLiteCore(this);
 
 		this.app.workspace.onLayoutReady(async () => {
-			await this.updateAssigneesFromVault();
+			await this.updateMetadataFromVault();
 		});
 	}
 
@@ -59,22 +61,68 @@ export default class TaskLitePlugin extends Plugin {
 		await this.saveData(this.settings);
 	}
 
-	async updateAssigneesFromVault(): Promise<void> {
-		const records = await this.documentStore.listRecords();
-		await this.updateAssigneesFromRecords(records);
+	getDefaultAssignee(): string {
+		if (this.settings.storeDefaultAssigneeLocally) {
+			try {
+				const storageKey = this.getDefaultAssigneeStorageKey();
+				const localVal = window.localStorage?.getItem(storageKey);
+				if (localVal !== null && localVal !== undefined) {
+					return localVal;
+				}
+			} catch {
+				// Local storage unavailable
+			}
+		}
+		return this.settings.defaultAssignee || "";
 	}
 
-	private queueAssigneeRefresh(): void {
+	async setDefaultAssignee(assignee: string): Promise<void> {
+		const trimmed = assignee.trim();
+		if (this.settings.storeDefaultAssigneeLocally) {
+			try {
+				const storageKey = this.getDefaultAssigneeStorageKey();
+				if (trimmed) {
+					window.localStorage?.setItem(storageKey, trimmed);
+				} else {
+					window.localStorage?.removeItem(storageKey);
+				}
+			} catch {
+				// Local storage unavailable
+			}
+		}
+		this.settings.defaultAssignee = trimmed;
+		await this.saveSettings();
+	}
+
+	private getDefaultAssigneeStorageKey(): string {
+		const vaultId = (this.app as unknown as { appId?: string }).appId || this.app.vault?.getName() || "default";
+		return `tasklite:defaultAssignee:${vaultId}`;
+	}
+
+	async updateMetadataFromVault(): Promise<void> {
+		const records = await this.documentStore.listRecords();
+		await this.updateMetadataFromRecords(records);
+	}
+
+	async updateAssigneesFromVault(): Promise<void> {
+		await this.updateMetadataFromVault();
+	}
+
+	private queueMetadataRefresh(): void {
 		if (this.assigneeRefreshTimer !== null) {
 			window.clearTimeout(this.assigneeRefreshTimer);
 		}
 		this.assigneeRefreshTimer = window.setTimeout(() => {
 			this.assigneeRefreshTimer = null;
-			void this.updateAssigneesFromVault();
+			void this.updateMetadataFromVault();
 		}, 200);
 	}
 
-	private async updateAssigneesFromRecords(records: TaskDocumentRecord[]): Promise<void> {
+	private queueAssigneeRefresh(): void {
+		this.queueMetadataRefresh();
+	}
+
+	private async updateMetadataFromRecords(records: TaskDocumentRecord[]): Promise<void> {
 		const assignees = new Set<string>();
 		for (const r of records) {
 			if (r.task.assignee) {

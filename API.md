@@ -1,6 +1,6 @@
 # TaskLite Plugin API
 
-> **Version**: 0.4.7
+> **Version**: 0.4.11
 > **Plugin ID**: `taskslite`
 
 本文档面向希望基于 TaskLite 插件开发新插件的开发者。
@@ -20,7 +20,8 @@
    - [updateTaskStatus](#26-updatetaskstatus)
    - [executeTasksToggleCommand](#27-executetaskstogglecommand)
    - [listAssignees](#28-listassignees)
-   - [generateTaskId](#29-generatetaskid)
+   - [getDefaultAssignee / setDefaultAssignee](#29-getdefaultassignee--setdefaultassignee)
+   - [generateTaskId](#210-generatetaskid)
 3. [数据结构参考](#3-数据结构参考)
    - [TaskLiteTaskRecord](#tasklitetaskrecord)
    - [TaskData](#taskdata)
@@ -105,6 +106,8 @@ interface TaskLiteCoreApi {
   cycleTaskStatus(path: string, lineNumber: number, direction?: "next" | "previous"): Promise<boolean>;
   executeTasksToggleCommand(line: string, path: string): string;
   listAssignees(): Promise<string[]>;
+  getDefaultAssignee(): string;
+  setDefaultAssignee(assignee: string): Promise<void>;
   listStatuses(): StatusConfiguration[];
   getStatusCycle(): string[];
   generateTaskId(description: string, options?: { isRecurring?: boolean; dueDate?: string | null }): string;
@@ -201,13 +204,14 @@ interface CreateTaskInput {
   dates?: {
     start?: string | null;     // 开始日期 "YYYY-MM-DD"
     scheduled?: string | null; // 计划日期
-    due?: string | null;       // 截止日期
+    due?: string | null;       // 截止日期，如 "2026-04-01" 或 "17:30"（若仅传时间且 start 提供日期，自动补齐为 start 当日）
   };
   recurrence?: string | null;    // 重复规则，如 "every week"
   onCompletion?: string | null;  // 完成行为
   id?: string | null;            // 任务 ID
   dependsOn?: string | null;     // 依赖的任务 ID
   assignee?: string[];           // 负责人数组，如 ["Alice", "Bob"]
+  location?: string | null;      // 📍 地点，如 "会议室 A"
   path?: string;                 // 目标文件路径，默认 "Tasks/New_Tasks.md"
   parentLineNumber?: number;     // 父任务行号（0-indexed），新任务插入到该行正下方并自动缩进
   isFileTask?: boolean;          // 是否创建为文件级任务（编码在 YAML frontmatter 中）
@@ -218,6 +222,7 @@ interface CreateTaskInput {
 - 若目标文件不存在，自动创建。
 - 若提供了 `parentLineNumber`，新任务将插入父任务的正下方，并自动继承父任务的缩进加一个 Tab。
 - 若未提供 `parentLineNumber`，任务追加到文件末尾。
+- 若未传 `assignee` 且在设置中启用了自动分配默认身份（`autoAssignDefault`），会自动赋予当前设备的 `defaultAssignee`。
 - 未传的可选字段使用默认值（`null` 或空），不会从文件中推断。
 - **文件级任务**（`isFileTask: true`）：`description` 会成为文件的标题（frontmatter 中的 description 字段）。
 
@@ -454,7 +459,25 @@ console.log("库中所有负责人：", assignees); // ['Alice', 'Bob', 'Sunny']
 
 ---
 
-### 2.9 `generateTaskId`
+### 2.9 `getDefaultAssignee` / `setDefaultAssignee`
+
+获取或设置当前设备上的默认负责人身份。为适配多用户多端同步仓库（如 Git、Obsidian Sync），默认身份默认保存在各设备的 `localStorage` 中，避免覆盖同仓库其他协作者的设置。
+
+```typescript
+getDefaultAssignee(): string
+setDefaultAssignee(assignee: string): Promise<void>
+```
+
+**示例：**
+
+```typescript
+const current = api.getDefaultAssignee();
+await api.setDefaultAssignee("Sunny");
+```
+
+---
+
+### 2.10 `generateTaskId`
 
 根据任务描述生成语义化 ID。英文单词取首字母转小写并用连字符连接，中文字符转拼音首字母并用连字符连接，基础 ID 长度限制为 8 字符。循环任务会添加日期后缀，Vault 中已存在的重复 ID 会添加随机 4 字符后缀。
 
@@ -549,7 +572,7 @@ interface TaskData {
     start: string | null;        // 🛫 开始日期
     created: string | null;      // ➕ 创建日期
     scheduled: string | null;    // ⏳ 计划日期
-    due: string | null;          // 📅 截止日期
+    due: string | null;          // 📅 截止日期（若格式为仅时间如 "17:30" 且存在 🛫 start 日期，解析时将自动继承 start 当天日期）
     done: string | null;         // ✅ 完成日期
     cancelled: string | null;    // ❌ 取消日期
   };
@@ -558,6 +581,7 @@ interface TaskData {
   id: string | null;             // 🆔 任务 ID
   dependsOn: string | null;      // ⛔ 依赖 ID
   assignee: string[];            // 👤 负责人
+  location: string | null;       // 📍 地点
   blockLink: string | null;      // Obsidian 块引用，如 "^abc123"（仅行任务，文件任务为 null）
   tags: string[];                // 提取的标签列表，如 ["#work", "#urgent"]
 }
@@ -591,6 +615,7 @@ type EditTaskPatch = {
   id?: string | null;
   dependsOn?: string | null;
   assignee?: string[];
+  location?: string | null;
 }
 ```
 
@@ -850,6 +875,7 @@ async function archiveCompletedTasks(app: App, api: TaskLiteCoreApi) {
 
 | 版本 | 新增 API |
 |------|---------|
+| 0.4.11 | 规范化缩进基于栈解析保证 m 与 n 间可逆转换；新增地点字段 `📍`（支持任务元数据解析与序列化、DQL 查询过滤）；新增默认身份（`getDefaultAssignee` / `setDefaultAssignee`，支持独立设备本地存储防同步覆盖，新建任务自动分配）；支持 due 仅指定时间时自动识别为 start 当日日期（如 `🛫 2026-09-07 15:30 📅 17:30` => `2026-09-07 17:30`） |
 | 0.4.7 | 新增任务定位与状态循环 API，并修复 file task frontmatter assignee 历史坏结构导致的负责人缓存污染 |
 | 0.4.7-beta.6 | 继续清理旧 assignee 缓存中的 `Name-Name` 重复派生值，同时保留 `Sunny-Mary` 这类非重复 hyphen 名字 |
 | 0.4.7-beta.5 | 清理旧 assignee 缓存中的 `Name - Name` 派生值，避免 stale settings 再次进入负责人提示 |

@@ -380,6 +380,8 @@ function getFieldValue(
 		case "assignee":
 		case "person":
 			return record.task.assignee;
+		case "location":
+			return record.task.location ?? "";
 		case "hasChildren":
 			return record.hasChildren;
 		case "parentLine":

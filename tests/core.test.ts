@@ -21,12 +21,12 @@ mock.module("obsidian", () => {
 	};
 });
 
-import { parseTaskLine, TASK_SYMBOLS, normalizeLineIndentation, type TaskPriority } from "../src/model/format";
+import { parseTaskLine, serializeTaskLine, TASK_SYMBOLS, normalizeLineIndentation, normalizeDocumentLines, type TaskPriority } from "../src/model/format";
 import { StatusRegistry } from "../src/model/status";
 import { buildTaskTree } from "../src/model/tree";
 import { taskIdentityKey } from "../src/model/taskIdentity";
 import { TaskDocumentStore, type TaskDocumentRecord } from "../src/model/taskDocumentStore";
-import { applyFrontmatterPatchToContent, parseFrontmatterTask } from "../src/model/frontmatterTask";
+import { applyFrontmatterPatchToContent, buildFrontmatterPatch, parseFrontmatterTask } from "../src/model/frontmatterTask";
 import { filterTaskRecordsByQuery } from "../src/model/taskQuery";
 import { cancelTaskAtLine, clickTaskCheckboxAtLine, rightClickTaskCheckboxAtLine, toggleTaskAtLine, unfinishTaskAtLine } from "../src/editor/toggle";
 import { reconcileExternalTaskCompletion } from "../src/editor/externalReconcileCore";
@@ -52,7 +52,12 @@ const fakeMoment: FakeMomentFactory = (value?: string) => {
 	};
 };
 
-(globalThis as unknown as {window: {moment: FakeMomentFactory}}).window = {moment: fakeMoment};
+(globalThis as unknown as {window: any}).window = {
+	...((globalThis as any).window ?? {}),
+	moment: fakeMoment,
+	setTimeout,
+	clearTimeout,
+};
 
 const settings: TaskLiteSettings = {
 	setCreatedDate: false,
@@ -2554,5 +2559,310 @@ describe("TaskLite 0.4.5 Features", () => {
 		expect(suggestions06_01.length).toBe(1);
 		expect(suggestions06_01[0].resolved).toBe(`${currentYear}-06-01`);
 	});
-});
 
+	describe("TaskLite 0.4.11 Features", () => {
+		test("indentation normalization is fully reversible between m and n spaces", () => {
+			const original2Spaces = [
+				"# Project Alpha",
+				"- [ ] Root task 1",
+				"  - [ ] Subtask 1.1",
+				"    - [ ] Subtask 1.1.1",
+				"  - [ ] Subtask 1.2",
+				"- [ ] Root task 2",
+				"",
+				"> - [ ] Quote task",
+				">   - [ ] Nested quote subtask",
+			];
+
+			// Normalize from 2 spaces to 4 spaces
+			const normalized4Spaces = normalizeDocumentLines(original2Spaces, false, 4);
+			expect(normalized4Spaces).toEqual([
+				"# Project Alpha",
+				"- [ ] Root task 1",
+				"    - [ ] Subtask 1.1",
+				"        - [ ] Subtask 1.1.1",
+				"    - [ ] Subtask 1.2",
+				"- [ ] Root task 2",
+				"",
+				"> - [ ] Quote task",
+				">     - [ ] Nested quote subtask",
+			]);
+
+			// Normalize back from 4 spaces to 2 spaces (must match original exactly!)
+			const reversed2Spaces = normalizeDocumentLines(normalized4Spaces, false, 2);
+			expect(reversed2Spaces).toEqual(original2Spaces);
+
+			// Normalize to tab
+			const normalizedTabs = normalizeDocumentLines(normalized4Spaces, true, 4);
+			expect(normalizedTabs).toEqual([
+				"# Project Alpha",
+				"- [ ] Root task 1",
+				"\t- [ ] Subtask 1.1",
+				"\t\t- [ ] Subtask 1.1.1",
+				"\t- [ ] Subtask 1.2",
+				"- [ ] Root task 2",
+				"",
+				"> - [ ] Quote task",
+				"> \t- [ ] Nested quote subtask",
+			]);
+
+			// Revert from tab back to 2 spaces
+			const fromTabsTo2Spaces = normalizeDocumentLines(normalizedTabs, false, 2);
+			expect(fromTabsTo2Spaces).toEqual(original2Spaces);
+		});
+
+		test("parses and serializes location 📍 metadata field", () => {
+			const registry = new StatusRegistry();
+			const line = "- [ ] Team meeting 📍 Room 101 📅 2026-09-06 👤 Sunny";
+			const parsed = parseTaskLine(line, "TODO");
+			expect(parsed).not.toBeNull();
+			expect(parsed?.data.description).toBe("Team meeting");
+			expect(parsed?.data.location).toBe("Room 101");
+			expect(parsed?.data.dates.due).toBe("2026-09-06");
+			expect(parsed?.data.assignee).toEqual(["Sunny"]);
+
+			// Serialize line
+			const serialized = serializeTaskLine(parsed!, "", registry);
+			expect(serialized).toBe("- [ ] Team meeting 📅 2026-09-06 👤 Sunny 📍 Room 101");
+
+			// Reverse order in source line
+			const reverseLine = "- [ ] Team meeting 👤 Sunny 📍 Room 101";
+			const reverseParsed = parseTaskLine(reverseLine, "TODO");
+			expect(reverseParsed?.data.location).toBe("Room 101");
+			expect(reverseParsed?.data.assignee).toEqual(["Sunny"]);
+		});
+
+		test("query filter supports location field", () => {
+			const record1 = {
+				path: "work.md",
+				basename: "work",
+				lineNumber: 0,
+				parentLine: null,
+				depth: 0,
+				hasChildren: false,
+				task: {
+					status: "TODO" as const,
+					description: "Design review",
+					priority: null,
+					dates: { start: null, created: null, scheduled: null, due: null, done: null, cancelled: null, remind: null },
+					recurrence: null,
+					onCompletion: null,
+					dependsOn: null,
+					id: null,
+					assignee: ["Sunny"],
+					location: "Office Room 302",
+					blockLink: null,
+					tags: [],
+					unmatched: null,
+				},
+			};
+			const record2 = {
+				...record1,
+				lineNumber: 1,
+				task: {
+					...record1.task,
+					description: "Coffee break",
+					location: "Starbucks Cafe",
+				},
+			};
+
+			const filtered1 = filterTaskRecordsByQuery([record1, record2], 'location = "Office Room 302"');
+			expect(filtered1).toHaveLength(1);
+			expect(filtered1[0].task.description).toBe("Design review");
+
+			const filtered2 = filterTaskRecordsByQuery([record1, record2], 'location contains "Cafe"');
+			expect(filtered2).toHaveLength(1);
+			expect(filtered2[0].task.description).toBe("Coffee break");
+		});
+
+		test("frontmatter task supports location", () => {
+			const registry = new StatusRegistry();
+			const file = createTestFile("location-task.md", "location-task");
+			const fm = {
+				task: true,
+				description: "Offsite Seminar",
+				location: "Convention Center",
+			};
+			const parsed = parseFrontmatterTask(file, { frontmatter: fm } as any, registry, false);
+			expect(parsed?.task.location).toBe("Convention Center");
+
+			const patch = buildFrontmatterPatch(
+				parsed!.task,
+				{ location: "New Convention Hall" },
+				registry,
+			);
+			expect(patch["location"]).toBe("New Convention Hall");
+		});
+
+		test("createTask applies defaultAssignee when enabled and none provided", async () => {
+			const registry = new StatusRegistry();
+			const testFile = createTestFile("inbox.md", "inbox");
+			let fileContent = "";
+			const app = {
+				vault: {
+					getAbstractFileByPath: () => testFile,
+					read: () => Promise.resolve(fileContent),
+					modify: (_file: unknown, content: string) => {
+						fileContent = content;
+						return Promise.resolve();
+					},
+				},
+				metadataCache: {
+					getFileCache: () => null,
+				},
+			};
+
+			const api = createTaskLiteCoreApi({
+				app: app as any,
+				registry,
+				getSettings: () => ({
+					...settings,
+					autoAssignDefault: true,
+					defaultAssignee: "Sunny",
+				}),
+				getDefaultAssignee: () => "Sunny",
+			});
+
+			// Create task without specifying assignee
+			await api.createTask({
+				description: "Check inbox",
+				path: "inbox.md",
+			});
+
+			expect(fileContent).toContain("👤 Sunny");
+
+			// Create task with explicit assignee (should NOT be overridden by default)
+			fileContent = "";
+			await api.createTask({
+				description: "Alice task",
+				path: "inbox.md",
+				assignee: ["Alice"],
+			});
+			expect(fileContent).toContain("👤 Alice");
+			expect(fileContent).not.toContain("Sunny");
+		});
+
+		test("typing @ alone preserves standard emoji menu, while @ass directly suggests default assignee", async () => {
+			const { TaskLiteEmojiSuggest } = await import("../src/suggest/emojiSuggest");
+			const mockPlugin = {
+				settings: {
+					defaultAssignee: "Sunny",
+					assignees: ["Alice", "Bob"],
+					autoSuggestInEditor: true,
+				},
+				getDefaultAssignee: () => "Sunny",
+				app: {},
+			};
+
+			const suggest = new TaskLiteEmojiSuggest(mockPlugin as any);
+
+			// 1. Typing @ alone (q is "") does NOT jump out with Sunny at index 0
+			const emptyQuerySuggestions = suggest.getSuggestions({ query: "@:" } as any);
+			expect(emptyQuerySuggestions.length).toBeGreaterThan(0);
+			// First item should be Due date (📅), NOT Sunny
+			expect(emptyQuerySuggestions[0].kind).toBe("emoji");
+			if (emptyQuerySuggestions[0].kind === "emoji") {
+				expect(emptyQuerySuggestions[0].insert).not.toContain("Sunny");
+				expect(emptyQuerySuggestions[0].label).toContain("Due date");
+			}
+
+			// 2. Typing @ass suggests default assignee first, followed by standalone assignee (no other assignees like Alice or Bob)
+			const assQuerySuggestions = suggest.getSuggestions({ query: "@:ass" } as any);
+			expect(assQuerySuggestions.length).toBe(2);
+			expect(assQuerySuggestions[0].kind).toBe("emoji");
+			if (assQuerySuggestions[0].kind === "emoji") {
+				expect(assQuerySuggestions[0].insert).toBe("👤 Sunny ");
+				expect(assQuerySuggestions[0].label).toContain("Sunny");
+			}
+			expect(assQuerySuggestions[1].kind).toBe("emoji");
+			if (assQuerySuggestions[1].kind === "emoji") {
+				expect(assQuerySuggestions[1].insert).toBe("👤 ");
+				expect(assQuerySuggestions[1].label).toContain("Assignee");
+			}
+
+			// Simulating selectSuggestion replaces @ass with 👤 Sunny
+			let replacedText = "";
+			let cursorPos = { line: 0, ch: 0 };
+			const mockEditor = {
+				replaceRange: (text: string) => {
+					replacedText = text;
+				},
+				setCursor: (pos: { line: number; ch: number }) => {
+					cursorPos = pos;
+				},
+			};
+
+			(suggest as any).context = {
+				editor: mockEditor,
+				start: { line: 0, ch: 7 },
+				end: { line: 0, ch: 11 }, // length of '@ass' is 4
+			};
+
+			suggest.selectSuggestion(assQuerySuggestions[0]);
+			expect(replacedText).toBe("👤 Sunny ");
+			expect(cursorPos.ch).toBe(7 + "👤 Sunny ".length);
+		});
+
+		test("auto-resolves due date to start day when due only specifies time", async () => {
+			const registry = new StatusRegistry();
+
+			// 1. Line task with date+time start and time-only due
+			const line1 = "- [ ] Team meeting 🛫 2026-09-07 15:30 📅 17:30";
+			const parsed1 = parseTaskLine(line1, "TODO");
+			expect(parsed1).not.toBeNull();
+			expect(parsed1?.data.description).toBe("Team meeting");
+			expect(parsed1?.data.dates.start).toBe("2026-09-07 15:30");
+			expect(parsed1?.data.dates.due).toBe("2026-09-07 17:30");
+
+			// 2. Line task with date-only start and time-only due
+			const line2 = "- [ ] Seminar 🛫 2026-09-07 📅 17:30";
+			const parsed2 = parseTaskLine(line2, "TODO");
+			expect(parsed2?.data.dates.due).toBe("2026-09-07 17:30");
+
+			// 3. Frontmatter task
+			const file = createTestFile("fm-dates.md", "fm-dates");
+			const fm = {
+				task: true,
+				description: "Client Demo",
+				start: "2026-09-07 15:30",
+				due: "17:30",
+			};
+			const parsedFm = parseFrontmatterTask(file, { frontmatter: fm } as any, registry, false);
+			expect(parsedFm?.task.dates.due).toBe("2026-09-07 17:30");
+
+			// 4. API createTask
+			let createdContent = "";
+			const app = {
+				vault: {
+					getAbstractFileByPath: () => file,
+					read: () => Promise.resolve(""),
+					modify: (_file: unknown, content: string) => {
+						createdContent = content;
+						return Promise.resolve();
+					},
+					create: () => Promise.resolve(file),
+				},
+				metadataCache: {
+					getFileCache: () => null,
+				},
+				fileManager: {
+					processFrontMatter: () => Promise.resolve(),
+				},
+			};
+			const api = createTaskLiteCoreApi({
+				app: app as any,
+				registry,
+				getSettings: () => ({} as any),
+			});
+			await api.createTask({
+				description: "Sync session",
+				path: "fm-dates.md",
+				dates: {
+					start: "2026-09-07 15:30",
+					due: "17:30",
+				},
+			});
+			expect(createdContent).toContain("📅 2026-09-07 17:30");
+		});
+	});
+});
