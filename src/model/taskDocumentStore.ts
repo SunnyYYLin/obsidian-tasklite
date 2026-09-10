@@ -106,8 +106,12 @@ export class TaskDocumentStore {
 	}
 
 	async replaceDocumentContent(file: TFile, content: string): Promise<TaskDocument | null> {
-		// 主动修改内容时，Obsidian 的 metadataCache 必定滞后，传入 null 强制使用 inferListItems
-		return this.setDocument(file, content, null);
+		// 主动修改内容时，Obsidian 的 metadataCache 必定滞后，传入仅包含 frontmatter 的 metadata 强制使用 inferListItems
+		const cache = this.app.metadataCache.getFileCache(file);
+		const metadata = cache?.frontmatter
+			? ({ frontmatter: cache.frontmatter } as CachedMetadata)
+			: null;
+		return this.setDocument(file, content, metadata);
 	}
 
 	async listRecords(): Promise<TaskDocumentRecord[]> {

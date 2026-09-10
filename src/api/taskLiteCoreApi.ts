@@ -965,6 +965,7 @@ async function updateFileTask({
 				settings.toggleBehavior.cascadeUncancel);
 
 		if (cascade) {
+			let linesChanged = false;
 			for (let i = 0; i < lines.length; i++) {
 				const node = tree.byLine.get(i);
 				if (node?.task) {
@@ -981,7 +982,13 @@ async function updateFileTask({
 						indent,
 						registry,
 					);
+					linesChanged = true;
 				}
+			}
+			if (linesChanged) {
+				const nextContent = lines.join("\n");
+				await app.vault.modify(file, nextContent);
+				await documentStore?.replaceDocumentContent(file, nextContent);
 			}
 		}
 
@@ -1013,6 +1020,7 @@ async function updateFileTask({
 	);
 
 	// Propagate status update to frontmatter task if it exists
+	let fmPatchToApply: Record<string, unknown> | null = null;
 	const fmMetadata = app.metadataCache.getFileCache(file);
 	const tempTree = buildTaskTree(lines, fmMetadata, registry);
 	const hasBodyTasks = tempTree.nodes.some((n) => n.task);
@@ -1077,15 +1085,12 @@ async function updateFileTask({
 					settings,
 					{ fillMissingStatusDate: true },
 				);
-				const fmPatch = buildFrontmatterPatch(
+				fmPatchToApply = buildFrontmatterPatch(
 					fmRecord.task,
 					updatedData,
 					registry,
 					fmRecord.rawStatus,
 				);
-				await applyFrontmatterPatch(app.fileManager, file, fmPatch);
-				documentStore?.invalidate(file.path);
-				return true;
 			}
 		}
 	}
@@ -1093,6 +1098,11 @@ async function updateFileTask({
 	const nextContent = lines.join("\n");
 	await app.vault.modify(file, nextContent);
 	await documentStore?.replaceDocumentContent(file, nextContent);
+
+	if (fmPatchToApply) {
+		await applyFrontmatterPatch(app.fileManager, file, fmPatchToApply);
+		documentStore?.invalidate(file.path);
+	}
 	return true;
 }
 

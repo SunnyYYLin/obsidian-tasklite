@@ -1845,6 +1845,51 @@ describe("TaskLite core", () => {
 		]);
 	});
 
+	test("updating subtask of a file-level task preserves the file-level task in listTasks", async () => {
+		let fileContent = [
+			"---",
+			"task: true",
+			"description: Project Alpha",
+			"status: \" \"",
+			"---",
+			"- [ ] Subtask 1",
+			"- [ ] Subtask 2",
+		].join("\n");
+		const file = createTestFile("Work/tasks.md", "tasks");
+		const api = createTestCoreApi({
+			vault: {
+				getMarkdownFiles: () => [file],
+				getAbstractFileByPath: (p: string) => (p === "Work/tasks.md" ? file : null),
+				cachedRead: () => fileContent,
+				read: () => Promise.resolve(fileContent),
+				modify: (_f: any, next: string) => {
+					fileContent = next;
+					return Promise.resolve();
+				},
+			},
+			metadataCache: {
+				getFileCache: () => ({
+					frontmatter: {
+						task: true,
+						description: "Project Alpha",
+						status: " ",
+					},
+				}),
+			},
+		});
+
+		await api.updateTaskStatus("Work/tasks.md", 5, "x");
+		const listed = await api.listTasks({ includeChildren: true, includeCompleted: true });
+		expect(listed.map((record) => record.task.description)).toEqual([
+			"Project Alpha",
+			"Subtask 1",
+			"Subtask 2",
+		]);
+		expect(listed[0]?.lineNumber).toBe(-1);
+		expect(listed[1]?.task.status).toBe("DONE");
+		expect(listed[1]?.parentLine).toBe(-1);
+	});
+
 	test("frontmatter task supports status keywords and preserves them on update", async () => {
 		let fmState: Record<string, unknown> = {
 			task: true,
@@ -2864,5 +2909,92 @@ describe("TaskLite 0.4.5 Features", () => {
 			});
 			expect(createdContent).toContain("📅 2026-09-07 17:30");
 		});
+
+		test("completing all subtasks under file-level task updates parent frontmatter and saves child checkbox to body", async () => {
+			const registry = new StatusRegistry();
+			let fileBody = ["---", "task: true", "status: todo", "---", "- [ ] Subtask 1"].join("\n");
+			let fmState: Record<string, unknown> = { task: true, status: "todo" };
+			const file = createTestFile("Work/parent-child.md", "parent-child");
+			const app = {
+				vault: {
+					getMarkdownFiles: () => [file],
+					getAbstractFileByPath: () => file,
+					read: () => Promise.resolve(fileBody),
+					cachedRead: () => Promise.resolve(fileBody),
+					modify: (_file: unknown, nextContent: string) => {
+						fileBody = nextContent;
+						return Promise.resolve();
+					},
+				},
+				fileManager: {
+					processFrontMatter: (_f: unknown, fn: (fm: Record<string, unknown>) => void) => {
+						fn(fmState);
+						return Promise.resolve();
+					},
+				},
+				metadataCache: {
+					getFileCache: () => ({
+						frontmatter: { ...fmState },
+						listItems: [{ position: { start: { line: 4 } }, task: " " }],
+					}),
+				},
+			};
+			const api = createTaskLiteCoreApi({
+				app: app as any,
+				registry,
+				getSettings: () => settings,
+			});
+
+			const res = await api.updateTaskStatus("Work/parent-child.md", 4, "x");
+			expect(res).toBe(true);
+			expect(fileBody).toContain("- [x] Subtask 1");
+			expect(fmState.status).toBe("done");
+		});
+
+		test("completing file-level task cascades to child tasks and saves updated lines to file", async () => {
+			const registry = new StatusRegistry();
+			let fileBody = ["---", "task: true", "status: todo", "---", "- [ ] Child 1", "- [ ] Child 2"].join("\n");
+			let fmState: Record<string, unknown> = { task: true, status: "todo" };
+			const file = createTestFile("Work/cascade.md", "cascade");
+			const app = {
+				vault: {
+					getMarkdownFiles: () => [file],
+					getAbstractFileByPath: () => file,
+					read: () => Promise.resolve(fileBody),
+					cachedRead: () => Promise.resolve(fileBody),
+					modify: (_file: unknown, nextContent: string) => {
+						fileBody = nextContent;
+						return Promise.resolve();
+					},
+				},
+				fileManager: {
+					processFrontMatter: (_f: unknown, fn: (fm: Record<string, unknown>) => void) => {
+						fn(fmState);
+						return Promise.resolve();
+					},
+				},
+				metadataCache: {
+					getFileCache: () => ({
+						frontmatter: { ...fmState },
+						listItems: [
+							{ position: { start: { line: 4 } }, task: " " },
+							{ position: { start: { line: 5 } }, task: " " },
+						],
+					}),
+				},
+			};
+			const api = createTaskLiteCoreApi({
+				app: app as any,
+				registry,
+				getSettings: () => settings,
+			});
+
+			const res = await api.updateTaskStatus("Work/cascade.md", -1, "x");
+			expect(res).toBe(true);
+			expect(fileBody).toContain("- [x] Child 1");
+			expect(fileBody).toContain("- [x] Child 2");
+			expect(fmState.status).toBe("done");
+		});
 	});
 });
+
