@@ -1,6 +1,6 @@
 import { MarkdownView, Notice, type Editor } from "obsidian";
 import type TaskLitePlugin from "../main";
-import { normalizeDocumentLines, serializeTaskLine, parseLineWithStatus } from "../model/format";
+import { normalizeLineIndentation, serializeTaskLine, parseLineWithStatus } from "../model/format";
 import { generateSemanticId } from "../model/taskSemanticId";
 import { cancelEditorTask, toggleEditorTask, toggleEditorTaskCancellation, uncancelEditorTask } from "../editor/apply";
 import { ExternalTaskReconciler } from "../editor/externalReconcile";
@@ -9,6 +9,11 @@ import { TaskLiteEmojiSuggest } from "../suggest/emojiSuggest";
 import { TaskLiteSettingTab } from "../settings";
 import { t } from "../i18n";
 import { getVaultIndentConfig } from "../editor/editorUtils";
+import { normalizeVaultTaskFormat } from "../editor/formatNormalization";
+import {
+	createInlineFieldFallbackExtension,
+	createInlineFieldPostProcessor,
+} from "../rendering/inlineFieldFallback";
 
 export function registerTaskLiteCore(plugin: TaskLitePlugin): void {
 	plugin.addCommand({
@@ -91,25 +96,56 @@ export function registerTaskLiteCore(plugin: TaskLitePlugin): void {
 		id: "normalize-indentation",
 		name: t("command.normalizeIndentation"),
 		checkCallback: (checking: boolean) => {
-			const activeView = plugin.app.workspace.getActiveViewOfType(MarkdownView);
-			const editor = activeView?.editor;
-			const activeFile = activeView?.file;
-			if (!editor || !activeFile) return false;
+			const activeFile = plugin.app.workspace.getActiveFile();
+			if (!activeFile) return false;
 			if (checking) return true;
 
 			(async () => {
-				const changed = normalizeEditorIndentation(editor, plugin);
+				const content = await plugin.app.vault.read(activeFile);
+				const lines = content.length > 0 ? content.split("\n") : [];
+
+				const { useTab, tabSize } = getVaultIndentConfig(plugin.app);
+
+				let changed = false;
+				const newLines = lines.map((line) => {
+					const newLine = normalizeLineIndentation(line, useTab, tabSize);
+					if (newLine !== line) {
+						changed = true;
+					}
+					return newLine;
+				});
+
 				if (changed) {
-					await plugin.documentStore.replaceDocumentContent(
-						activeFile,
-						editor.getValue(),
-					);
+					const newContent = newLines.join("\n");
+					await plugin.app.vault.modify(activeFile, newContent);
+					await plugin.documentStore.replaceDocumentContent(activeFile, newContent);
 				}
 				new Notice(t("notice.normalizedIndents"));
 			})().catch((err) => {
 				console.error(err);
 			});
 			return true;
+		},
+	});
+
+	plugin.addCommand({
+		id: "normalize-task-format",
+		name: t("command.normalizeTaskFormat"),
+		callback: async () => {
+			const targetFormat = plugin.settings.preferredTaskFormat ?? "dataview";
+			new Notice(t("notice.normalizingTaskFormatAllStarted"));
+			try {
+				const { totalUpdatedFiles, totalUpdatedLines } =
+					await normalizeVaultTaskFormat(plugin.app, plugin, targetFormat);
+				new Notice(
+					t("notice.normalizedTaskFormatAllFinished")
+						.replace("{files}", totalUpdatedFiles.toString())
+						.replace("{lines}", totalUpdatedLines.toString()),
+				);
+			} catch (err) {
+				console.error("TaskLite: failed to normalize task format across vault", err);
+				new Notice("Failed to normalize task format: " + String(err));
+			}
 		},
 	});
 
@@ -152,39 +188,13 @@ export function registerTaskLiteCore(plugin: TaskLitePlugin): void {
 	});
 
 	plugin.addCommand({
-		id: "create-task",
-		name: t("command.createTask"),
-		editorCallback: (editor: Editor) => {
-			const cursor = editor.getCursor();
-			const line = editor.getLine(cursor.line);
-			const defaultAssignee = plugin.getDefaultAssignee();
-			const assigneePart =
-				plugin.settings.autoAssignDefault && defaultAssignee
-					? ` 👤 ${defaultAssignee}`
-					: "";
-			const taskPrefix = "- [ ] ";
-			if (line.trim().length === 0) {
-				const indent = line.match(/^[\s\t>]+/)?.[0] ?? "";
-				const text = `${indent}${taskPrefix}${assigneePart}`;
-				editor.setLine(cursor.line, text);
-				editor.setCursor({ line: cursor.line, ch: text.length });
-			} else {
-				const indent = line.match(/^([\s\t>]*)/)?.[0] ?? "";
-				const text = `\n${indent}${taskPrefix}${assigneePart}`;
-				editor.replaceRange(text, { line: cursor.line, ch: line.length });
-				editor.setCursor({ line: cursor.line + 1, ch: indent.length + taskPrefix.length });
-			}
-		},
-	});
-
-	plugin.addCommand({
 		id: "rebuild-cache",
 		name: t("command.rebuildCache"),
 		callback: () => {
 			(async () => {
 				await plugin.loadSettings();
 				plugin.documentStore.invalidateAll();
-				await plugin.updateAssigneesFromVault();
+				await plugin.documentStore.listRecords();
 				new Notice(t("notice.cacheRebuilt"));
 			})().catch((err) => {
 				console.error(err);
@@ -195,36 +205,9 @@ export function registerTaskLiteCore(plugin: TaskLitePlugin): void {
 
 	new ExternalTaskReconciler(plugin, plugin.app, plugin.statusRegistry, () => plugin.settings, plugin.documentStore).register();
 	plugin.registerEditorExtension(createLivePreviewExtension(plugin.app, plugin.statusRegistry, () => plugin.settings, plugin.documentStore));
+	plugin.registerEditorExtension(createInlineFieldFallbackExtension(plugin.app));
+	plugin.registerMarkdownPostProcessor(createInlineFieldPostProcessor(plugin.app));
 	plugin.registerEditorSuggest(new TaskLiteEmojiSuggest(plugin));
 	plugin.addSettingTab(new TaskLiteSettingTab(plugin.app, plugin));
-}
-
-function normalizeEditorIndentation(
-	editor: Editor,
-	plugin: TaskLitePlugin,
-): boolean {
-	const content = editor.getValue();
-	const lines = content.length > 0 ? content.split("\n") : [];
-	const { useTab, tabSize } = getVaultIndentConfig(plugin.app);
-
-	const newLines = normalizeDocumentLines(lines, useTab, tabSize);
-	let changed = false;
-	for (let i = 0; i < lines.length; i++) {
-		if (lines[i] !== newLines[i]) {
-			changed = true;
-			break;
-		}
-	}
-
-	if (!changed) return false;
-
-	const selections = editor.listSelections();
-	const scroll = editor.getScrollInfo();
-	const lastLine = Math.max(editor.lastLine(), 0);
-	const lastCh = editor.getLine(lastLine).length;
-	editor.replaceRange(newLines.join("\n"), { line: 0, ch: 0 }, { line: lastLine, ch: lastCh });
-	editor.setSelections(selections);
-	editor.scrollTo(scroll.left, scroll.top);
-	return true;
 }
 

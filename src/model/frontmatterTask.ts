@@ -129,16 +129,16 @@ export function parseFrontmatterTask(
 	const statusSymbol = resolveStatusSymbol(fm["status"], registry);
 	const statusConfig = registry.get(statusSymbol);
 
-	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- Frontmatter values from Obsidian cache are loosely typed
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
 	const rawPriority = fm["priority"];
 	const priority: TaskPriority | null =
 		typeof rawPriority === "string" && rawPriority in PRIORITY_MAP
 			? (PRIORITY_MAP[rawPriority] ?? null)
 			: null;
 
-	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- Frontmatter values from Obsidian cache are loosely typed
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
 	const rawOnCompletion = fm["onCompletion"] ?? fm["on_completion"];
-	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- Frontmatter values from Obsidian cache are loosely typed
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
 	const onCompletion: OnCompletionAction | null =
 		rawOnCompletion === "delete" || rawOnCompletion === "keep"
 			? rawOnCompletion
@@ -159,6 +159,7 @@ export function parseFrontmatterTask(
 			.map((p) => p.trim())
 			.filter(Boolean);
 	}
+
 	assignee = normalizeAssignees(assignee);
 
 	const task: TaskData = {
@@ -187,10 +188,7 @@ export function parseFrontmatterTask(
 		id: typeof fm["id"] === "string" ? fm["id"] : null,
 		dependsOn: typeof fm["dependsOn"] === "string" ? fm["dependsOn"] : null,
 		assignee,
-		location:
-			typeof fm["location"] === "string" && fm["location"].trim()
-				? fm["location"].trim()
-				: null,
+		location: typeof fm["location"] === "string" ? fm["location"] : null,
 		blockLink: null,
 		tags: Array.isArray(fm["tags"]) ? fm["tags"].map(String) : [],
 		unmatched: null,
@@ -208,6 +206,11 @@ export function parseFrontmatterTask(
 	};
 }
 
+/**
+ * Build a minimal frontmatter patch object to update the task's status and
+ * optional date fields.  Returns an object suitable for merging into existing
+ * frontmatter.
+ */
 function parseFrontmatterAssigneeFromContent(content: string | undefined): string[] | null {
 	if (!content) return null;
 	const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u);
@@ -238,11 +241,6 @@ function parseFrontmatterAssigneeFromContent(content: string | undefined): strin
 	return null;
 }
 
-/**
- * Build a minimal frontmatter patch object to update the task's status and
- * optional date fields.  Returns an object suitable for merging into existing
- * frontmatter.
- */
 export function buildFrontmatterPatch(
 	current: TaskData,
 	updates: Partial<TaskData>,
@@ -270,7 +268,7 @@ export function buildFrontmatterPatch(
 	if (updates.id !== undefined) patch["id"] = updates.id;
 	if (updates.dependsOn !== undefined) patch["dependsOn"] = updates.dependsOn;
 	if (updates.assignee !== undefined) patch["assignee"] = updates.assignee;
-	if (updates.location !== undefined) patch["location"] = updates.location;
+	if (updates.location !== undefined) patch["location"] = updates.location ?? null;
 
 	if (updates.dates) {
 		const d = updates.dates;
@@ -279,7 +277,6 @@ export function buildFrontmatterPatch(
 			d.due !== undefined
 				? (resolveDueDateFromStart(d.due, startDate) ?? d.due)
 				: undefined;
-
 		if (d.start !== undefined) patch["start"] = d.start ?? null;
 		if (d.created !== undefined) patch["created"] = d.created ?? null;
 		if (d.scheduled !== undefined) patch["scheduled"] = d.scheduled ?? null;
@@ -315,13 +312,12 @@ export async function applyFrontmatterPatch(
 	patch: Record<string, unknown>,
 ): Promise<void> {
 	await fileManager.processFrontMatter(file, (fm) => {
-		// eslint-disable-next-line @typescript-eslint/no-unsafe-call -- Object.entries on dynamic frontmatter patch; reviewer lints compiled JS
 		for (const [key, value] of Object.entries(patch)) {
 			if (value === null || value === undefined) {
-				// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- Dynamic frontmatter key deletion via Obsidian's processFrontMatter API
+				// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
 				delete fm[key];
 			} else {
-				// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment -- Dynamic frontmatter key/value assignment via Obsidian's processFrontMatter API
+				// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
 				fm[key] = value;
 			}
 		}
@@ -345,9 +341,8 @@ export function applyFrontmatterPatchToContent(
 	const lines = fmBlock.split(/\r?\n/u);
 
 	const updated = new Map<string, string>();
-	// eslint-disable-next-line @typescript-eslint/no-unsafe-call -- Object.entries on dynamic frontmatter patch; reviewer lints compiled JS
 	for (const [key, value] of Object.entries(patch)) {
-		// eslint-disable-next-line @typescript-eslint/no-base-to-string, @typescript-eslint/no-unsafe-argument -- String conversion for frontmatter patch values; reviewer lints compiled JS
+		// eslint-disable-next-line @typescript-eslint/no-base-to-string
 		updated.set(key, value === null ? "" : String(value));
 	}
 
@@ -362,7 +357,6 @@ export function applyFrontmatterPatchToContent(
 			}
 			skippingContinuation = false;
 		}
-
 		const keyMatch = line.match(/^([a-zA-Z_][a-zA-Z0-9_]*):\s*(.*)/u);
 		if (keyMatch) {
 			const key = keyMatch[1] ?? "";
@@ -391,9 +385,9 @@ export function applyFrontmatterPatchToContent(
 
 function dateField(value: unknown): string | null {
 	if (typeof value !== "string") return null;
-	return /^\d{4}-\d{2}-\d{2}(?: \d{1,2}:\d{2}(?:\s?[AaPp][Mm])?)?$/u.test(
+	return /^\d{4}-\d{2}-\d{2}(?: \d{1,2}:\d{2}(?:\s?[AaPp][Mm])?)?$/u.test(value) || /^\d{1,2}:\d{2}(?:\s?[AaPp][Mm])?$/u.test(
 		value,
-	) || /^\d{1,2}:\d{2}(?:\s?[AaPp][Mm])?$/u.test(value)
+	)
 		? value
 		: null;
 }

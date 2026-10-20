@@ -1,7 +1,7 @@
 import { TFile, type App, type Plugin } from "obsidian";
 import { reconcileExternalTaskCompletion } from "./externalReconcileCore";
 import type { StatusRegistry } from "../model/status";
-import type { TaskDocumentStore } from "../model/taskDocumentStore";
+import { fileMayContainTasks, type TaskDocumentStore } from "../model/taskDocumentStore";
 import type { TaskLiteSettings } from "../settings";
 import { buildTaskTree, taskDepth } from "../model/tree";
 import { parseFrontmatterTask, buildFrontmatterPatch, applyFrontmatterPatch } from "../model/frontmatterTask";
@@ -9,11 +9,13 @@ import { parseTaskLine, serializeTaskLine } from "../model/format";
 import { getIndentPrefix } from "./toggle";
 
 function isTFile(value: unknown): value is TFile {
-	const file = value as Partial<TFile> | null | undefined;
-	return Boolean(
-		file &&
-		typeof file.path === "string" &&
-		typeof file.extension === "string",
+	return (
+		value instanceof TFile ||
+		(Boolean(value) &&
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
+			typeof (value as any).path === "string" &&
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
+			typeof (value as any).extension === "string")
 	);
 }
 
@@ -48,6 +50,7 @@ export class ExternalTaskReconciler {
 		if (metadata?.frontmatter?.tasks === "ignore") return;
 
 		const docBefore = this.documentStore.getCachedDocument(file.path);
+		if (!docBefore && metadata && !fileMayContainTasks(metadata)) return;
 		const before = docBefore?.content ?? null;
 
 		const after = await this.app.vault.read(file);

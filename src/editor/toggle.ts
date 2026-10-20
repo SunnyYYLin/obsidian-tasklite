@@ -28,14 +28,6 @@ import {
 	replaceTaskStatus,
 } from "./toggleMutation";
 
-interface DependencyRecord {
-	task: { id?: string; status: string };
-}
-
-interface DependencyStoreAccessor {
-	documentStore?: { listCachedRecords(): DependencyRecord[] };
-}
-
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
@@ -90,6 +82,22 @@ export function getIndentPrefix(depth: number, app?: App, lines?: string[]): str
 // Public API
 // ---------------------------------------------------------------------------
 
+export function getNextTaskStatusSymbol(currentStatus: string, registry: StatusRegistry): string {
+	if (currentStatus === "TODO") return registry.getByType("DONE").symbol;
+	if (currentStatus === "DONE") return registry.getByType("IN_PROGRESS").symbol;
+	if (currentStatus === "IN_PROGRESS") return registry.getByType("CANCELLED").symbol;
+	if (currentStatus === "CANCELLED") return registry.getByType("TODO").symbol;
+	return registry.getByType("TODO").symbol;
+}
+
+export function getPrevTaskStatusSymbol(currentStatus: string, registry: StatusRegistry): string {
+	if (currentStatus === "TODO") return registry.getByType("CANCELLED").symbol;
+	if (currentStatus === "CANCELLED") return registry.getByType("IN_PROGRESS").symbol;
+	if (currentStatus === "IN_PROGRESS") return registry.getByType("DONE").symbol;
+	if (currentStatus === "DONE") return registry.getByType("TODO").symbol;
+	return registry.getByType("TODO").symbol;
+}
+
 export function toggleTaskAtLine({
 	lines,
 	lineNumber,
@@ -103,9 +111,8 @@ export function toggleTaskAtLine({
 	if (!node) return null;
 	if (!node.task) return togglePlainCheckbox(node, registry);
 
-	const symbol = registry.getByType(node.task.data.status).symbol;
-	const targetStatus = registry.next(registry.get(symbol));
-	return changeTaskStatusWithTree(tree, {lines, lineNumber, metadata, app, registry, settings, targetStatusSymbol: targetStatus.symbol}, node);
+	const targetSymbol = (node.task.data.status === "DONE" || node.task.data.status === "CANCELLED") ? " " : "x";
+	return changeTaskStatusWithTree(tree, {lines, lineNumber, metadata, app, registry, settings, targetStatusSymbol: targetSymbol}, node);
 }
 
 export function changeTaskStatusAtLine(
@@ -135,19 +142,17 @@ export function uncancelTaskAtLine(input: TaskStatusMutationInput): ToggleResult
 export function clickTaskCheckboxAtLine(input: TaskStatusMutationInput): ToggleResult | null {
 	const tree = buildTaskTree(input.lines, input.metadata, input.registry);
 	const node = tree.byLine.get(input.lineNumber);
-	if (!node?.task) return node ? cyclePlainCheckbox(node, input.registry, input.settings, "next") : null;
-	const current = input.registry.getByType(node.task.data.status).symbol;
-	const target = getCycleStatusSymbol(current, input.registry, input.settings, "next");
-	return changeTaskStatusWithTree(tree, {...input, targetStatusSymbol: target}, node);
+	if (!node?.task) return node ? togglePlainCheckbox(node, input.registry) : null;
+	const sym = getNextTaskStatusSymbol(node.task.data.status, input.registry);
+	return changeTaskStatusWithTree(tree, {...input, targetStatusSymbol: sym}, node);
 }
 
 export function rightClickTaskCheckboxAtLine(input: TaskStatusMutationInput): ToggleResult | null {
 	const tree = buildTaskTree(input.lines, input.metadata, input.registry);
 	const node = tree.byLine.get(input.lineNumber);
-	if (!node?.task) return node ? cyclePlainCheckbox(node, input.registry, input.settings, "previous") : null;
-	const current = input.registry.getByType(node.task.data.status).symbol;
-	const target = getCycleStatusSymbol(current, input.registry, input.settings, "previous");
-	return changeTaskStatusWithTree(tree, {...input, targetStatusSymbol: target}, node);
+	if (!node?.task) return node ? togglePlainCheckboxReverse(node, input.registry) : null;
+	const sym = getPrevTaskStatusSymbol(node.task.data.status, input.registry);
+	return changeTaskStatusWithTree(tree, {...input, targetStatusSymbol: sym}, node);
 }
 
 // ---------------------------------------------------------------------------
@@ -165,23 +170,25 @@ export function getUnfinishedDependencies(
 		.filter(Boolean);
 	if (depIds.length === 0) return [];
 
-	// Access internal Obsidian plugin registry for dependency checking
-	const rawPlugins = (app as unknown as Record<string, unknown>).plugins as Record<string, Record<string, unknown>> | undefined;
-	// Access plugin instances from internal registry
-	const tasklitePlugin = rawPlugins?.["plugins"]?.["taskslite"] as DependencyStoreAccessor | undefined;
-	const documentStore = tasklitePlugin?.documentStore;
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
+	const plugin = (app as any).plugins?.plugins?.["taskslite"];
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+	const documentStore = plugin?.documentStore;
 	if (!documentStore) return [];
 
+	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
 	const records = documentStore.listCachedRecords();
 	const unfinished = new Set<string>();
 
 	for (const r of records) {
+		/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument */
 		if (r.task.id && depIds.includes(r.task.id)) {
-			const status = r.task.status;
+			const status = r.task.status; // status type
 			if (status !== "DONE" && status !== "CANCELLED") {
 				unfinished.add(r.task.id);
 			}
 		}
+		/* eslint-enable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument */
 	}
 	return Array.from(unfinished);
 }
@@ -269,9 +276,14 @@ function updateSingleStatus(
 	const changedTask = applyTaskStatus(node.task.data, status.type, ctx.settings, {fillMissingStatusDate: true});
 	const changedTasks = new Map<number, TaskData>([[node.lineNumber, changedTask]]);
 	const indent = getIndentPrefix(taskDepth(node), ctx.app, ctx.lines);
+	const format = ctx.settings?.preferredTaskFormat ?? "dataview";
 	const replacementByLine = new Map<number, string>([
-		[node.lineNumber, serializeTaskLine({...node.task, data: changedTask}, indent, ctx.registry)],
+		[node.lineNumber, serializeTaskLine({...node.task, data: changedTask}, indent, ctx.registry, format)],
 	]);
+
+	if (status.type === "IN_PROGRESS" && shouldPropagateToParent("unfinish", ctx.settings)) {
+		applyBehaviorToParents(node, "unfinish", changedTasks, replacementByLine, ctx);
+	}
 
 	const mutCtx: TaskMutationContext = {
 		...ctx,
@@ -286,44 +298,17 @@ function updateSingleStatus(
 function togglePlainCheckbox(node: TaskTreeNode, registry: StatusRegistry): ToggleResult | null {
 	if (node.statusCharacter === null) return null;
 	const current = registry.get(node.statusCharacter);
-	const next = registry.next(current);
-	const replacement = node.original.replace(/\[(.)\]/u, `[${next.symbol}]`);
+	const nextSym = getNextTaskStatusSymbol(current.type, registry);
+	const replacement = node.original.replace(/\[(.)\]/u, `[${nextSym}]`);
 	return {fromLine: node.lineNumber, toLine: node.lineNumber, replacement: [replacement]};
 }
 
-function cyclePlainCheckbox(
-	node: TaskTreeNode,
-	registry: StatusRegistry,
-	settings: TaskLiteSettings,
-	direction: "next" | "previous",
-): ToggleResult | null {
+function togglePlainCheckboxReverse(node: TaskTreeNode, registry: StatusRegistry): ToggleResult | null {
 	if (node.statusCharacter === null) return null;
-	const target = getCycleStatusSymbol(node.statusCharacter, registry, settings, direction);
-	const replacement = node.original.replace(/\[(.)\]/u, `[${target}]`);
+	const current = registry.get(node.statusCharacter);
+	const prevSym = getPrevTaskStatusSymbol(current.type, registry);
+	const replacement = node.original.replace(/\[(.)\]/u, `[${prevSym}]`);
 	return {fromLine: node.lineNumber, toLine: node.lineNumber, replacement: [replacement]};
-}
-
-export function getCycleStatusSymbol(
-	currentSymbol: string,
-	registry: StatusRegistry,
-	settings: TaskLiteSettings,
-	direction: "next" | "previous",
-): string {
-	const cycle = normalizeStatusCycle(settings.statusCycle, registry);
-	const currentIndex = cycle.indexOf(currentSymbol);
-	if (currentIndex < 0) {
-		return direction === "next"
-			? registry.next(registry.get(currentSymbol)).symbol
-			: cycle[cycle.length - 1] ?? " ";
-	}
-	const delta = direction === "next" ? 1 : -1;
-	return cycle[(currentIndex + delta + cycle.length) % cycle.length] ?? " ";
-}
-
-function normalizeStatusCycle(cycle: string[] | undefined, registry: StatusRegistry): string[] {
-	const normalized = (cycle && cycle.length > 0 ? cycle : [" ", "x", "/", "-"])
-		.filter((symbol, index, array) => typeof symbol === "string" && array.indexOf(symbol) === index);
-	return normalized.length > 0 ? normalized : [" ", "x", "/", "-"].filter((symbol) => registry.has(symbol));
 }
 
 // Re-export so external callers that reference these by name continue to work

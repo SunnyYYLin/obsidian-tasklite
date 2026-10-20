@@ -1,7 +1,6 @@
 import type { App, CachedMetadata, TFile } from "obsidian";
 import {
 	changeTaskStatusAtLine,
-	getCycleStatusSymbol,
 	toggleTaskAtLine,
 	getIndentPrefix,
 	getUnfinishedDependencies,
@@ -35,23 +34,24 @@ import {
 	buildFrontmatterPatch,
 	applyFrontmatterPatch,
 } from "../model/frontmatterTask";
-import { filterTaskRecordsByQuery } from "../model/taskQuery";
-import { type StatusConfiguration, type StatusRegistry, type StatusType } from "../model/status";
+import { filterTaskRecordsByQuery, doesQueryExcludeCompleted } from "../model/taskQuery";
+import { type StatusRegistry, type StatusType } from "../model/status";
 import { generateSemanticId } from "../model/taskSemanticId";
+import { KeyedMutex } from "../editor/keyedMutex";
 import type { TaskLiteSettings } from "../settings";
 
 /** TaskLiteTaskRecord 与 TaskDocumentRecord 共享同一个形状，此处直接复用，避免类型重复定义 */
 export type TaskLiteTaskRecord = TaskDocumentRecord;
+
+export interface FindTaskOptions extends ListTasksOptions {
+	path?: string;
+}
 
 export interface ListTasksOptions {
 	includeCompleted?: boolean;
 	includeCancelled?: boolean;
 	includeChildren?: boolean;
 	query?: string;
-}
-
-export interface FindTaskOptions extends ListTasksOptions {
-	path?: string;
 }
 
 /**
@@ -141,19 +141,8 @@ export interface TaskLiteCoreApi {
 	 * Return all file-level tasks (encoded in YAML frontmatter with `task: true`).
 	 */
 	listFrontmatterTasks(): Promise<TaskLiteTaskRecord[]>;
-	/**
-	 * Return one task by file path and line number, including completed/cancelled
-	 * tasks and children. Returns null when the file or task does not exist.
-	 */
 	getTask(path: string, lineNumber: number): Promise<TaskLiteTaskRecord | null>;
-	/**
-	 * Find a task by its 🆔 metadata field. Options can narrow the search to a path
-	 * or include completed/cancelled/child tasks.
-	 */
-	findTaskById(
-		id: string,
-		options?: FindTaskOptions,
-	): Promise<TaskLiteTaskRecord | null>;
+	findTaskById(id: string, options?: FindTaskOptions): Promise<TaskLiteTaskRecord | null>;
 	/**
 	 * Transition the status of the task at `lineNumber` in `path` to the target status symbol.
 	 * This triggers appropriate tree cascades (e.g. finishing subtasks when set to DONE,
@@ -164,14 +153,6 @@ export interface TaskLiteCoreApi {
 		path: string,
 		lineNumber: number,
 		statusSymbol: string,
-	): Promise<boolean>;
-	/**
-	 * Move a task to the next or previous status in the configured status cycle.
-	 */
-	cycleTaskStatus(
-		path: string,
-		lineNumber: number,
-		direction?: "next" | "previous",
 	): Promise<boolean>;
 	createTask(input: CreateTaskInput): Promise<void>;
 	/**
@@ -206,21 +187,9 @@ export interface TaskLiteCoreApi {
 	 */
 	listAssignees(): Promise<string[]>;
 	/**
-	 * Return the configured default assignee identity.
+	 * Return the local default assignee/identity configured on this device, or empty string if not set.
 	 */
 	getDefaultAssignee(): string;
-	/**
-	 * Set the configured default assignee identity.
-	 */
-	setDefaultAssignee(assignee: string): Promise<void>;
-	/**
-	 * Return all registered status definitions.
-	 */
-	listStatuses(): StatusConfiguration[];
-	/**
-	 * Return the configured checkbox status cycle.
-	 */
-	getStatusCycle(): string[];
 	/**
 	 * Generate a semantic task ID from the description.
 	 * English words are converted to lowercase and separated by hyphens.
@@ -240,6 +209,10 @@ export interface TaskLiteCoreApi {
 			dueDate?: string | null;
 		},
 	): string;
+	/**
+	 * Parse a DQL query and semantically determine whether it excludes completed tasks.
+	 */
+	isQueryExcludingCompleted(query: string): boolean;
 }
 
 interface TaskLiteCoreApiOptions {
@@ -247,8 +220,6 @@ interface TaskLiteCoreApiOptions {
 	registry: StatusRegistry;
 	getSettings: () => TaskLiteSettings;
 	documentStore?: TaskDocumentStore;
-	getDefaultAssignee?: () => string;
-	setDefaultAssignee?: (assignee: string) => Promise<void>;
 }
 
 export function createTaskLiteCoreApi({
@@ -256,9 +227,8 @@ export function createTaskLiteCoreApi({
 	registry,
 	getSettings,
 	documentStore,
-	getDefaultAssignee,
-	setDefaultAssignee,
 }: TaskLiteCoreApiOptions): TaskLiteCoreApi {
+	const fileMutex = new KeyedMutex();
 	return {
 		listTasks: (options) =>
 			listTasks({ app, registry, documentStore, options }),
@@ -279,108 +249,92 @@ export function createTaskLiteCoreApi({
 					includeChildren: true,
 				},
 			});
-			return records.find((record) => record.path === path && record.lineNumber === lineNumber) ?? null;
+			return (
+				records.find(
+					(r) => r.path === path && r.lineNumber === lineNumber,
+				) ?? null
+			);
 		},
-		findTaskById: async (id, options = {}) => {
-			if (typeof id !== "string" || !id.trim()) {
-				throw new TypeError("TaskLite: id must be a non-empty string.");
-			}
+		findTaskById: async (id, options) => {
+			if (!id || typeof id !== "string") return null;
+			const targetId = id.trim();
+			if (!targetId) return null;
 			const records = await listTasks({
 				app,
 				registry,
 				documentStore,
 				options: {
+					includeCompleted: true,
+					includeCancelled: true,
+					includeChildren: true,
 					...options,
-					includeCompleted: options.includeCompleted ?? true,
-					includeCancelled: options.includeCancelled ?? true,
-					includeChildren: options.includeChildren ?? true,
 				},
 			});
-			return records.find((record) =>
-				record.task.id === id && (!options.path || record.path === options.path),
-			) ?? null;
+			return (
+				records.find(
+					(r) =>
+						r.task.id === targetId &&
+						(!options?.path || r.path === options.path),
+				) ?? null
+			);
 		},
 		updateTaskStatus: async (path, lineNumber, statusSymbol) => {
 			validatePath(path);
 			validateLineNumber(lineNumber);
 
-			const statusConfig = registry.get(statusSymbol);
-			if (statusConfig.type === "DONE") {
-				if (lineNumber === -1) {
-					const file = app.vault.getAbstractFileByPath(path);
-					if (isTFile(file)) {
-						const metadata = app.metadataCache.getFileCache(file);
-						const document = await documentStore?.getDocumentByPath(path);
-						const lines = document ? document.lines : [];
-						const tree = buildTaskTree(lines, metadata, registry);
-						const hasBodyTasks = tree.nodes.some((n) => n.task);
-						const fmRecord = parseFrontmatterTask(file, metadata, registry, hasBodyTasks);
-						if (fmRecord) {
-							const unfinished = getUnfinishedDependencies(fmRecord.task.dependsOn, app);
-							if (unfinished.length > 0) {
-								throw new Error(`Task is blocked by unfinished dependencies: ${unfinished.join(", ")}`);
+			return fileMutex.runExclusive(path, async () => {
+				const statusConfig = registry.get(statusSymbol);
+				if (statusConfig.type === "DONE") {
+					if (lineNumber === -1) {
+						const file = app.vault.getAbstractFileByPath(path);
+						if (isTFile(file)) {
+							const metadata = app.metadataCache.getFileCache(file);
+							const document = await documentStore?.getDocumentByPath(path);
+							const lines = document ? document.lines : [];
+							const tree = buildTaskTree(lines, metadata, registry);
+							const hasBodyTasks = tree.nodes.some((n) => n.task);
+							const fmRecord = parseFrontmatterTask(file, metadata, registry, hasBodyTasks);
+							if (fmRecord) {
+								const unfinished = getUnfinishedDependencies(fmRecord.task.dependsOn, app);
+								if (unfinished.length > 0) {
+									throw new Error(`Task is blocked by unfinished dependencies: ${unfinished.join(", ")}`);
+								}
 							}
 						}
-					}
-				} else {
-					const document = await documentStore?.getDocumentByPath(path);
-					const line = document?.lines[lineNumber];
-					if (line) {
-						const parsed = parseLineWithStatus(line, registry);
-						if (parsed) {
-							const unfinished = getUnfinishedDependencies(parsed.data.dependsOn, app);
-							if (unfinished.length > 0) {
-								throw new Error(`Task is blocked by unfinished dependencies: ${unfinished.join(", ")}`);
+					} else {
+						const document = await documentStore?.getDocumentByPath(path);
+						const line = document?.lines[lineNumber];
+						if (line) {
+							const parsed = parseLineWithStatus(line, registry);
+							if (parsed) {
+								const unfinished = getUnfinishedDependencies(parsed.data.dependsOn, app);
+								if (unfinished.length > 0) {
+									throw new Error(`Task is blocked by unfinished dependencies: ${unfinished.join(", ")}`);
+								}
 							}
 						}
 					}
 				}
-			}
 
-			return updateFileTask({
-				app,
-				path,
-				lineNumber,
-				registry,
-				settings: getSettings(),
-				documentStore,
-				mutate: (input) =>
-					changeTaskStatusAtLine({
-						...input,
-						targetStatusSymbol: statusSymbol,
-					}),
-				statusSymbol,
-			});
-		},
-		cycleTaskStatus: async (path, lineNumber, direction = "next") => {
-			validatePath(path);
-			validateLineNumber(lineNumber);
-			if (direction !== "next" && direction !== "previous") {
-				throw new TypeError("TaskLite: direction must be \"next\" or \"previous\".");
-			}
-			const record = await listTaskByLocation({
-				app,
-				path,
-				lineNumber,
-				registry,
-				documentStore,
-			});
-			if (!record) return false;
-			const currentSymbol = registry.getByType(record.task.status).symbol;
-			const target = getCycleStatusSymbol(currentSymbol, registry, getSettings(), direction);
-			return updateFileTask({
-				app,
-				path,
-				lineNumber,
-				registry,
-				settings: getSettings(),
-				documentStore,
-				mutate: (input) =>
-					changeTaskStatusAtLine({
-						...input,
-						targetStatusSymbol: target,
-					}),
-				statusSymbol: target,
+				const result = await updateFileTask({
+					app,
+					path,
+					lineNumber,
+					registry,
+					settings: getSettings(),
+					documentStore,
+					mutate: (input) =>
+						changeTaskStatusAtLine({
+							...input,
+							targetStatusSymbol: statusSymbol,
+						}),
+					statusSymbol,
+				});
+
+				if (result) {
+					triggerWorkspaceEvent(app, "tasklite:tasks-changed", { path: path });
+				}
+				return result;
 			});
 		},
 		createTask: async (input) => {
@@ -388,30 +342,46 @@ export function createTaskLiteCoreApi({
 				throw new TypeError("TaskLite createTask: description must not be empty.");
 			if (input.isFileTask && typeof input.parentLineNumber === "number")
 				throw new TypeError("TaskLite createTask: file-level tasks cannot have a parentLineNumber.");
-			return createTask({
-				app,
-				input,
-				registry,
-				settings: getSettings(),
-				documentStore,
-				defaultAssignee: getDefaultAssignee ? getDefaultAssignee() : getSettings().defaultAssignee,
+			const targetPath = normalizePathLocal(input.path || "Tasks/New_Tasks.md");
+			return fileMutex.runExclusive(targetPath, async () => {
+				await createTask({
+					app,
+					input,
+					registry,
+					settings: getSettings(),
+					documentStore,
+				});
+				triggerWorkspaceEvent(app, "tasklite:tasks-changed", { path: targetPath });
 			});
 		},
 		deleteTask: (path, lineNumber) => {
 			validatePath(path);
 			validateLineNumber(lineNumber);
-			return deleteFileTask({ app, path, lineNumber, registry, documentStore });
+			return fileMutex.runExclusive(path, async () => {
+				const result = await deleteFileTask({ app, path, lineNumber, registry, documentStore });
+				if (result) {
+					triggerWorkspaceEvent(app, "tasklite:tasks-changed", { path: path });
+				}
+				return result;
+			});
 		},
 		editTask: (path, lineNumber, patch) => {
 			validatePath(path);
 			validateLineNumber(lineNumber);
-			return editFileTask({
-				app,
-				path,
-				lineNumber,
-				registry,
-				documentStore,
-				patch,
+			return fileMutex.runExclusive(path, async () => {
+				const result = await editFileTask({
+					app,
+					path,
+					lineNumber,
+					registry,
+					settings: getSettings(),
+					documentStore,
+					patch,
+				});
+				if (result) {
+					triggerWorkspaceEvent(app, "tasklite:tasks-changed", { path: path });
+				}
+				return result;
 			});
 		},
 		executeTasksToggleCommand: (line, path) => {
@@ -449,21 +419,29 @@ export function createTaskLiteCoreApi({
 			return result?.replacement.join("\n") ?? line;
 		},
 		listAssignees: async () => {
-			return getSettings().assignees || [];
+			const configured = getSettings().assignees || [];
+			const defaultIdentity =
+				typeof window !== "undefined" && window.localStorage
+					? window.localStorage.getItem("tasklite-my-identity")?.trim()
+					: null;
+			const set = new Set(configured);
+			if (defaultIdentity) {
+				set.add(defaultIdentity);
+			}
+			const list = Array.from(set).sort((a, b) => a.localeCompare(b));
+			if (defaultIdentity && list.includes(defaultIdentity)) {
+				return [defaultIdentity, ...list.filter((x) => x !== defaultIdentity)];
+			}
+			return list;
 		},
 		getDefaultAssignee: () => {
-			if (getDefaultAssignee) return getDefaultAssignee();
-			return getSettings().defaultAssignee || "";
-		},
-		setDefaultAssignee: async (assignee: string) => {
-			if (setDefaultAssignee) {
-				await setDefaultAssignee(assignee);
-			} else {
-				getSettings().defaultAssignee = assignee;
+			if (typeof window !== "undefined" && window.localStorage) {
+				return (
+					window.localStorage.getItem("tasklite-my-identity")?.trim() || ""
+				);
 			}
+			return "";
 		},
-		listStatuses: () => registry.getAll(),
-		getStatusCycle: () => [...(getSettings().statusCycle || [])],
 		generateTaskId: (description, options) => {
 			const existingIds = new Set<string>();
 			if (documentStore) {
@@ -479,33 +457,8 @@ export function createTaskLiteCoreApi({
 				existingIds,
 			});
 		},
+		isQueryExcludingCompleted: (query: string) => doesQueryExcludeCompleted(query),
 	};
-}
-
-async function listTaskByLocation({
-	app,
-	path,
-	lineNumber,
-	registry,
-	documentStore,
-}: {
-	app: App;
-	path: string;
-	lineNumber: number;
-	registry: StatusRegistry;
-	documentStore?: TaskDocumentStore;
-}): Promise<TaskLiteTaskRecord | null> {
-	const records = await listTasks({
-		app,
-		registry,
-		documentStore,
-		options: {
-			includeCompleted: true,
-			includeCancelled: true,
-			includeChildren: true,
-		},
-	});
-	return records.find((record) => record.path === path && record.lineNumber === lineNumber) ?? null;
 }
 
 /** Validate API path parameter. */
@@ -579,29 +532,15 @@ async function createTask({
 	registry,
 	settings,
 	documentStore,
-	defaultAssignee,
 }: {
 	app: App;
 	input: CreateTaskInput;
 	registry: StatusRegistry;
 	settings: TaskLiteSettings;
 	documentStore?: TaskDocumentStore;
-	defaultAssignee?: string;
 }): Promise<void> {
 	const statusSymbol = input.status ?? " ";
 	const statusConfig = registry.get(statusSymbol);
-	let assignee = input.assignee ?? [];
-	if (
-		assignee.length === 0 &&
-		settings.autoAssignDefault &&
-		defaultAssignee
-	) {
-		assignee = [defaultAssignee];
-	}
-	const startDate = input.dates?.start ?? null;
-	const rawDue = input.dates?.due ?? null;
-	const resolvedDue = resolveDueDateFromStart(rawDue, startDate) ?? rawDue;
-
 	const taskLine: TaskLine = {
 		listMarker: "-",
 		data: {
@@ -609,10 +548,10 @@ async function createTask({
 			description: input.description,
 			priority: normalizePriority(input.priority),
 			dates: {
-				start: startDate,
+				start: input.dates?.start ?? null,
 				created: input.dates?.created ?? null,
 				scheduled: input.dates?.scheduled ?? null,
-				due: resolvedDue,
+				due: input.dates?.due ?? null,
 				done: input.dates?.done ?? null,
 				cancelled: input.dates?.cancelled ?? null,
 				remind: input.dates?.remind ?? null,
@@ -621,7 +560,7 @@ async function createTask({
 			onCompletion: input.onCompletion ?? null,
 			dependsOn: input.dependsOn ?? null,
 			id: input.id ?? null,
-			assignee,
+			assignee: input.assignee ?? [],
 			location: input.location ?? null,
 			blockLink: null,
 			tags: [],
@@ -662,8 +601,8 @@ async function createTask({
 		if (input.dependsOn !== undefined && input.dependsOn !== null) {
 			fmPatch["dependsOn"] = input.dependsOn;
 		}
-		if (assignee.length > 0) {
-			fmPatch["assignee"] = assignee;
+		if (input.assignee !== undefined && input.assignee.length > 0) {
+			fmPatch["assignee"] = input.assignee;
 		}
 		if (input.location !== undefined && input.location !== null) {
 			fmPatch["location"] = input.location;
@@ -673,7 +612,7 @@ async function createTask({
 			if (d.start !== undefined && d.start !== null) fmPatch["start"] = d.start;
 			if (d.created !== undefined && d.created !== null) fmPatch["created"] = d.created;
 			if (d.scheduled !== undefined && d.scheduled !== null) fmPatch["scheduled"] = d.scheduled;
-			if (d.due !== undefined && d.due !== null) fmPatch["due"] = resolvedDue;
+			if (d.due !== undefined && d.due !== null) fmPatch["due"] = d.due;
 			if (d.done !== undefined && d.done !== null) fmPatch["done"] = d.done;
 			if (d.cancelled !== undefined && d.cancelled !== null) fmPatch["cancelled"] = d.cancelled;
 			if (d.remind !== undefined && d.remind !== null) fmPatch["remind"] = d.remind;
@@ -699,9 +638,16 @@ async function createTask({
 
 	const parentPrefix = parentNode ? parentNode.indentation : "";
 	const indentPrefix = parentNode ? `${parentPrefix}${oneLevelIndent}` : "";
-	const line = serializeTaskLine(taskLine, indentPrefix, registry);
+	const format = settings.preferredTaskFormat ?? "dataview";
+	const startDate = input.dates?.start ?? null;
+	const rawDue = input.dates?.due;
+	const resolvedDue = rawDue !== undefined && rawDue !== null ? (resolveDueDateFromStart(rawDue, startDate) ?? rawDue) : rawDue;
+	if (input.dates && resolvedDue !== undefined) {
+		taskLine.data.dates.due = resolvedDue;
+	}
 
-	// eslint-disable-next-line @typescript-eslint/no-unsafe-call -- String .trimStart() on well-typed task line; reviewer lints compiled JS
+	const line = serializeTaskLine(taskLine, indentPrefix, registry, format);
+
 	const insertion = parentNode
 		? `${parentPrefix}${oneLevelIndent}${line.trimStart()}`
 		: line;
@@ -784,6 +730,7 @@ async function editFileTask({
 	path,
 	lineNumber,
 	registry,
+	settings,
 	documentStore,
 	patch,
 }: {
@@ -791,6 +738,7 @@ async function editFileTask({
 	path: string;
 	lineNumber: number;
 	registry: StatusRegistry;
+	settings: TaskLiteSettings;
 	documentStore?: TaskDocumentStore;
 	patch: EditTaskPatch;
 }): Promise<boolean> {
@@ -831,12 +779,12 @@ async function editFileTask({
 		if (patch.location !== undefined) data.location = patch.location;
 		if (patch.dates) {
 			const d = patch.dates;
-			const startDate = d.start !== undefined ? d.start : data.dates.start;
 			if (d.start !== undefined) data.dates.start = d.start;
 			if (d.scheduled !== undefined) data.dates.scheduled = d.scheduled;
 			if (d.due !== undefined) {
-				data.dates.due = resolveDueDateFromStart(d.due, startDate) ?? d.due;
-			}
+			const startDate = d.start !== undefined ? d.start : data.dates.start;
+			data.dates.due = resolveDueDateFromStart(d.due, startDate) ?? d.due;
+		}
 			if (d.remind !== undefined) data.dates.remind = d.remind;
 			if (d.done !== undefined) data.dates.done = d.done;
 			if (d.cancelled !== undefined) data.dates.cancelled = d.cancelled;
@@ -871,12 +819,9 @@ async function editFileTask({
 	if (patch.location !== undefined) data.location = patch.location;
 	if (patch.dates) {
 		const d = patch.dates;
-		const startDate = d.start !== undefined ? d.start : data.dates.start;
 		if (d.start !== undefined) data.dates.start = d.start;
 		if (d.scheduled !== undefined) data.dates.scheduled = d.scheduled;
-		if (d.due !== undefined) {
-			data.dates.due = resolveDueDateFromStart(d.due, startDate) ?? d.due;
-		}
+		if (d.due !== undefined) data.dates.due = d.due;
 		if (d.remind !== undefined) data.dates.remind = d.remind;
 		if (d.done !== undefined) data.dates.done = d.done;
 		if (d.cancelled !== undefined) data.dates.cancelled = d.cancelled;
@@ -886,7 +831,8 @@ async function editFileTask({
 	const updatedTask: TaskLine = { ...node.task, data };
 	const depth = taskDepth(node);
 	const indent = getIndentPrefix(depth, app);
-	lines[lineNumber] = serializeTaskLine(updatedTask, indent, registry);
+	const format = settings.preferredTaskFormat ?? "dataview";
+	lines[lineNumber] = serializeTaskLine(updatedTask, indent, registry, format);
 	const nextContent = lines.join("\n");
 	await app.vault.modify(file, nextContent);
 	await documentStore?.replaceDocumentContent(file, nextContent);
@@ -964,8 +910,8 @@ async function updateFileTask({
 			(behavior === "uncancel" &&
 				settings.toggleBehavior.cascadeUncancel);
 
+		let linesChanged = false;
 		if (cascade) {
-			let linesChanged = false;
 			for (let i = 0; i < lines.length; i++) {
 				const node = tree.byLine.get(i);
 				if (node?.task) {
@@ -981,6 +927,7 @@ async function updateFileTask({
 						{ ...node.task, data: nodeUpdatedData },
 						indent,
 						registry,
+						settings.preferredTaskFormat ?? "dataview",
 					);
 					linesChanged = true;
 				}
@@ -1163,6 +1110,7 @@ function normalizeApiToggledLine(
 		{ ...task, data: updatedData },
 		indentPrefix,
 		registry,
+		settings.preferredTaskFormat ?? "dataview",
 	);
 }
 
@@ -1269,4 +1217,12 @@ async function listFrontmatterTasks({
 		if (record) records.push(record);
 	}
 	return records;
+}
+interface WorkspaceEventTrigger {
+	trigger(name: string, ...data: unknown[]): void;
+}
+
+function triggerWorkspaceEvent(app: App, name: string, data: unknown): void {
+	const ws = app.workspace as unknown as Partial<WorkspaceEventTrigger> | undefined;
+	ws?.trigger?.(name, data);
 }

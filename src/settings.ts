@@ -1,9 +1,9 @@
 import { Notice, PluginSettingTab, Setting, type App } from "obsidian";
 import type TaskLitePlugin from "./main";
 import { t, type I18nKey } from "./i18n";
-import { normalizeDocumentLines } from "./model/format";
+import { normalizeLineIndentation } from "./model/format";
 import { getVaultIndentConfig } from "./editor/editorUtils";
-import { normalizeAssignees } from "./model/assignee";
+import { normalizeVaultTaskFormat } from "./editor/formatNormalization";
 
 export interface ToggleBehaviorSettings {
 	cascadeFinish: boolean;
@@ -23,11 +23,8 @@ export interface TaskLiteSettings {
 	copySubtasksOnRecurrence: boolean;
 	autoSuggestInEditor: boolean;
 	toggleBehavior: ToggleBehaviorSettings;
-	statusCycle: string[];
 	assignees: string[];
-	defaultAssignee: string;
-	autoAssignDefault: boolean;
-	storeDefaultAssigneeLocally: boolean;
+	preferredTaskFormat: "dataview" | "emoji";
 }
 
 export const DEFAULT_TOGGLE_BEHAVIOR: ToggleBehaviorSettings = {
@@ -48,11 +45,8 @@ export const DEFAULT_SETTINGS: TaskLiteSettings = {
 	copySubtasksOnRecurrence: true,
 	autoSuggestInEditor: true,
 	toggleBehavior: DEFAULT_TOGGLE_BEHAVIOR,
-	statusCycle: [" ", "x", "/", "-"],
 	assignees: [],
-	defaultAssignee: "",
-	autoAssignDefault: true,
-	storeDefaultAssigneeLocally: true,
+	preferredTaskFormat: "dataview",
 };
 
 export class TaskLiteSettingTab extends PluginSettingTab {
@@ -63,6 +57,82 @@ export class TaskLiteSettingTab extends PluginSettingTab {
 	display(): void {
 		const {containerEl} = this;
 		containerEl.empty();
+
+		this.addHeading(containerEl, "settings.heading.format");
+		new Setting(containerEl)
+			.setName(t("settings.preferredTaskFormat.name"))
+			.setDesc(t("settings.preferredTaskFormat.desc"))
+			.addDropdown((drop) => {
+				drop.addOption("dataview", t("settings.preferredTaskFormat.dataview"));
+				drop.addOption("emoji", t("settings.preferredTaskFormat.emoji"));
+				drop.setValue(this.plugin.settings.preferredTaskFormat ?? "dataview");
+				drop.onChange(async (val) => {
+					this.plugin.settings.preferredTaskFormat = val as "dataview" | "emoji";
+					await this.plugin.saveSettings();
+					this.display();
+				});
+			});
+
+		const currentFormat = this.plugin.settings.preferredTaskFormat ?? "dataview";
+		const formatLabel =
+			currentFormat === "dataview"
+				? t("settings.preferredTaskFormat.dataview")
+				: t("settings.preferredTaskFormat.emoji");
+		const formatShortLabel =
+			currentFormat === "dataview" ? "Dataview" : "Emoji";
+
+		new Setting(containerEl)
+			.setName(t("settings.normalizeTaskFormatAll.name"))
+			.setDesc(
+				t("settings.normalizeTaskFormatAll.desc").replace(
+					"{format}",
+					formatLabel,
+				),
+			)
+			.addButton((button) =>
+				button
+					.setButtonText(
+						t("settings.normalizeTaskFormatAll.button").replace(
+							"{format}",
+							formatShortLabel,
+						),
+					)
+					.setCta()
+					.onClick(async () => {
+						button.setDisabled(true);
+						button.setButtonText(t("common.loading"));
+						try {
+							new Notice(t("notice.normalizingTaskFormatAllStarted"));
+							const { totalUpdatedFiles, totalUpdatedLines } =
+								await normalizeVaultTaskFormat(
+									this.app,
+									this.plugin,
+									currentFormat,
+								);
+							new Notice(
+								t("notice.normalizedTaskFormatAllFinished")
+									.replace("{files}", totalUpdatedFiles.toString())
+									.replace("{lines}", totalUpdatedLines.toString()),
+							);
+						} catch (error) {
+							console.error(
+								"TaskLite: failed to normalize task format across vault",
+								error,
+							);
+							new Notice(
+								"Failed to normalize task format: " +
+									String(error),
+							);
+						} finally {
+							button.setDisabled(false);
+							button.setButtonText(
+								t(
+									"settings.normalizeTaskFormatAll.button",
+								).replace("{format}", formatShortLabel),
+							);
+						}
+					}),
+			);
 
 		this.addHeading(containerEl, "settings.heading.dates");
 		this.addToggleSetting(containerEl, "settings.setDoneDate.name", "settings.setDoneDate.desc", this.plugin.settings.setDoneDate, async (v) => { this.plugin.settings.setDoneDate = v; await this.plugin.saveSettings(); });
@@ -83,39 +153,6 @@ export class TaskLiteSettingTab extends PluginSettingTab {
 					new Notice(t("notice.reloadForSuggestions"));
 				}),
 			);
-
-		this.addHeading(containerEl, "settings.heading.assignee");
-		new Setting(containerEl)
-			.setName(t("settings.defaultAssignee.name"))
-			.setDesc(t("settings.defaultAssignee.desc"))
-			.addText((text) =>
-				text
-					.setPlaceholder("Sunny")
-					.setValue(this.plugin.getDefaultAssignee())
-					.onChange(async (value) => {
-						await this.plugin.setDefaultAssignee(value);
-					}),
-			);
-		this.addToggleSetting(
-			containerEl,
-			"settings.autoAssignDefault.name",
-			"settings.autoAssignDefault.desc",
-			this.plugin.settings.autoAssignDefault,
-			async (v) => {
-				this.plugin.settings.autoAssignDefault = v;
-				await this.plugin.saveSettings();
-			},
-		);
-		this.addToggleSetting(
-			containerEl,
-			"settings.storeDefaultAssigneeLocally.name",
-			"settings.storeDefaultAssigneeLocally.desc",
-			this.plugin.settings.storeDefaultAssigneeLocally,
-			async (v) => {
-				this.plugin.settings.storeDefaultAssigneeLocally = v;
-				await this.plugin.saveSettings();
-			},
-		);
 
 		new Setting(containerEl)
 			.setName(t("settings.normalizeIndentsAll.name"))
@@ -140,15 +177,16 @@ export class TaskLiteSettingTab extends PluginSettingTab {
 							const content = await this.app.vault.read(file);
 							const lines = content.length > 0 ? content.split("\n") : [];
 
-							const newLines = normalizeDocumentLines(lines, useTab, tabSize);
 							let fileChanged = false;
 							let fileUpdatedLines = 0;
-							for (let i = 0; i < lines.length; i++) {
-								if (lines[i] !== newLines[i]) {
+							const newLines = lines.map((line) => {
+								const newLine = normalizeLineIndentation(line, useTab, tabSize);
+								if (newLine !== line) {
 									fileChanged = true;
 									fileUpdatedLines++;
 								}
-							}
+								return newLine;
+							});
 
 							if (fileChanged) {
 								const newContent = newLines.join("\n");
@@ -183,6 +221,38 @@ export class TaskLiteSettingTab extends PluginSettingTab {
 			{key: "parentOnUncancel", nameKey: "settings.parentOnUncancel.name", descKey: "settings.parentOnUncancel.desc"},
 		]);
 
+		this.addHeading(containerEl, "settings.heading.assignees");
+		new Setting(containerEl)
+			.setName(t("settings.assignees.name"))
+			.setDesc(t("settings.assignees.desc"))
+			.addTextArea((text) => {
+				text.setPlaceholder(t("settings.assignees.placeholder"))
+					.setValue((this.plugin.settings.assignees || []).join(", "))
+					.onChange(async (val) => {
+						this.plugin.settings.assignees = val
+							.split(/[,，\n]/)
+							.map((s) => s.trim())
+							.filter(Boolean);
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName(t("settings.assignees.myDefault.name"))
+			.setDesc(t("settings.assignees.myDefault.desc"))
+			.addText((text) => {
+				const current = (typeof window !== "undefined" && window.localStorage?.getItem("tasklite-my-identity")) || "";
+				text.setValue(current).onChange((val) => {
+					const trimmed = val.trim();
+					if (typeof window !== "undefined" && window.localStorage) {
+						if (trimmed) {
+							window.localStorage.setItem("tasklite-my-identity", trimmed);
+						} else {
+							window.localStorage.removeItem("tasklite-my-identity");
+						}
+					}
+				});
+			});
 	}
 
 	private addHeading(containerEl: HTMLElement, key: I18nKey): void {
@@ -222,8 +292,6 @@ export function mergeSettings(loaded: Partial<TaskLiteSettings> | null | undefin
 		...DEFAULT_SETTINGS,
 		...safe,
 		toggleBehavior,
-		statusCycle: normalizeStatusCycle(safe.statusCycle),
-		assignees: normalizeAssignees(safe.assignees),
 	};
 }
 
@@ -236,11 +304,7 @@ function pickKnownKeys(obj: Partial<TaskLiteSettings>): Partial<TaskLiteSettings
 		copySubtasksOnRecurrence,
 		autoSuggestInEditor,
 		toggleBehavior,
-		statusCycle,
 		assignees,
-		defaultAssignee,
-		autoAssignDefault,
-		storeDefaultAssigneeLocally,
 	} = obj;
 	return {
 		setCreatedDate,
@@ -249,18 +313,6 @@ function pickKnownKeys(obj: Partial<TaskLiteSettings>): Partial<TaskLiteSettings
 		copySubtasksOnRecurrence,
 		autoSuggestInEditor,
 		toggleBehavior,
-		statusCycle,
 		assignees,
-		defaultAssignee,
-		autoAssignDefault,
-		storeDefaultAssigneeLocally,
 	};
-}
-
-function normalizeStatusCycle(value: unknown): string[] {
-	if (!Array.isArray(value)) return [...DEFAULT_SETTINGS.statusCycle];
-	const cycle = value
-		.filter((symbol): symbol is string => typeof symbol === "string")
-		.filter((symbol, index, array) => array.indexOf(symbol) === index);
-	return cycle.length > 0 ? cycle : [...DEFAULT_SETTINGS.statusCycle];
 }

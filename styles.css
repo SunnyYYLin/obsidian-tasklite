@@ -63,15 +63,18 @@
 	padding: 0;
 }
 
+.taskslite-list-view .view-content.taskslite-list-root,
 .taskslite-list-root {
+	box-sizing: border-box;
 	min-height: 100%;
-	padding: 1rem;
+	padding: 1rem 0.85rem;
 	padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px) + 4.5rem);
 	background: var(--background-primary);
 	color: var(--text-normal);
 }
 
 .taskslite-list-layout {
+	box-sizing: border-box;
 	width: min(58rem, 100%);
 	margin: 0 auto;
 }
@@ -513,8 +516,9 @@
 		border-radius: 999px;
 	}
 
+	.taskslite-list-view .view-content.taskslite-list-root,
 	.taskslite-list-root {
-		padding: 0.75rem;
+		padding: 0.75rem 0.65rem;
 		padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px) + 7.5rem);
 	}
 
@@ -585,3 +589,292 @@
 		margin-left: 2.25rem;
 	}
 }
+
+/* ---------------------------------------------------------------------------
+ * TaskLite: Dataview Task Key to Emoji Replacement (Scoped purely to task keys)
+ * --------------------------------------------------------------------------- */
+
+/* TaskLite Fallback Capsule Container for Dataview-disabled mode */
+.dataview.inline-field.tasklite-fallback {
+	display: inline-flex;
+	align-items: center;
+	border-radius: 4px;
+	background-color: var(--background-secondary-alt, var(--background-secondary));
+	border: 1px solid var(--background-modifier-border);
+	padding: 0 4px;
+	margin: 0 2px;
+	font-size: 0.85em;
+	line-height: 1.4;
+	vertical-align: baseline;
+	color: var(--text-normal);
+}
+
+.dataview.inline-field.tasklite-fallback .inline-field-key {
+	display: inline-flex;
+	align-items: center;
+	color: var(--text-muted);
+}
+
+.dataview.inline-field.tasklite-fallback .inline-field-value {
+	display: inline;
+	padding-left: 2px;
+}
+
+/* Hide text and optimize padding for recognized task keys only */
+.dataview.inline-field-key[data-dv-key="due" i],
+.dataview.inline-field-key[data-dv-norm-key="due" i],
+.dataview.inline-field[data-dv-key="due" i] .inline-field-key,
+.dataview.inline-field[data-dv-norm-key="due" i] .inline-field-key,
+.dataview.inline-field-key[data-dv-key="scheduled" i],
+.dataview.inline-field-key[data-dv-norm-key="scheduled" i],
+.dataview.inline-field[data-dv-key="scheduled" i] .inline-field-key,
+.dataview.inline-field[data-dv-norm-key="scheduled" i] .inline-field-key,
+.dataview.inline-field-key[data-dv-key="start" i],
+.dataview.inline-field-key[data-dv-norm-key="start" i],
+.dataview.inline-field[data-dv-key="start" i] .inline-field-key,
+.dataview.inline-field[data-dv-norm-key="start" i] .inline-field-key,
+.dataview.inline-field-key[data-dv-key="created" i],
+.dataview.inline-field-key[data-dv-norm-key="created" i],
+.dataview.inline-field[data-dv-key="created" i] .inline-field-key,
+.dataview.inline-field[data-dv-norm-key="created" i] .inline-field-key,
+.dataview.inline-field-key[data-dv-key="completion" i],
+.dataview.inline-field-key[data-dv-norm-key="completion" i],
+.dataview.inline-field[data-dv-key="completion" i] .inline-field-key,
+.dataview.inline-field[data-dv-norm-key="completion" i] .inline-field-key,
+.dataview.inline-field-key[data-dv-key="done" i],
+.dataview.inline-field-key[data-dv-norm-key="done" i],
+.dataview.inline-field[data-dv-key="done" i] .inline-field-key,
+.dataview.inline-field[data-dv-norm-key="done" i] .inline-field-key,
+.dataview.inline-field-key[data-dv-key="cancelled" i],
+.dataview.inline-field-key[data-dv-norm-key="cancelled" i],
+.dataview.inline-field[data-dv-key="cancelled" i] .inline-field-key,
+.dataview.inline-field[data-dv-norm-key="cancelled" i] .inline-field-key,
+.dataview.inline-field-key[data-dv-key="remind" i],
+.dataview.inline-field-key[data-dv-norm-key="remind" i],
+.dataview.inline-field[data-dv-key="remind" i] .inline-field-key,
+.dataview.inline-field[data-dv-norm-key="remind" i] .inline-field-key,
+.dataview.inline-field-key[data-dv-key="priority" i],
+.dataview.inline-field-key[data-dv-norm-key="priority" i],
+.dataview.inline-field[data-dv-key="priority" i] .inline-field-key,
+.dataview.inline-field[data-dv-norm-key="priority" i] .inline-field-key,
+.dataview.inline-field-key[data-dv-key="repeat" i],
+.dataview.inline-field-key[data-dv-norm-key="repeat" i],
+.dataview.inline-field[data-dv-key="repeat" i] .inline-field-key,
+.dataview.inline-field[data-dv-norm-key="repeat" i] .inline-field-key,
+.dataview.inline-field-key[data-dv-key="recurrence" i],
+.dataview.inline-field-key[data-dv-norm-key="recurrence" i],
+.dataview.inline-field[data-dv-key="recurrence" i] .inline-field-key,
+.dataview.inline-field[data-dv-norm-key="recurrence" i] .inline-field-key,
+.dataview.inline-field-key[data-dv-key="assignee" i],
+.dataview.inline-field-key[data-dv-norm-key="assignee" i],
+.dataview.inline-field[data-dv-key="assignee" i] .inline-field-key,
+.dataview.inline-field[data-dv-norm-key="assignee" i] .inline-field-key,
+.dataview.inline-field-key[data-dv-key="assigned" i],
+.dataview.inline-field-key[data-dv-norm-key="assigned" i],
+.dataview.inline-field[data-dv-key="assigned" i] .inline-field-key,
+.dataview.inline-field[data-dv-norm-key="assigned" i] .inline-field-key,
+.dataview.inline-field-key[data-dv-key="person" i],
+.dataview.inline-field-key[data-dv-norm-key="person" i],
+.dataview.inline-field[data-dv-key="person" i] .inline-field-key,
+.dataview.inline-field[data-dv-norm-key="person" i] .inline-field-key,
+.dataview.inline-field-key[data-dv-key="id" i],
+.dataview.inline-field-key[data-dv-norm-key="id" i],
+.dataview.inline-field[data-dv-key="id" i] .inline-field-key,
+.dataview.inline-field[data-dv-norm-key="id" i] .inline-field-key,
+.dataview.inline-field-key[data-dv-key="dependson" i],
+.dataview.inline-field-key[data-dv-norm-key="dependson" i],
+.dataview.inline-field[data-dv-key="dependson" i] .inline-field-key,
+.dataview.inline-field[data-dv-norm-key="dependson" i] .inline-field-key,
+.dataview.inline-field-key[data-dv-key="blockedby" i],
+.dataview.inline-field-key[data-dv-norm-key="blockedby" i],
+.dataview.inline-field[data-dv-key="blockedby" i] .inline-field-key,
+.dataview.inline-field[data-dv-norm-key="blockedby" i] .inline-field-key,
+.dataview.inline-field-key[data-dv-key="oncompletion" i],
+.dataview.inline-field-key[data-dv-norm-key="oncompletion" i],
+.dataview.inline-field[data-dv-key="oncompletion" i] .inline-field-key,
+.dataview.inline-field[data-dv-norm-key="oncompletion" i] .inline-field-key,
+.dataview.inline-field-key[data-dv-key="location" i],
+.dataview.inline-field-key[data-dv-norm-key="location" i],
+.dataview.inline-field[data-dv-key="location" i] .inline-field-key,
+.dataview.inline-field[data-dv-norm-key="location" i] .inline-field-key,
+.dataview.inline-field-key[data-dv-key="place" i],
+.dataview.inline-field-key[data-dv-norm-key="place" i],
+.dataview.inline-field[data-dv-key="place" i] .inline-field-key,
+.dataview.inline-field[data-dv-norm-key="place" i] .inline-field-key,
+.dataview.inline-field-key[data-dv-key="loc" i],
+.dataview.inline-field-key[data-dv-norm-key="loc" i],
+.dataview.inline-field[data-dv-key="loc" i] .inline-field-key,
+.dataview.inline-field[data-dv-norm-key="loc" i] .inline-field-key {
+	font-size: 0 !important;
+	padding-left: 6px;
+	padding-right: 6px;
+}
+
+/* Emoji mappings */
+.dataview.inline-field-key[data-dv-key="due" i]::after,
+.dataview.inline-field-key[data-dv-norm-key="due" i]::after,
+.dataview.inline-field[data-dv-key="due" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="due" i] .inline-field-key::after {
+	content: "📅";
+	font-size: 0.95rem;
+}
+
+.dataview.inline-field-key[data-dv-key="scheduled" i]::after,
+.dataview.inline-field-key[data-dv-norm-key="scheduled" i]::after,
+.dataview.inline-field[data-dv-key="scheduled" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="scheduled" i] .inline-field-key::after {
+	content: "⏳";
+	font-size: 0.95rem;
+}
+
+.dataview.inline-field-key[data-dv-key="start" i]::after,
+.dataview.inline-field-key[data-dv-norm-key="start" i]::after,
+.dataview.inline-field[data-dv-key="start" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="start" i] .inline-field-key::after {
+	content: "🛫";
+	font-size: 0.95rem;
+}
+
+.dataview.inline-field-key[data-dv-key="created" i]::after,
+.dataview.inline-field-key[data-dv-norm-key="created" i]::after,
+.dataview.inline-field[data-dv-key="created" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="created" i] .inline-field-key::after {
+	content: "➕";
+	font-size: 0.95rem;
+}
+
+.dataview.inline-field-key[data-dv-key="completion" i]::after,
+.dataview.inline-field-key[data-dv-norm-key="completion" i]::after,
+.dataview.inline-field[data-dv-key="completion" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="completion" i] .inline-field-key::after,
+.dataview.inline-field-key[data-dv-key="done" i]::after,
+.dataview.inline-field-key[data-dv-norm-key="done" i]::after,
+.dataview.inline-field[data-dv-key="done" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="done" i] .inline-field-key::after {
+	content: "✅";
+	font-size: 0.95rem;
+}
+
+.dataview.inline-field-key[data-dv-key="cancelled" i]::after,
+.dataview.inline-field-key[data-dv-norm-key="cancelled" i]::after,
+.dataview.inline-field[data-dv-key="cancelled" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="cancelled" i] .inline-field-key::after {
+	content: "❌";
+	font-size: 0.95rem;
+}
+
+.dataview.inline-field-key[data-dv-key="remind" i]::after,
+.dataview.inline-field-key[data-dv-norm-key="remind" i]::after,
+.dataview.inline-field[data-dv-key="remind" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="remind" i] .inline-field-key::after {
+	content: "⏰";
+	font-size: 0.95rem;
+}
+
+.dataview.inline-field-key[data-dv-key="priority" i]::after,
+.dataview.inline-field-key[data-dv-norm-key="priority" i]::after,
+.dataview.inline-field[data-dv-key="priority" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="priority" i] .inline-field-key::after {
+	content: "🔺";
+	font-size: 0.95rem;
+}
+
+.dataview.inline-field[data-dv-key="priority" i][data-dv-value="highest" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="priority" i][data-dv-value="highest" i] .inline-field-key::after {
+	content: "🔺";
+}
+
+.dataview.inline-field[data-dv-key="priority" i][data-dv-value="high" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="priority" i][data-dv-value="high" i] .inline-field-key::after {
+	content: "⏫";
+}
+
+.dataview.inline-field[data-dv-key="priority" i][data-dv-value="medium" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="priority" i][data-dv-value="medium" i] .inline-field-key::after {
+	content: "🔼";
+}
+
+.dataview.inline-field[data-dv-key="priority" i][data-dv-value="low" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="priority" i][data-dv-value="low" i] .inline-field-key::after {
+	content: "🔽";
+}
+
+.dataview.inline-field[data-dv-key="priority" i][data-dv-value="lowest" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="priority" i][data-dv-value="lowest" i] .inline-field-key::after {
+	content: "⏬";
+}
+
+.dataview.inline-field-key[data-dv-key="repeat" i]::after,
+.dataview.inline-field-key[data-dv-norm-key="repeat" i]::after,
+.dataview.inline-field[data-dv-key="repeat" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="repeat" i] .inline-field-key::after,
+.dataview.inline-field-key[data-dv-key="recurrence" i]::after,
+.dataview.inline-field-key[data-dv-norm-key="recurrence" i]::after,
+.dataview.inline-field[data-dv-key="recurrence" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="recurrence" i] .inline-field-key::after {
+	content: "🔁";
+	font-size: 0.95rem;
+}
+
+.dataview.inline-field-key[data-dv-key="assignee" i]::after,
+.dataview.inline-field-key[data-dv-norm-key="assignee" i]::after,
+.dataview.inline-field[data-dv-key="assignee" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="assignee" i] .inline-field-key::after,
+.dataview.inline-field-key[data-dv-key="assigned" i]::after,
+.dataview.inline-field-key[data-dv-norm-key="assigned" i]::after,
+.dataview.inline-field[data-dv-key="assigned" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="assigned" i] .inline-field-key::after,
+.dataview.inline-field-key[data-dv-key="person" i]::after,
+.dataview.inline-field-key[data-dv-norm-key="person" i]::after,
+.dataview.inline-field[data-dv-key="person" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="person" i] .inline-field-key::after {
+	content: "👤";
+	font-size: 0.95rem;
+}
+
+.dataview.inline-field-key[data-dv-key="id" i]::after,
+.dataview.inline-field-key[data-dv-norm-key="id" i]::after,
+.dataview.inline-field[data-dv-key="id" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="id" i] .inline-field-key::after {
+	content: "🆔";
+	font-size: 0.95rem;
+}
+
+.dataview.inline-field-key[data-dv-key="dependson" i]::after,
+.dataview.inline-field-key[data-dv-norm-key="dependson" i]::after,
+.dataview.inline-field[data-dv-key="dependson" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="dependson" i] .inline-field-key::after,
+.dataview.inline-field-key[data-dv-key="blockedby" i]::after,
+.dataview.inline-field-key[data-dv-norm-key="blockedby" i]::after,
+.dataview.inline-field[data-dv-key="blockedby" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="blockedby" i] .inline-field-key::after {
+	content: "⛔";
+	font-size: 0.95rem;
+}
+
+.dataview.inline-field-key[data-dv-key="oncompletion" i]::after,
+.dataview.inline-field-key[data-dv-norm-key="oncompletion" i]::after,
+.dataview.inline-field[data-dv-key="oncompletion" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="oncompletion" i] .inline-field-key::after {
+	content: "🏁";
+	font-size: 0.95rem;
+}
+
+.dataview.inline-field-key[data-dv-key="location" i]::after,
+.dataview.inline-field-key[data-dv-norm-key="location" i]::after,
+.dataview.inline-field[data-dv-key="location" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="location" i] .inline-field-key::after,
+.dataview.inline-field-key[data-dv-key="place" i]::after,
+.dataview.inline-field-key[data-dv-norm-key="place" i]::after,
+.dataview.inline-field[data-dv-key="place" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="place" i] .inline-field-key::after,
+.dataview.inline-field-key[data-dv-key="loc" i]::after,
+.dataview.inline-field-key[data-dv-norm-key="loc" i]::after,
+.dataview.inline-field[data-dv-key="loc" i] .inline-field-key::after,
+.dataview.inline-field[data-dv-norm-key="loc" i] .inline-field-key::after {
+	content: "📍";
+	font-size: 0.95rem;
+}
+
+
+

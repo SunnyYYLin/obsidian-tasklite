@@ -1,5 +1,10 @@
-import { ViewPlugin, type EditorView, type PluginValue } from "@codemirror/view";
-import { Notice, type App, type Plugin } from "obsidian";
+import {
+	ViewPlugin,
+	type EditorView,
+	type PluginValue,
+} from "@codemirror/view";
+import type { Extension } from "@codemirror/state";
+import { Notice, type App } from "obsidian";
 import type { StatusRegistry } from "../model/status";
 import type { TaskDocumentStore } from "../model/taskDocumentStore";
 import type { TaskLiteSettings } from "../settings";
@@ -19,7 +24,7 @@ export function createLivePreviewExtension(
 	registry: StatusRegistry,
 	getSettings: () => TaskLiteSettings,
 	documentStore?: TaskDocumentStore,
-): Parameters<Plugin["registerEditorExtension"]>[0] {
+): Extension {
 	return ViewPlugin.fromClass(
 		class TaskLiteLivePreview implements PluginValue {
 			constructor(private readonly view: EditorView) {
@@ -76,29 +81,23 @@ export function createLivePreviewExtension(
 					void documentStore?.replaceDocumentContent(activeFile, this.view.state.doc.toString());
 				}
 
-				this.syncCheckboxDom(target, line.number);
+				const replacementIdx = (line.number - 1) - result.fromLine;
+				const replacementLine = result.replacement[replacementIdx];
+				if (replacementLine !== undefined) {
+					const match = replacementLine.match(/\[(.)\]/u);
+					const symbol = match?.[1] ?? " ";
+					const statusConfig = registry.get(symbol);
+					const isChecked = statusConfig.type === "DONE";
+					setTimeout(() => {
+						target.checked = isChecked;
+					}, 0);
+				}
 
 				if (result.warning) {
 					new Notice(result.warning);
 				}
 			}
-
-			private syncCheckboxDom(target: HTMLInputElement, oneBasedLineNumber: number): void {
-				const apply = (): void => {
-					if (!target.isConnected) return;
-					const text = this.view.state.doc.line(oneBasedLineNumber).text;
-					const symbol = text.match(/\[(.)\]/u)?.[1] ?? " ";
-					const statusConfig = registry.get(symbol);
-					target.checked = statusConfig.type === "DONE";
-					target.indeterminate = statusConfig.type === "IN_PROGRESS";
-					target.dataset.task = symbol;
-					target.setAttribute("data-task", symbol);
-					const listItem = target.closest("li");
-					listItem?.setAttribute("data-task", symbol);
-				};
-				this.view.requestMeasure({ read: () => null, write: apply });
-				window.requestAnimationFrame(apply);
-			}
 		},
 	);
 }
+

@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-tasklite",
-	"version": "0.4.12",
+	"version": "0.5.0",
 	"description": "A lightweight tree-aware task manager for Obsidian.",
 	"main": "main.js",
 	"type": "module",
@@ -26,6 +26,7 @@
 		"jiti": "2.6.1"
 	},
 	"dependencies": {
+		"@codemirror/state": "^6.5.2",
 		"@codemirror/view": "^6.43.0",
 		"obsidian": "1.12.3",
 		"pinyinlite": "^1.2.1",

@@ -2,8 +2,6 @@
 
 TaskLite is a lightweight, tree-aware Obsidian task plugin compatible with the Tasks plugin's emoji metadata format. It focuses on editing and rendering standard Markdown task lines.
 
-![TaskLite demo](imgs/demo.gif)
-
 ## Features
 
 - Tasks-compatible emoji metadata (dates, recurrence, priority, assignee, etc.)
@@ -162,10 +160,10 @@ bun run lint         # ESLint check
 Push a tag matching `x.y.z` to trigger automatic GitHub release:
 
 ```bash
-bun pm version patch # Bumps version in manifest.json and versions.json
+npm version patch    # Bumps version in manifest.json and versions.json
 git push && git push --tags
 ```
 
 ## License
 
-0BSD
+MIT

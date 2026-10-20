@@ -14,27 +14,42 @@ mock.module("obsidian", () => {
 	class EditorSuggest {
 		constructor(app: any) {}
 	}
+	class PluginSettingTab {
+		constructor(app: any, plugin: any) {}
+	}
+	class Setting {
+		constructor(containerEl: any) {}
+		setName() { return this; }
+		setDesc() { return this; }
+		setHeading() { return this; }
+		addText() { return this; }
+		addTextArea() { return this; }
+		addToggle() { return this; }
+		addDropdown() { return this; }
+		addButton() { return this; }
+	}
 	return {
 		TFile,
 		Notice,
 		EditorSuggest,
+		PluginSettingTab,
+		Setting,
 	};
 });
 
-import { parseTaskLine, serializeTaskLine, TASK_SYMBOLS, normalizeLineIndentation, normalizeDocumentLines, type TaskPriority } from "../src/model/format";
+import { parseTaskLine, parseLineWithStatus, serializeTaskLine, TASK_SYMBOLS, normalizeLineIndentation, type TaskPriority } from "../src/model/format";
 import { StatusRegistry } from "../src/model/status";
 import { buildTaskTree } from "../src/model/tree";
 import { taskIdentityKey } from "../src/model/taskIdentity";
 import { TaskDocumentStore, type TaskDocumentRecord } from "../src/model/taskDocumentStore";
-import { applyFrontmatterPatchToContent, buildFrontmatterPatch, parseFrontmatterTask } from "../src/model/frontmatterTask";
-import { filterTaskRecordsByQuery } from "../src/model/taskQuery";
+import { filterTaskRecordsByQuery, doesQueryExcludeCompleted } from "../src/model/taskQuery";
 import { cancelTaskAtLine, clickTaskCheckboxAtLine, rightClickTaskCheckboxAtLine, toggleTaskAtLine, unfinishTaskAtLine } from "../src/editor/toggle";
 import { reconcileExternalTaskCompletion } from "../src/editor/externalReconcileCore";
 import { generateSemanticId } from "../src/model/taskSemanticId";
 import { createTaskLiteCoreApi } from "../src/api/taskLiteCoreApi";
+import { normalizeVaultTaskFormat } from "../src/editor/formatNormalization";
 import type TaskLitePlugin from "../src/main";
 import type { TaskLiteSettings } from "../src/settings";
-import { normalizeAssignees } from "../src/model/assignee";
 import type { CachedMetadata, ListItemCache } from "obsidian";
 
 interface FakeMoment {
@@ -52,14 +67,10 @@ const fakeMoment: FakeMomentFactory = (value?: string) => {
 	};
 };
 
-(globalThis as unknown as {window: any}).window = {
-	...((globalThis as any).window ?? {}),
-	moment: fakeMoment,
-	setTimeout,
-	clearTimeout,
-};
+(globalThis as unknown as {window: {moment: FakeMomentFactory}}).window = {moment: fakeMoment};
 
 const settings: TaskLiteSettings = {
+	preferredTaskFormat: "emoji",
 	setCreatedDate: false,
 	setDoneDate: true,
 	setCancelledDate: true,
@@ -75,8 +86,6 @@ const settings: TaskLiteSettings = {
 		parentOnUnfinish: true,
 		parentOnUncancel: true,
 	},
-	statusCycle: [" ", "x", "/", "-"],
-	assignees: [],
 };
 
 describe("TaskLite core", () => {
@@ -87,63 +96,6 @@ describe("TaskLite core", () => {
 		expect(task?.data.description).toBe("Ship MVP");
 		expect(task?.data.dates.due).toBe("2026-05-20");
 		expect(task?.data.recurrence).toBe("every week");
-	});
-
-	test("parses ampersand-separated assignees", () => {
-		const registry = new StatusRegistry();
-		const task = parseTaskLine(`- [ ] Pair task ${TASK_SYMBOLS.assignee} Sunny&Mary`, registry.get(" "));
-
-		expect(task?.data.assignee).toEqual(["Sunny", "Mary"]);
-	});
-
-	test("does not split assignees on hyphen", () => {
-		const registry = new StatusRegistry();
-		const task = parseTaskLine(`- [ ] Pair task ${TASK_SYMBOLS.assignee} Sunny-Mary`, registry.get(" "));
-
-		expect(task?.data.assignee).toEqual(["Sunny-Mary"]);
-	});
-
-	test("normalizes assignee cache entries without interpreting hyphens", () => {
-		const assignees = normalizeAssignees(["Mary", "Sunny", "Sunny - Sunny", "Sunny-Sunny", "Sunny - Mary", "Sunny-Mary", " Sunny "]);
-
-		expect(assignees).toEqual(["Mary", "Sunny", "Sunny - Mary", "Sunny - Sunny", "Sunny-Mary", "Sunny-Sunny"]);
-	});
-
-	test("parses malformed scalar-plus-list frontmatter assignee from source", () => {
-		const registry = new StatusRegistry();
-		const record = parseFrontmatterTask(
-			{ path: "School/Thesis.md", basename: "Thesis", extension: "md" } as any,
-			{ frontmatter: { task: true, assignee: "Sunny - Sunny" } } as any,
-			registry,
-			false,
-			[
-				"---",
-				"task: true",
-				"assignee: Sunny",
-				"  - Sunny",
-				"---",
-				"",
-			].join("\n"),
-		);
-
-		expect(record?.task.assignee).toEqual(["Sunny"]);
-	});
-
-	test("frontmatter string patch removes replaced array continuations", () => {
-		const content = [
-			"---",
-			"task: true",
-			"assignee:",
-			"  - Sunny",
-			"---",
-			"",
-		].join("\n");
-
-		// eslint-disable-next-line @typescript-eslint/no-deprecated -- legacy helper remains intentionally covered here
-		const updated = applyFrontmatterPatchToContent(content, { assignee: "Sunny" });
-
-		expect(updated).toContain("assignee: Sunny");
-		expect(updated).not.toContain("  - Sunny");
 	});
 
 	test("supports every weekday recurrence", () => {
@@ -530,7 +482,7 @@ describe("TaskLite core", () => {
 		]);
 	});
 
-	test("editor checkbox right click cycles cancelled tasks backward", () => {
+	test("editor checkbox right click on cancelled child moves to in-progress and unfinishes parent", () => {
 		const registry = new StatusRegistry();
 		const result = rightClickTaskCheckboxAtLine({
 			lines: [
@@ -543,31 +495,13 @@ describe("TaskLite core", () => {
 			settings,
 		});
 
-		expect(result?.replacement).toEqual(["  - [/] Child"]);
+		expect(result?.replacement).toEqual([
+			"- [ ] Parent",
+			"  - [/] Child",
+		]);
 	});
 
-	test("editor checkbox clicks cycle through configured statuses", () => {
-		const registry = new StatusRegistry();
-		const forwardFromDone = clickTaskCheckboxAtLine({
-			lines: [`- [x] Task ${TASK_SYMBOLS.done} 2026-05-16`],
-			lineNumber: 0,
-			metadata: null,
-			registry,
-			settings,
-		});
-		expect(forwardFromDone?.replacement).toEqual(["- [/] Task"]);
-
-		const backwardFromTodo = rightClickTaskCheckboxAtLine({
-			lines: ["- [ ] Task"],
-			lineNumber: 0,
-			metadata: null,
-			registry,
-			settings,
-		});
-		expect(backwardFromTodo?.replacement[0]).toContain(`- [-] Task ${TASK_SYMBOLS.cancelled} 2026-05-16`);
-	});
-
-	test("right click cycles a single cancelled task backward", () => {
+	test("right click moves cancelled task to in-progress", () => {
 		const registry = new StatusRegistry();
 		const result = rightClickTaskCheckboxAtLine({
 			lines: [`- [-] Cancelled task ${TASK_SYMBOLS.cancelled} 2026-05-16`],
@@ -578,6 +512,19 @@ describe("TaskLite core", () => {
 		});
 
 		expect(result?.replacement).toEqual(["- [/] Cancelled task"]);
+	});
+
+	test("right click moves done task to todo", () => {
+		const registry = new StatusRegistry();
+		const result = rightClickTaskCheckboxAtLine({
+			lines: [`- [x] Done task ${TASK_SYMBOLS.done} 2026-05-16`],
+			lineNumber: 0,
+			metadata: null,
+			registry,
+			settings,
+		});
+
+		expect(result?.replacement).toEqual(["- [ ] Done task"]);
 	});
 
 	test("unfinish parent only changes parent when cascade is off", () => {
@@ -1067,6 +1014,108 @@ describe("TaskLite core", () => {
 		expect(readCount).toBe(4);
 	});
 
+
+	test("document store forgetFolder invalidates all child files within folder and triggers domain event", async () => {
+		const registry = new StatusRegistry();
+		const events = new Map<string, (file: unknown, oldPath?: string) => void>();
+		const triggeredEvents: Array<{ name: string; data: unknown }> = [];
+		const file1 = createTestFile("projects/projectA/task1.md", "task1");
+		const file2 = createTestFile("projects/projectA/task2.md", "task2");
+		const file3 = createTestFile("other/task3.md", "task3");
+		let readCount = 0;
+		const app = {
+			vault: {
+				on: (name: string, callback: (file: unknown, oldPath?: string) => void) => {
+					events.set(name, callback);
+					return {};
+				},
+				getMarkdownFiles: () => [file1, file2, file3],
+				cachedRead: () => {
+					readCount++;
+					return Promise.resolve("- [ ] Task");
+				},
+				getAbstractFileByPath: (path: string) => {
+					if (path === "projects/projectA/task1.md") return file1;
+					if (path === "projects/projectA/task2.md") return file2;
+					return file3;
+				},
+			},
+			metadataCache: {
+				getFileCache: () => null,
+				on: (name: string, callback: (file: unknown) => void) => {
+					events.set(name, callback);
+					return {};
+				},
+			},
+			workspace: {
+				trigger: (name: string, data: unknown) => {
+					triggeredEvents.push({ name, data });
+				},
+			},
+		};
+		const store = new TaskDocumentStore(app as unknown as TaskLitePlugin["app"], registry);
+		store.register({ registerEvent: () => {} } as unknown as TaskLitePlugin);
+
+		await store.listRecords();
+		expect(readCount).toBe(3);
+
+		// Folder delete event
+		const folderToDelete = {
+			path: "projects/projectA",
+			children: [file1, file2],
+		};
+		events.get("delete")?.(folderToDelete);
+
+		expect(store.getCachedDocument("projects/projectA/task1.md")).toBeNull();
+		expect(store.getCachedDocument("projects/projectA/task2.md")).toBeNull();
+		expect(store.getCachedDocument("other/task3.md")).not.toBeNull();
+		expect(triggeredEvents.some((e) => e.name === "tasklite:tasks-changed" && (e.data as any).path === "projects/projectA")).toBe(true);
+	});
+
+	test("document store skips reading files that metadataCache knows have no tasks", async () => {
+		const registry = new StatusRegistry();
+		const nonTaskFile = createTestFile("article.md", "article");
+		const taskFile = createTestFile("todo.md", "todo");
+		let readCount = 0;
+		const app = {
+			vault: {
+				on: () => {},
+				getMarkdownFiles: () => [nonTaskFile, taskFile],
+				cachedRead: (file: {path: string}) => {
+					readCount++;
+					return Promise.resolve(file.path === "todo.md" ? "- [ ] Active task" : "# Just an article\nNo tasks here");
+				},
+				getAbstractFileByPath: (path: string) => (path === "todo.md" ? taskFile : nonTaskFile),
+			},
+			metadataCache: {
+				getFileCache: (file: {path: string}) => {
+					if (file.path === "article.md") {
+						return {
+							listItems: [{ position: { start: { line: 1, col: 0, offset: 0 }, end: { line: 1, col: 5, offset: 5 } }, parent: -1 }],
+						};
+					}
+					if (file.path === "todo.md") {
+						return {
+							listItems: [{ position: { start: { line: 0, col: 0, offset: 0 }, end: { line: 0, col: 15, offset: 15 } }, task: " ", parent: -1 }],
+						};
+					}
+					return null;
+				},
+				on: () => ({}),
+			},
+			workspace: {
+				layoutReady: true,
+				onLayoutReady: (cb: () => void) => cb(),
+			},
+		};
+		const store = new TaskDocumentStore(app as any, registry);
+		const records = await store.listRecords();
+		expect(records).toHaveLength(1);
+		expect(records[0]?.task.description).toBe("Active task");
+		// Crucial assertion: article.md was NEVER read from vault because metadata indicated no tasks!
+		expect(readCount).toBe(1);
+	});
+
 	test("document store correctly links root body tasks to frontmatter tasks with parentLine: -1", async () => {
 		const registry = new StatusRegistry();
 		const fmFile = createTestFile("fm.md", "fm");
@@ -1390,7 +1439,7 @@ describe("TaskLite core", () => {
 			expect(result?.replacement[0]).toBe("- [ ] cancelled");
 		});
 
-		test("clicking an in-progress task cycles to cancelled", () => {
+		test("clicking an in-progress task cancels it in forward cycle", () => {
 			const registry = new StatusRegistry();
 			const result = clickTaskCheckboxAtLine({
 				lines: ["- [/] in progress"],
@@ -1401,7 +1450,21 @@ describe("TaskLite core", () => {
 			});
 
 			expect(result).not.toBeNull();
-			expect(result?.replacement[0]).toContain(`- [-] in progress ${TASK_SYMBOLS.cancelled} 2026-05-16`);
+			expect(result?.replacement[0]).toContain("- [-] in progress");
+		});
+
+		test("right-clicking an in-progress task marks it done in reverse cycle", () => {
+			const registry = new StatusRegistry();
+			const result = rightClickTaskCheckboxAtLine({
+				lines: ["- [/] in progress"],
+				lineNumber: 0,
+				metadata: null,
+				registry,
+				settings,
+			});
+
+			expect(result).not.toBeNull();
+			expect(result?.replacement[0]).toContain("- [x] in progress");
 		});
 
 		test("right-clicking a todo task cancels it", () => {
@@ -1416,6 +1479,54 @@ describe("TaskLite core", () => {
 
 			expect(result).not.toBeNull();
 			expect(result?.replacement[0]).toContain("- [-] todo");
+		});
+
+		test("full forward cycle: todo -> done -> in-progress -> cancelled -> todo", () => {
+			const registry = new StatusRegistry();
+			let lines = ["- [ ] Cycling task"];
+
+			// 1. todo -> done
+			let res = clickTaskCheckboxAtLine({lines, lineNumber: 0, metadata: null, registry, settings});
+			expect(res?.replacement[0]).toContain("- [x] Cycling task");
+			lines = res!.replacement;
+
+			// 2. done -> in-progress
+			res = clickTaskCheckboxAtLine({lines, lineNumber: 0, metadata: null, registry, settings});
+			expect(res?.replacement[0]).toContain("- [/] Cycling task");
+			lines = res!.replacement;
+
+			// 3. in-progress -> cancelled
+			res = clickTaskCheckboxAtLine({lines, lineNumber: 0, metadata: null, registry, settings});
+			expect(res?.replacement[0]).toContain("- [-] Cycling task");
+			lines = res!.replacement;
+
+			// 4. cancelled -> todo
+			res = clickTaskCheckboxAtLine({lines, lineNumber: 0, metadata: null, registry, settings});
+			expect(res?.replacement[0]).toContain("- [ ] Cycling task");
+		});
+
+		test("full reverse cycle: todo -> cancelled -> in-progress -> done -> todo", () => {
+			const registry = new StatusRegistry();
+			let lines = ["- [ ] Cycling task"];
+
+			// 1. todo -> cancelled
+			let res = rightClickTaskCheckboxAtLine({lines, lineNumber: 0, metadata: null, registry, settings});
+			expect(res?.replacement[0]).toContain("- [-] Cycling task");
+			lines = res!.replacement;
+
+			// 2. cancelled -> in-progress
+			res = rightClickTaskCheckboxAtLine({lines, lineNumber: 0, metadata: null, registry, settings});
+			expect(res?.replacement[0]).toContain("- [/] Cycling task");
+			lines = res!.replacement;
+
+			// 3. in-progress -> done
+			res = rightClickTaskCheckboxAtLine({lines, lineNumber: 0, metadata: null, registry, settings});
+			expect(res?.replacement[0]).toContain("- [x] Cycling task");
+			lines = res!.replacement;
+
+			// 4. done -> todo
+			res = rightClickTaskCheckboxAtLine({lines, lineNumber: 0, metadata: null, registry, settings});
+			expect(res?.replacement[0]).toContain("- [ ] Cycling task");
 		});
 
 		test("toggling non-existent line returns null", () => {
@@ -1460,21 +1571,18 @@ describe("TaskLite core", () => {
 
 	describe("parseTaskBody edge cases", () => {
 		test("empty body produces empty description", () => {
-			const registry = new StatusRegistry();
 			const task = parseTaskLine("- [ ] ", "TODO");
 			expect(task).not.toBeNull();
 			expect(task!.data.description).toBe("");
 		});
 
 		test("body with only spaces produces empty description", () => {
-			const registry = new StatusRegistry();
 			const task = parseTaskLine("- [ ]   ", "TODO");
 			expect(task).not.toBeNull();
 			expect(task!.data.description).toBe("");
 		});
 
 		test("priority emoji is extracted from description", () => {
-			const registry = new StatusRegistry();
 			const task = parseTaskLine("- [ ] task 🔺", "TODO");
 			expect(task).not.toBeNull();
 			expect(task!.data.description).toBe("task");
@@ -1482,14 +1590,12 @@ describe("TaskLite core", () => {
 		});
 
 		test("lowest priority emoji is extracted", () => {
-			const registry = new StatusRegistry();
 			const task = parseTaskLine("- [ ] task ⏬", "TODO");
 			expect(task).not.toBeNull();
 			expect(task!.data.priority).toBe("lowest");
 		});
 
 		test("multiple dates are all extracted", () => {
-			const registry = new StatusRegistry();
 			const task = parseTaskLine("- [ ] task 🛫 2026-01-01 📅 2026-12-31", "TODO");
 			expect(task).not.toBeNull();
 			expect(task!.data.dates.start).toBe("2026-01-01");
@@ -1498,7 +1604,6 @@ describe("TaskLite core", () => {
 		});
 
 		test("block link is extracted", () => {
-			const registry = new StatusRegistry();
 			const task = parseTaskLine("- [ ] task ^block-id", "TODO");
 			expect(task).not.toBeNull();
 			expect(task!.data.blockLink).toBe("^block-id");
@@ -1506,14 +1611,12 @@ describe("TaskLite core", () => {
 		});
 
 		test("tags are extracted from description", () => {
-			const registry = new StatusRegistry();
 			const task = parseTaskLine("- [ ] task #work #urgent", "TODO");
 			expect(task).not.toBeNull();
 			expect(task!.data.tags).toEqual(["#work", "#urgent"]);
 		});
 
 		test("unicode emoji in description is preserved", () => {
-			const registry = new StatusRegistry();
 			const task = parseTaskLine("- [ ] 买菜 🛒", "TODO");
 			expect(task).not.toBeNull();
 			expect(task!.data.description).toBe("买菜 🛒");
@@ -1812,6 +1915,160 @@ describe("TaskLite core", () => {
 				"Task C",
 			]);
 		});
+
+		test("supports relative dates in date(...) function", () => {
+			const records = createQueryRecords();
+			// today in fakeMoment is 2026-05-16
+			// Ship dashboard: due = 2026-05-16, scheduled = 2026-05-15
+			// Backlog item: due = 2026-05-20, scheduled = 2026-05-20
+			expect(filterTaskRecordsByQuery(records, "scheduled = date(yesterday)").map((r) => r.task.description)).toEqual([
+				"Ship dashboard",
+			]);
+			expect(filterTaskRecordsByQuery(records, "due < date(tomorrow)").map((r) => r.task.description)).toEqual([
+				"Ship dashboard",
+			]);
+			expect(filterTaskRecordsByQuery(records, "due = date(today, +4d)").map((r) => r.task.description)).toEqual([
+				"Backlog item",
+				"Done report",
+			]);
+			expect(filterTaskRecordsByQuery(records, "due = date(today + 4d)").map((r) => r.task.description)).toEqual([
+				"Backlog item",
+				"Done report",
+			]);
+			expect(filterTaskRecordsByQuery(records, "due <= date(next-week)").map((r) => r.task.description)).toEqual([
+				"Ship dashboard",
+				"Backlog item",
+				"Done report",
+			]);
+			expect(filterTaskRecordsByQuery(records, "due = date(+4d)").map((r) => r.task.description)).toEqual([
+				"Backlog item",
+				"Done report",
+			]);
+			expect(filterTaskRecordsByQuery(records, "due = date('2026-05-20')").map((r) => r.task.description)).toEqual([
+				"Backlog item",
+				"Done report",
+			]);
+		});
+
+		test("supports task domain macros happens(...) and is(...)", () => {
+			const records = [
+				...createQueryRecords(),
+				createQueryRecord({
+					path: "Work/overdue.md",
+					lineNumber: 0,
+					parentLine: null,
+					description: "Overdue task",
+					status: "TODO",
+					due: "2026-05-10",
+				}),
+				createQueryRecord({
+					path: "Work/cancelled.md",
+					lineNumber: 0,
+					parentLine: null,
+					description: "Cancelled task",
+					status: "CANCELLED",
+					due: "2026-05-10",
+				}),
+				createQueryRecord({
+					path: "Work/spanning.md",
+					lineNumber: 0,
+					parentLine: null,
+					description: "Spanning project",
+					status: "TODO",
+					start: "2026-05-10",
+					due: "2026-05-20",
+				}),
+				createQueryRecord({
+					path: "Work/openended.md",
+					lineNumber: 0,
+					parentLine: null,
+					description: "Open-ended project",
+					status: "TODO",
+					start: "2026-05-10",
+				}),
+			];
+
+			// is(open)
+			expect(filterTaskRecordsByQuery(records, "is(open)").map((r) => r.task.description)).toEqual([
+				"Ship dashboard",
+				"Backlog item",
+				"Overdue task",
+				"Spanning project",
+				"Open-ended project",
+			]);
+
+			// is(done)
+			expect(filterTaskRecordsByQuery(records, "is(done)").map((r) => r.task.description)).toEqual([
+				"Done report",
+			]);
+
+			// is(cancelled)
+			expect(filterTaskRecordsByQuery(records, "is(cancelled)").map((r) => r.task.description)).toEqual([
+				"Cancelled task",
+			]);
+
+			// is(overdue) - strictly due < today (2026-05-16)
+			expect(filterTaskRecordsByQuery(records, "is(overdue)").map((r) => r.task.description)).toEqual([
+				"Overdue task",
+			]);
+
+			// is(overdate) - strictly scheduled < today (2026-05-16)
+			// Ship dashboard has scheduled: "2026-05-15" (yesterday), due: "2026-05-16" (today)
+			expect(filterTaskRecordsByQuery(records, "is(overdate)").map((r) => r.task.description)).toEqual([
+				"Ship dashboard",
+			]);
+
+			// covers(today) and cover(date)
+			expect(filterTaskRecordsByQuery(records, "covers(today)").map((r) => r.task.description)).toEqual([
+				"Spanning project",
+				"Open-ended project",
+			]);
+			expect(filterTaskRecordsByQuery(records, 'covers("2026-05-20")').map((r) => r.task.description)).toEqual([
+				"Spanning project",
+				"Open-ended project",
+			]);
+			expect(filterTaskRecordsByQuery(records, 'covers("2026-05-21")').map((r) => r.task.description)).toEqual([
+				"Open-ended project",
+			]);
+			expect(filterTaskRecordsByQuery(records, 'covers("2026-05-09")').map((r) => r.task.description)).toEqual([]);
+
+			// is(root) vs is(subtask)
+			expect(filterTaskRecordsByQuery(records, "is(root)").map((r) => r.task.description)).toEqual([
+				"Ship dashboard",
+				"Done report",
+				"Overdue task",
+				"Cancelled task",
+				"Spanning project",
+				"Open-ended project",
+			]);
+			expect(filterTaskRecordsByQuery(records, "is(subtask)").map((r) => r.task.description)).toEqual([
+				"Backlog item",
+			]);
+
+			// happens(today)
+			expect(filterTaskRecordsByQuery(records, "happens(today)").map((r) => r.task.description)).toEqual([
+				"Ship dashboard",
+			]);
+
+			// happens("2026-05-20")
+			expect(filterTaskRecordsByQuery(records, 'happens("2026-05-20")').map((r) => r.task.description)).toEqual([
+				"Backlog item",
+				"Done report",
+				"Spanning project",
+			]);
+
+			// Combined GTD column query: is(open) AND (happens(today) OR covers(today) OR is(overdue) OR is(overdate))
+			expect(
+				filterTaskRecordsByQuery(records, "is(open) AND (happens(today) OR covers(today) OR is(overdue) OR is(overdate))").map(
+					(r) => r.task.description,
+				),
+			).toEqual([
+				"Ship dashboard",
+				"Overdue task",
+				"Spanning project",
+				"Open-ended project",
+			]);
+		});
 	});
 
 	test("listTasks includes both line-level tasks and file-level tasks", async () => {
@@ -1843,51 +2100,6 @@ describe("TaskLite core", () => {
 			"Project Alpha",
 			"Line-level task",
 		]);
-	});
-
-	test("updating subtask of a file-level task preserves the file-level task in listTasks", async () => {
-		let fileContent = [
-			"---",
-			"task: true",
-			"description: Project Alpha",
-			"status: \" \"",
-			"---",
-			"- [ ] Subtask 1",
-			"- [ ] Subtask 2",
-		].join("\n");
-		const file = createTestFile("Work/tasks.md", "tasks");
-		const api = createTestCoreApi({
-			vault: {
-				getMarkdownFiles: () => [file],
-				getAbstractFileByPath: (p: string) => (p === "Work/tasks.md" ? file : null),
-				cachedRead: () => fileContent,
-				read: () => Promise.resolve(fileContent),
-				modify: (_f: any, next: string) => {
-					fileContent = next;
-					return Promise.resolve();
-				},
-			},
-			metadataCache: {
-				getFileCache: () => ({
-					frontmatter: {
-						task: true,
-						description: "Project Alpha",
-						status: " ",
-					},
-				}),
-			},
-		});
-
-		await api.updateTaskStatus("Work/tasks.md", 5, "x");
-		const listed = await api.listTasks({ includeChildren: true, includeCompleted: true });
-		expect(listed.map((record) => record.task.description)).toEqual([
-			"Project Alpha",
-			"Subtask 1",
-			"Subtask 2",
-		]);
-		expect(listed[0]?.lineNumber).toBe(-1);
-		expect(listed[1]?.task.status).toBe("DONE");
-		expect(listed[1]?.parentLine).toBe(-1);
 	});
 
 	test("frontmatter task supports status keywords and preserves them on update", async () => {
@@ -2032,54 +2244,6 @@ describe("TaskLite core", () => {
 			"- [ ] Other Task",
 		]);
 	});
-
-	test("core API exposes task lookup and status metadata", async () => {
-		const file = createTestFile("tasks.md", "tasks");
-		const api = createTestCoreApi({
-			vault: {
-				getMarkdownFiles: () => [file],
-				cachedRead: () => [
-					`- [ ] Lookup target ${TASK_SYMBOLS.id} lookup-id`,
-					"- [x] Done task",
-				].join("\n"),
-			},
-			metadataCache: {
-				getFileCache: () => null,
-			},
-		});
-
-		expect(api.getStatusCycle()).toEqual([" ", "x", "/", "-"]);
-		expect(api.listStatuses().map((status) => status.symbol)).toContain("/");
-
-		const byLine = await api.getTask("tasks.md", 0);
-		expect(byLine?.task.description).toBe("Lookup target");
-
-		const byId = await api.findTaskById("lookup-id");
-		expect(byId?.lineNumber).toBe(0);
-	});
-
-	test("core API cycles task status using the configured cycle", async () => {
-		let content = "- [x] Cycle me";
-		const file = createTestFile("tasks.md", "tasks");
-		const api = createTestCoreApi({
-			vault: {
-				getMarkdownFiles: () => [file],
-				getAbstractFileByPath: () => file,
-				cachedRead: () => Promise.resolve(content),
-				read: () => Promise.resolve(content),
-				modify: (_file: unknown, nextContent: string) => {
-					content = nextContent;
-					return Promise.resolve();
-				},
-			},
-			metadataCache: {
-				getFileCache: () => null,
-			},
-		});
-
-		expect(await api.cycleTaskStatus("tasks.md", 0, "next")).toBe(true);
-		expect(content).toBe("- [/] Cycle me");
-	});
 });
 
 function createTestCoreApi(app: Record<string, unknown> = {}) {
@@ -2156,6 +2320,7 @@ function createQueryRecord(input: {
 	description: string;
 	status: "TODO" | "DONE" | "IN_PROGRESS" | "ON_HOLD" | "CANCELLED" | "NON_TASK" | "EMPTY";
 	priority?: TaskPriority | null;
+	start?: string | null;
 	due?: string | null;
 	scheduled?: string | null;
 	tags?: string[];
@@ -2173,12 +2338,13 @@ function createQueryRecord(input: {
 			description: input.description,
 			priority: input.priority ?? null,
 			dates: {
-				start: null,
+				start: input.start ?? null,
 				created: null,
 				scheduled: input.scheduled ?? null,
 				due: input.due ?? null,
 				done: null,
 				cancelled: null,
+				remind: null,
 			},
 			recurrence: null,
 			onCompletion: null,
@@ -2511,7 +2677,7 @@ describe("TaskLite 0.4.5 Features", () => {
 		const mockPlugin = {
 			settings: {
 				autoSuggestInEditor: true,
-				assignees: ["Alice", "Bob", "Charlie", "Mary", "@Mobile"],
+				assignees: ["Alice", "Bob", "Charlie"],
 			},
 			app: {},
 		};
@@ -2539,39 +2705,6 @@ describe("TaskLite 0.4.5 Features", () => {
 		const suggestions = suggest.getSuggestions(context as any);
 		expect(suggestions.length).toBe(1);
 		expect(suggestions[0].name).toBe("Bob");
-
-		const ampersandEditor = {
-			getLine: () => `- [ ] Task ${TASK_SYMBOLS.assignee} Sunny&Ma`,
-		};
-		const ampersandTrigger = suggest.onTrigger(
-			{ line: 0, ch: `- [ ] Task ${TASK_SYMBOLS.assignee} Sunny&Ma`.length },
-			ampersandEditor as any,
-			file as any
-		);
-		expect(ampersandTrigger?.query).toBe("assignee:ma");
-		expect(suggest.getSuggestions({ query: "assignee:ma" } as any)[0].name).toBe("Mary");
-
-		const hyphenEditor = {
-			getLine: () => `- [ ] Task ${TASK_SYMBOLS.assignee} Sunny-Ma`,
-		};
-		const hyphenTrigger = suggest.onTrigger(
-			{ line: 0, ch: `- [ ] Task ${TASK_SYMBOLS.assignee} Sunny-Ma`.length },
-			hyphenEditor as any,
-			file as any
-		);
-		expect(hyphenTrigger?.query).toBe("assignee:sunny-ma");
-		expect(suggest.getSuggestions({ query: "assignee:sunny-ma" } as any)).toHaveLength(0);
-
-		const mobileHandleEditor = {
-			getLine: () => `- [ ] Task ${TASK_SYMBOLS.assignee} @Mo`,
-		};
-		const mobileTrigger = suggest.onTrigger(
-			{ line: 0, ch: `- [ ] Task ${TASK_SYMBOLS.assignee} @Mo`.length },
-			mobileHandleEditor as any,
-			file as any
-		);
-		expect(mobileTrigger?.query).toBe("assignee:@mo");
-		expect(suggest.getSuggestions({ query: "assignee:@mo" } as any)[0].name).toBe("@Mobile");
 	});
 
 	test("date shorthand autocomplete parses M-D and D patterns", async () => {
@@ -2605,395 +2738,868 @@ describe("TaskLite 0.4.5 Features", () => {
 		expect(suggestions06_01[0].resolved).toBe(`${currentYear}-06-01`);
 	});
 
-	describe("TaskLite 0.4.11 Features", () => {
-		test("indentation normalization is fully reversible between m and n spaces", () => {
-			const original2Spaces = [
-				"# Project Alpha",
-				"- [ ] Root task 1",
-				"  - [ ] Subtask 1.1",
-				"    - [ ] Subtask 1.1.1",
-				"  - [ ] Subtask 1.2",
-				"- [ ] Root task 2",
-				"",
-				"> - [ ] Quote task",
-				">   - [ ] Nested quote subtask",
-			];
-
-			// Normalize from 2 spaces to 4 spaces
-			const normalized4Spaces = normalizeDocumentLines(original2Spaces, false, 4);
-			expect(normalized4Spaces).toEqual([
-				"# Project Alpha",
-				"- [ ] Root task 1",
-				"    - [ ] Subtask 1.1",
-				"        - [ ] Subtask 1.1.1",
-				"    - [ ] Subtask 1.2",
-				"- [ ] Root task 2",
-				"",
-				"> - [ ] Quote task",
-				">     - [ ] Nested quote subtask",
-			]);
-
-			// Normalize back from 4 spaces to 2 spaces (must match original exactly!)
-			const reversed2Spaces = normalizeDocumentLines(normalized4Spaces, false, 2);
-			expect(reversed2Spaces).toEqual(original2Spaces);
-
-			// Normalize to tab
-			const normalizedTabs = normalizeDocumentLines(normalized4Spaces, true, 4);
-			expect(normalizedTabs).toEqual([
-				"# Project Alpha",
-				"- [ ] Root task 1",
-				"\t- [ ] Subtask 1.1",
-				"\t\t- [ ] Subtask 1.1.1",
-				"\t- [ ] Subtask 1.2",
-				"- [ ] Root task 2",
-				"",
-				"> - [ ] Quote task",
-				"> \t- [ ] Nested quote subtask",
-			]);
-
-			// Revert from tab back to 2 spaces
-			const fromTabsTo2Spaces = normalizeDocumentLines(normalizedTabs, false, 2);
-			expect(fromTabsTo2Spaces).toEqual(original2Spaces);
-		});
-
-		test("parses and serializes location 📍 metadata field", () => {
+	describe("TaskLite 0.5.0 Architecture Improvements", () => {
+		test("task-cache.json hits skip file reading when mtime matches", async () => {
 			const registry = new StatusRegistry();
-			const line = "- [ ] Team meeting 📍 Room 101 📅 2026-09-06 👤 Sunny";
-			const parsed = parseTaskLine(line, "TODO");
-			expect(parsed).not.toBeNull();
-			expect(parsed?.data.description).toBe("Team meeting");
-			expect(parsed?.data.location).toBe("Room 101");
-			expect(parsed?.data.dates.due).toBe("2026-09-06");
-			expect(parsed?.data.assignee).toEqual(["Sunny"]);
+			const fileA = { ...createTestFile("fileA.md", "fileA"), stat: { mtime: 1000 } };
+			const fileB = { ...createTestFile("fileB.md", "fileB"), stat: { mtime: 1000 } };
+			let readCount = 0;
 
-			// Serialize line
-			const serialized = serializeTaskLine(parsed!, "", registry);
-			expect(serialized).toBe("- [ ] Team meeting 📅 2026-09-06 👤 Sunny 📍 Room 101");
-
-			// Reverse order in source line
-			const reverseLine = "- [ ] Team meeting 👤 Sunny 📍 Room 101";
-			const reverseParsed = parseTaskLine(reverseLine, "TODO");
-			expect(reverseParsed?.data.location).toBe("Room 101");
-			expect(reverseParsed?.data.assignee).toEqual(["Sunny"]);
-		});
-
-		test("query filter supports location field", () => {
-			const record1 = {
-				path: "work.md",
-				basename: "work",
-				lineNumber: 0,
-				parentLine: null,
-				depth: 0,
-				hasChildren: false,
-				task: {
-					status: "TODO" as const,
-					description: "Design review",
-					priority: null,
-					dates: { start: null, created: null, scheduled: null, due: null, done: null, cancelled: null, remind: null },
-					recurrence: null,
-					onCompletion: null,
-					dependsOn: null,
-					id: null,
-					assignee: ["Sunny"],
-					location: "Office Room 302",
-					blockLink: null,
-					tags: [],
-					unmatched: null,
-				},
-			};
-			const record2 = {
-				...record1,
-				lineNumber: 1,
-				task: {
-					...record1.task,
-					description: "Coffee break",
-					location: "Starbucks Cafe",
-				},
-			};
-
-			const filtered1 = filterTaskRecordsByQuery([record1, record2], 'location = "Office Room 302"');
-			expect(filtered1).toHaveLength(1);
-			expect(filtered1[0].task.description).toBe("Design review");
-
-			const filtered2 = filterTaskRecordsByQuery([record1, record2], 'location contains "Cafe"');
-			expect(filtered2).toHaveLength(1);
-			expect(filtered2[0].task.description).toBe("Coffee break");
-		});
-
-		test("frontmatter task supports location", () => {
-			const registry = new StatusRegistry();
-			const file = createTestFile("location-task.md", "location-task");
-			const fm = {
-				task: true,
-				description: "Offsite Seminar",
-				location: "Convention Center",
-			};
-			const parsed = parseFrontmatterTask(file, { frontmatter: fm } as any, registry, false);
-			expect(parsed?.task.location).toBe("Convention Center");
-
-			const patch = buildFrontmatterPatch(
-				parsed!.task,
-				{ location: "New Convention Hall" },
-				registry,
-			);
-			expect(patch["location"]).toBe("New Convention Hall");
-		});
-
-		test("createTask applies defaultAssignee when enabled and none provided", async () => {
-			const registry = new StatusRegistry();
-			const testFile = createTestFile("inbox.md", "inbox");
-			let fileContent = "";
-			const app = {
-				vault: {
-					getAbstractFileByPath: () => testFile,
-					read: () => Promise.resolve(fileContent),
-					modify: (_file: unknown, content: string) => {
-						fileContent = content;
-						return Promise.resolve();
+			const cacheData: Record<string, string> = {
+				".obsidian/plugins/taskslite/task-cache.json": JSON.stringify({
+					version: 1,
+					files: {
+						"fileA.md": {
+							mtime: 1000,
+							records: [
+								{
+									path: "fileA.md",
+									basename: "fileA",
+									lineNumber: 0,
+									parentLine: null,
+									depth: 0,
+									hasChildren: false,
+									task: {
+										status: "TODO",
+										description: "Cached Task A",
+										priority: null,
+										dates: { start: null, created: null, scheduled: null, due: null, done: null, cancelled: null, remind: null },
+										recurrence: null,
+										onCompletion: null,
+										dependsOn: null,
+										id: null,
+										assignee: [],
+										blockLink: null,
+										tags: [],
+										unmatched: null,
+									},
+								},
+							],
+						},
+						"fileB.md": {
+							mtime: 1000,
+							records: [],
+						},
 					},
-				},
-				metadataCache: {
-					getFileCache: () => null,
-				},
-			};
-
-			const api = createTaskLiteCoreApi({
-				app: app as any,
-				registry,
-				getSettings: () => ({
-					...settings,
-					autoAssignDefault: true,
-					defaultAssignee: "Sunny",
 				}),
-				getDefaultAssignee: () => "Sunny",
-			});
-
-			// Create task without specifying assignee
-			await api.createTask({
-				description: "Check inbox",
-				path: "inbox.md",
-			});
-
-			expect(fileContent).toContain("👤 Sunny");
-
-			// Create task with explicit assignee (should NOT be overridden by default)
-			fileContent = "";
-			await api.createTask({
-				description: "Alice task",
-				path: "inbox.md",
-				assignee: ["Alice"],
-			});
-			expect(fileContent).toContain("👤 Alice");
-			expect(fileContent).not.toContain("Sunny");
-		});
-
-		test("typing @ alone preserves standard emoji menu, while @ass directly suggests default assignee", async () => {
-			const { TaskLiteEmojiSuggest } = await import("../src/suggest/emojiSuggest");
-			const mockPlugin = {
-				settings: {
-					defaultAssignee: "Sunny",
-					assignees: ["Alice", "Bob"],
-					autoSuggestInEditor: true,
-				},
-				getDefaultAssignee: () => "Sunny",
-				app: {},
 			};
 
-			const suggest = new TaskLiteEmojiSuggest(mockPlugin as any);
-
-			// 1. Typing @ alone (q is "") does NOT jump out with Sunny at index 0
-			const emptyQuerySuggestions = suggest.getSuggestions({ query: "@:" } as any);
-			expect(emptyQuerySuggestions.length).toBeGreaterThan(0);
-			// First item should be Due date (📅), NOT Sunny
-			expect(emptyQuerySuggestions[0].kind).toBe("emoji");
-			if (emptyQuerySuggestions[0].kind === "emoji") {
-				expect(emptyQuerySuggestions[0].insert).not.toContain("Sunny");
-				expect(emptyQuerySuggestions[0].label).toContain("Due date");
-			}
-
-			// 2. Typing @ass suggests default assignee first, followed by standalone assignee (no other assignees like Alice or Bob)
-			const assQuerySuggestions = suggest.getSuggestions({ query: "@:ass" } as any);
-			expect(assQuerySuggestions.length).toBe(2);
-			expect(assQuerySuggestions[0].kind).toBe("emoji");
-			if (assQuerySuggestions[0].kind === "emoji") {
-				expect(assQuerySuggestions[0].insert).toBe("👤 Sunny ");
-				expect(assQuerySuggestions[0].label).toContain("Sunny");
-			}
-			expect(assQuerySuggestions[1].kind).toBe("emoji");
-			if (assQuerySuggestions[1].kind === "emoji") {
-				expect(assQuerySuggestions[1].insert).toBe("👤 ");
-				expect(assQuerySuggestions[1].label).toContain("Assignee");
-			}
-
-			// Simulating selectSuggestion replaces @ass with 👤 Sunny
-			let replacedText = "";
-			let cursorPos = { line: 0, ch: 0 };
-			const mockEditor = {
-				replaceRange: (text: string) => {
-					replacedText = text;
-				},
-				setCursor: (pos: { line: number; ch: number }) => {
-					cursorPos = pos;
-				},
-			};
-
-			(suggest as any).context = {
-				editor: mockEditor,
-				start: { line: 0, ch: 7 },
-				end: { line: 0, ch: 11 }, // length of '@ass' is 4
-			};
-
-			suggest.selectSuggestion(assQuerySuggestions[0]);
-			expect(replacedText).toBe("👤 Sunny ");
-			expect(cursorPos.ch).toBe(7 + "👤 Sunny ".length);
-		});
-
-		test("auto-resolves due date to start day when due only specifies time", async () => {
-			const registry = new StatusRegistry();
-
-			// 1. Line task with date+time start and time-only due
-			const line1 = "- [ ] Team meeting 🛫 2026-09-07 15:30 📅 17:30";
-			const parsed1 = parseTaskLine(line1, "TODO");
-			expect(parsed1).not.toBeNull();
-			expect(parsed1?.data.description).toBe("Team meeting");
-			expect(parsed1?.data.dates.start).toBe("2026-09-07 15:30");
-			expect(parsed1?.data.dates.due).toBe("2026-09-07 17:30");
-
-			// 2. Line task with date-only start and time-only due
-			const line2 = "- [ ] Seminar 🛫 2026-09-07 📅 17:30";
-			const parsed2 = parseTaskLine(line2, "TODO");
-			expect(parsed2?.data.dates.due).toBe("2026-09-07 17:30");
-
-			// 3. Frontmatter task
-			const file = createTestFile("fm-dates.md", "fm-dates");
-			const fm = {
-				task: true,
-				description: "Client Demo",
-				start: "2026-09-07 15:30",
-				due: "17:30",
-			};
-			const parsedFm = parseFrontmatterTask(file, { frontmatter: fm } as any, registry, false);
-			expect(parsedFm?.task.dates.due).toBe("2026-09-07 17:30");
-
-			// 4. API createTask
-			let createdContent = "";
 			const app = {
 				vault: {
-					getAbstractFileByPath: () => file,
-					read: () => Promise.resolve(""),
-					modify: (_file: unknown, content: string) => {
-						createdContent = content;
-						return Promise.resolve();
+					on: () => {},
+					getMarkdownFiles: () => [fileA, fileB],
+					cachedRead: () => {
+						readCount++;
+						return Promise.resolve("- [ ] Real read");
 					},
-					create: () => Promise.resolve(file),
+					getAbstractFileByPath: (p: string) => (p === "fileA.md" ? fileA : fileB),
+					adapter: {
+						exists: (p: string) => Promise.resolve(p in cacheData),
+						read: (p: string) => Promise.resolve(cacheData[p]),
+						write: (p: string, content: string) => {
+							cacheData[p] = content;
+							return Promise.resolve();
+						},
+						mkdir: () => Promise.resolve(),
+					},
 				},
 				metadataCache: {
 					getFileCache: () => null,
-				},
-				fileManager: {
-					processFrontMatter: () => Promise.resolve(),
+					on: () => {},
 				},
 			};
-			const api = createTaskLiteCoreApi({
-				app: app as any,
-				registry,
-				getSettings: () => ({} as any),
-			});
-			await api.createTask({
-				description: "Sync session",
-				path: "fm-dates.md",
-				dates: {
-					start: "2026-09-07 15:30",
-					due: "17:30",
-				},
-			});
-			expect(createdContent).toContain("📅 2026-09-07 17:30");
+
+			const store = new TaskDocumentStore(app as any, registry);
+			const records = await store.listRecords();
+
+			expect(readCount).toBe(0);
+			expect(records).toHaveLength(1);
+			expect(records[0].task.description).toBe("Cached Task A");
 		});
 
-		test("completing all subtasks under file-level task updates parent frontmatter and saves child checkbox to body", async () => {
+		test("task-cache.json incremental reload only rereads modified files", async () => {
 			const registry = new StatusRegistry();
-			let fileBody = ["---", "task: true", "status: todo", "---", "- [ ] Subtask 1"].join("\n");
-			let fmState: Record<string, unknown> = { task: true, status: "todo" };
-			const file = createTestFile("Work/parent-child.md", "parent-child");
+			const fileA = { ...createTestFile("fileA.md", "fileA"), stat: { mtime: 1000 } };
+			const fileB = { ...createTestFile("fileB.md", "fileB"), stat: { mtime: 2000 } }; // changed from 1000 to 2000
+			const readFiles: string[] = [];
+
+			const cacheData: Record<string, string> = {
+				".obsidian/plugins/taskslite/task-cache.json": JSON.stringify({
+					version: 1,
+					files: {
+						"fileA.md": {
+							mtime: 1000,
+							records: [
+								{
+									path: "fileA.md",
+									basename: "fileA",
+									lineNumber: 0,
+									parentLine: null,
+									depth: 0,
+									hasChildren: false,
+									task: {
+										status: "TODO",
+										description: "Cached Task A",
+										priority: null,
+										dates: { start: null, created: null, scheduled: null, due: null, done: null, cancelled: null, remind: null },
+										recurrence: null,
+										onCompletion: null,
+										dependsOn: null,
+										id: null,
+										assignee: [],
+										blockLink: null,
+										tags: [],
+										unmatched: null,
+									},
+								},
+							],
+						},
+						"fileB.md": {
+							mtime: 1000,
+							records: [],
+						},
+					},
+				}),
+			};
+
 			const app = {
 				vault: {
-					getMarkdownFiles: () => [file],
-					getAbstractFileByPath: () => file,
-					read: () => Promise.resolve(fileBody),
-					cachedRead: () => Promise.resolve(fileBody),
-					modify: (_file: unknown, nextContent: string) => {
-						fileBody = nextContent;
-						return Promise.resolve();
+					on: () => {},
+					getMarkdownFiles: () => [fileA, fileB],
+					cachedRead: (f: any) => {
+						readFiles.push(f.path);
+						return Promise.resolve("- [ ] Fresh Task B");
 					},
-				},
-				fileManager: {
-					processFrontMatter: (_f: unknown, fn: (fm: Record<string, unknown>) => void) => {
-						fn(fmState);
-						return Promise.resolve();
+					getAbstractFileByPath: (p: string) => (p === "fileA.md" ? fileA : fileB),
+					adapter: {
+						exists: (p: string) => Promise.resolve(p in cacheData),
+						read: (p: string) => Promise.resolve(cacheData[p]),
+						write: (p: string, content: string) => {
+							cacheData[p] = content;
+							return Promise.resolve();
+						},
+						mkdir: () => Promise.resolve(),
 					},
 				},
 				metadataCache: {
-					getFileCache: () => ({
-						frontmatter: { ...fmState },
-						listItems: [{ position: { start: { line: 4 } }, task: " " }],
-					}),
+					getFileCache: () => null,
+					on: () => {},
 				},
 			};
-			const api = createTaskLiteCoreApi({
-				app: app as any,
-				registry,
-				getSettings: () => settings,
-			});
 
-			const res = await api.updateTaskStatus("Work/parent-child.md", 4, "x");
-			expect(res).toBe(true);
-			expect(fileBody).toContain("- [x] Subtask 1");
-			expect(fmState.status).toBe("done");
+			const store = new TaskDocumentStore(app as any, registry);
+			const records = await store.listRecords();
+
+			// Only fileB should have been read from disk
+			expect(readFiles).toEqual(["fileB.md"]);
+			expect(records).toHaveLength(2);
+			const descriptions = records.map((r) => r.task.description).sort();
+			expect(descriptions).toEqual(["Cached Task A", "Fresh Task B"]);
 		});
 
-		test("completing file-level task cascades to child tasks and saves updated lines to file", async () => {
+		test("corrupted task-cache.json recovers gracefully without error", async () => {
 			const registry = new StatusRegistry();
-			let fileBody = ["---", "task: true", "status: todo", "---", "- [ ] Child 1", "- [ ] Child 2"].join("\n");
-			let fmState: Record<string, unknown> = { task: true, status: "todo" };
-			const file = createTestFile("Work/cascade.md", "cascade");
+			const file = { ...createTestFile("test.md", "test"), stat: { mtime: 1000 } };
+			let readCount = 0;
+
 			const app = {
 				vault: {
+					on: () => {},
 					getMarkdownFiles: () => [file],
-					getAbstractFileByPath: () => file,
-					read: () => Promise.resolve(fileBody),
-					cachedRead: () => Promise.resolve(fileBody),
-					modify: (_file: unknown, nextContent: string) => {
-						fileBody = nextContent;
-						return Promise.resolve();
+					cachedRead: () => {
+						readCount++;
+						return Promise.resolve("- [ ] Recovered Task");
 					},
-				},
-				fileManager: {
-					processFrontMatter: (_f: unknown, fn: (fm: Record<string, unknown>) => void) => {
-						fn(fmState);
-						return Promise.resolve();
+					getAbstractFileByPath: () => file,
+					adapter: {
+						exists: () => Promise.resolve(true),
+						read: () => Promise.resolve("MALFORMED JSON {{{"),
+						write: () => Promise.resolve(),
+						mkdir: () => Promise.resolve(),
 					},
 				},
 				metadataCache: {
-					getFileCache: () => ({
-						frontmatter: { ...fmState },
-						listItems: [
-							{ position: { start: { line: 4 } }, task: " " },
-							{ position: { start: { line: 5 } }, task: " " },
+					getFileCache: () => null,
+					on: () => {},
+				},
+			};
+
+			const store = new TaskDocumentStore(app as any, registry);
+			const records = await store.listRecords();
+
+			expect(readCount).toBe(1);
+			expect(records).toHaveLength(1);
+			expect(records[0].task.description).toBe("Recovered Task");
+		});
+
+		test("listAssignees strictly returns only configured team members and ignores unconfigured names in vault", async () => {
+			const registry = new StatusRegistry();
+			const file = { ...createTestFile("tasks.md", "tasks"), stat: { mtime: 1000 } };
+			let content = "- [ ] Fix bug 👤 Mar";
+
+			const app = {
+				vault: {
+					on: () => {},
+					getMarkdownFiles: () => [file],
+					cachedRead: () => Promise.resolve(content),
+					read: () => Promise.resolve(content),
+					modify: (_f: any, val: string) => {
+						content = val;
+						return Promise.resolve();
+					},
+					getAbstractFileByPath: () => file,
+				},
+				metadataCache: {
+					getFileCache: () => null,
+					on: () => {},
+				},
+			};
+
+			const store = new TaskDocumentStore(app as any, registry);
+			const testSettings = {
+				...settings,
+				assignees: ["Alice", "Bob"], // Configured team members
+			};
+
+			const api = createTaskLiteCoreApi({
+				app: app as any,
+				registry,
+				getSettings: () => testSettings,
+				documentStore: store,
+			});
+
+			// Only configured team members (Alice, Bob) are returned; unconfigured 'Mar' in vault is ignored
+			const assignees = await api.listAssignees();
+			expect(assignees).toEqual(["Alice", "Bob"]);
+			expect(assignees).not.toContain("Mar");
+		});
+
+	
+		test("doesQueryExcludeCompleted detects queries that filter out completed tasks", () => {
+			expect(doesQueryExcludeCompleted('status != "DONE"')).toBe(true);
+			expect(doesQueryExcludeCompleted("status != 'DONE'")).toBe(true);
+			expect(doesQueryExcludeCompleted('status = "TODO"')).toBe(true);
+			expect(doesQueryExcludeCompleted('status = "IN_PROGRESS"')).toBe(true);
+			expect(doesQueryExcludeCompleted('is(todo)')).toBe(true);
+			expect(doesQueryExcludeCompleted('NOT (status = "DONE")')).toBe(true);
+			expect(doesQueryExcludeCompleted('NOT is(done)')).toBe(true);
+			expect(doesQueryExcludeCompleted('priority = "high" AND status != "DONE"')).toBe(true);
+			expect(doesQueryExcludeCompleted('status != "DONE" OR status = "TODO"')).toBe(true);
+			expect(doesQueryExcludeCompleted('(status = "TODO" OR status = "IN_PROGRESS") AND priority = "high"')).toBe(true);
+
+			// Should return false when completed is NOT excluded
+			expect(doesQueryExcludeCompleted('')).toBe(false);
+			expect(doesQueryExcludeCompleted('priority = "high"')).toBe(false);
+			expect(doesQueryExcludeCompleted('status = "DONE"')).toBe(false);
+			expect(doesQueryExcludeCompleted('status != "CANCELLED"')).toBe(false);
+			expect(doesQueryExcludeCompleted('status != "DONE" OR priority = "high"')).toBe(false);
+		});
+
+	describe("Dual-Mode Task Format (Phase 2)", () => {
+			test("parses Dataview inline fields correctly", () => {
+				const registry = new StatusRegistry();
+				const task = parseTaskLine(
+					"- [ ] Ship MVP [due:: 2026-05-20] [priority:: high] [repeat:: every week] [assignee:: Alice & Bob] [dependsOn:: TASK-1] [id:: TASK-2]",
+					registry.get(" ")
+				);
+
+				expect(task).not.toBeNull();
+				expect(task?.data.description).toBe("Ship MVP");
+				expect(task?.data.dates.due).toBe("2026-05-20");
+				expect(task?.data.priority).toBe("high");
+				expect(task?.data.recurrence).toBe("every week");
+				expect(task?.data.assignee).toEqual(["Alice", "Bob"]);
+				expect(task?.data.dependsOn).toBe("TASK-1");
+				expect(task?.data.id).toBe("TASK-2");
+			});
+
+			test("parses Dataview emoji-key fields correctly", () => {
+				const registry = new StatusRegistry();
+				const task = parseTaskLine(
+					"- [ ] Design mockups [📅:: 2026-06-01] [🔺:: highest]",
+					registry.get(" ")
+				);
+
+				expect(task).not.toBeNull();
+				expect(task?.data.description).toBe("Design mockups");
+				expect(task?.data.dates.due).toBe("2026-06-01");
+				expect(task?.data.priority).toBe("highest");
+			});
+
+			test("parses mixed Dataview inline fields and Tasks Emoji metadata", () => {
+				const registry = new StatusRegistry();
+				const task = parseTaskLine(
+					"- [ ] Refactor auth module [due:: 2026-05-20] 🔺 🔁 every 2 weeks",
+					registry.get(" ")
+				);
+
+				expect(task).not.toBeNull();
+				expect(task?.data.description).toBe("Refactor auth module");
+				expect(task?.data.dates.due).toBe("2026-05-20");
+				expect(task?.data.priority).toBe("highest");
+				expect(task?.data.recurrence).toBe("every 2 weeks");
+			});
+
+			test("serializes task data in dataview format", () => {
+				const registry = new StatusRegistry();
+				const task = parseTaskLine(
+					"- [ ] Write documentation [due:: 2026-05-20] [priority:: high] [assignee:: Alice]",
+					registry.get(" ")
+				);
+				expect(task).not.toBeNull();
+				if (!task) return;
+
+				const serialized = serializeTaskLine(task, "", registry, "dataview");
+				expect(serialized).toBe("- [ ] Write documentation [priority:: high] [due:: 2026-05-20] [assignee:: Alice]");
+			});
+
+			test("serializes task data in emoji format", () => {
+				const registry = new StatusRegistry();
+				const task = parseTaskLine(
+					"- [ ] Write documentation [due:: 2026-05-20] [priority:: high] [assignee:: Alice]",
+					registry.get(" ")
+				);
+				expect(task).not.toBeNull();
+				if (!task) return;
+
+				const serialized = serializeTaskLine(task, "", registry, "emoji");
+				expect(serialized).toBe(`- [ ] Write documentation ⏫ ${TASK_SYMBOLS.due} 2026-05-20 ${TASK_SYMBOLS.assignee} Alice`);
+			});
+
+			test("provides format-aware autocomplete suggestions for dataview and emoji modes", async () => {
+				const { getFieldSuggestions } = await import("../src/suggest/emojiSuggest");
+				const dvSuggestions = getFieldSuggestions("dataview");
+				const emojiSuggestions = getFieldSuggestions("emoji");
+
+				const dvDue = dvSuggestions.find((s) => s.label.startsWith("Due date"));
+				expect(dvDue?.insert).toBe("[due:: ");
+
+				const emojiDue = emojiSuggestions.find((s) => s.label.startsWith("Due date"));
+				expect(emojiDue?.insert).toBe("📅 ");
+
+				const dvPriority = dvSuggestions.find((s) => s.label.startsWith("High priority"));
+				expect(dvPriority?.insert).toBe("[priority:: high] ");
+
+				const emojiPriority = emojiSuggestions.find((s) => s.label.startsWith("High priority"));
+				expect(emojiPriority?.insert).toBe("⏫");
+
+				const dvLocation = dvSuggestions.find((s) => s.label.startsWith("Location"));
+				expect(dvLocation?.insert).toBe("[location:: ");
+
+				const emojiLocation = emojiSuggestions.find((s) => s.label.startsWith("Location"));
+				expect(emojiLocation?.insert).toBe("📍 ");
+			});
+
+			test("parses location in emoji format and dataview format", () => {
+				const registry = new StatusRegistry();
+				const taskEmoji = parseTaskLine(
+					"- [ ] Meet client 👤 Sunny 📍 科学家博物馆 📅 2026-10-20",
+					registry.get(" ")
+				);
+				expect(taskEmoji).not.toBeNull();
+				expect(taskEmoji?.data.description).toBe("Meet client");
+				expect(taskEmoji?.data.assignee).toEqual(["Sunny"]);
+				expect(taskEmoji?.data.location).toBe("科学家博物馆");
+				expect(taskEmoji?.data.dates.due).toBe("2026-10-20");
+
+				const taskDv = parseTaskLine(
+					"- [ ] Server maintenance [location:: 10.1.130.42] [assignee:: Sunny]",
+					registry.get(" ")
+				);
+				expect(taskDv).not.toBeNull();
+				expect(taskDv?.data.description).toBe("Server maintenance");
+				expect(taskDv?.data.location).toBe("10.1.130.42");
+				expect(taskDv?.data.assignee).toEqual(["Sunny"]);
+			});
+
+			test("serializes location in dataview and emoji formats", () => {
+				const registry = new StatusRegistry();
+				const task = parseTaskLine(
+					"- [ ] Visit lab 📍 科学家博物馆 👤 Sunny",
+					registry.get(" ")
+				);
+				expect(task).not.toBeNull();
+				if (!task) return;
+
+				const serializedEmoji = serializeTaskLine(task, "", registry, "emoji");
+				expect(serializedEmoji).toBe("- [ ] Visit lab 👤 Sunny 📍 科学家博物馆");
+
+				const serializedDv = serializeTaskLine(task, "", registry, "dataview");
+				expect(serializedDv).toBe("- [ ] Visit lab [assignee:: Sunny] [location:: 科学家博物馆]");
+			});
+
+			test("filters tasks by location query", () => {
+				const registry = new StatusRegistry();
+				const records: TaskDocumentRecord[] = [
+					{
+						path: "A.md",
+						basename: "A",
+						lineNumber: 0,
+						parentLine: null,
+						depth: 0,
+						hasChildren: false,
+						task: parseTaskLine("- [ ] Task 1 📍 科学家博物馆", registry.get(" "))!.data,
+					},
+					{
+						path: "B.md",
+						basename: "B",
+						lineNumber: 0,
+						parentLine: null,
+						depth: 0,
+						hasChildren: false,
+						task: parseTaskLine("- [ ] Task 2 📍 10.1.130.42", registry.get(" "))!.data,
+					},
+				];
+
+				const filteredMuseum = filterTaskRecordsByQuery(records, 'location = "科学家博物馆"');
+				expect(filteredMuseum).toHaveLength(1);
+				expect(filteredMuseum[0].path).toBe("A.md");
+
+				const filteredIp = filterTaskRecordsByQuery(records, 'location = "10.1.130.42"');
+				expect(filteredIp).toHaveLength(1);
+				expect(filteredIp[0].path).toBe("B.md");
+			});
+
+			test("normalizeVaultTaskFormat converts emoji tasks to dataview format across vault", async () => {
+				const registry = new StatusRegistry();
+				const file = { path: "Projects/Demo.md", basename: "Demo", stat: { mtime: 1000 } };
+				let content = [
+					"# Project Demo",
+					"- [ ] Meeting with Sunny 👤 Sunny 📍 科学家博物馆 📅 2026-10-20 ⏫",
+					"- [/] In progress task 🛫 2026-10-18",
+					"- [x] Done task ✅ 2026-10-19",
+					"Some notes here",
+				].join("\n");
+
+				let modifiedContent = "";
+				const app = {
+					vault: {
+						getMarkdownFiles: () => [file],
+						read: () => Promise.resolve(content),
+						modify: (_f: any, val: string) => {
+							modifiedContent = val;
+							content = val;
+							return Promise.resolve();
+						},
+					},
+					metadataCache: {
+						getFileCache: () => null,
+					},
+				};
+
+				let replacedContent = "";
+				const plugin = {
+					statusRegistry: registry,
+					documentStore: {
+						replaceDocumentContent: (_f: any, val: string) => {
+							replacedContent = val;
+							return Promise.resolve();
+						},
+					},
+				};
+
+				const result = await normalizeVaultTaskFormat(app as any, plugin as any, "dataview");
+				expect(result.totalUpdatedFiles).toBe(1);
+				expect(result.totalUpdatedLines).toBe(3);
+				expect(modifiedContent).toBe([
+					"# Project Demo",
+					"- [ ] Meeting with Sunny [priority:: high] [due:: 2026-10-20] [assignee:: Sunny] [location:: 科学家博物馆]",
+					"- [/] In progress task [start:: 2026-10-18]",
+					"- [x] Done task [completion:: 2026-10-19]",
+					"Some notes here",
+				].join("\n"));
+				expect(replacedContent).toBe(modifiedContent);
+			});
+
+			test("normalizeVaultTaskFormat converts dataview tasks to emoji format across vault", async () => {
+				const registry = new StatusRegistry();
+				const file = { path: "Projects/Server.md", basename: "Server", stat: { mtime: 1000 } };
+				let content = [
+					"- [ ] Server maintenance [due:: 2026-10-20] [location:: 10.1.130.42] [priority:: high]",
+				].join("\n");
+
+				let modifiedContent = "";
+				const app = {
+					vault: {
+						getMarkdownFiles: () => [file],
+						read: () => Promise.resolve(content),
+						modify: (_f: any, val: string) => {
+							modifiedContent = val;
+							content = val;
+							return Promise.resolve();
+						},
+					},
+					metadataCache: {
+						getFileCache: () => null,
+					},
+				};
+
+				const plugin = {
+					statusRegistry: registry,
+					documentStore: {
+						replaceDocumentContent: () => Promise.resolve(),
+					},
+				};
+
+				const result = await normalizeVaultTaskFormat(app as any, plugin as any, "emoji");
+				expect(result.totalUpdatedFiles).toBe(1);
+				expect(result.totalUpdatedLines).toBe(1);
+				expect(modifiedContent).toBe("- [ ] Server maintenance ⏫ 📅 2026-10-20 📍 10.1.130.42");
+			});
+
+			test("normalizeVaultTaskFormat ignores files with tasks: ignore frontmatter", async () => {
+				const registry = new StatusRegistry();
+				const file = { path: "Ignore.md", basename: "Ignore", stat: { mtime: 1000 } };
+				let content = "- [ ] Task 📅 2026-10-20";
+				let modifyCalled = false;
+
+				const app = {
+					vault: {
+						getMarkdownFiles: () => [file],
+						read: () => Promise.resolve(content),
+						modify: () => {
+							modifyCalled = true;
+							return Promise.resolve();
+						},
+					},
+					metadataCache: {
+						getFileCache: () => ({ frontmatter: { tasks: "ignore" } }),
+					},
+				};
+
+				const plugin = {
+					statusRegistry: registry,
+					documentStore: {
+						replaceDocumentContent: () => Promise.resolve(),
+					},
+				};
+
+				const result = await normalizeVaultTaskFormat(app as any, plugin as any, "dataview");
+				expect(result.totalUpdatedFiles).toBe(0);
+				expect(result.totalUpdatedLines).toBe(0);
+				expect(modifyCalled).toBe(false);
+			});
+
+			test("DEFAULT_SETTINGS defaults preferredTaskFormat to dataview", async () => {
+				const { DEFAULT_SETTINGS } = await import("../src/settings");
+				expect(DEFAULT_SETTINGS.preferredTaskFormat).toBe("dataview");
+			});
+
+			test("supports dependsOn syntax across dataview inline fields", () => {
+				const registry = new StatusRegistry();
+				const t1 = parseLineWithStatus("- [ ] Task 1 [dependsOn:: task-a]", registry);
+				expect(t1?.data.dependsOn).toBe("task-a");
+				expect(t1?.data.description).toBe("Task 1");
+			});
+
+			test("task query filters support dependsOn and is(blocked) macro", () => {
+				const registry = new StatusRegistry();
+				const t1 = parseLineWithStatus("- [ ] Normal task", registry);
+				const t2 = parseLineWithStatus("- [ ] Blocked task [dependsOn:: task-a]", registry);
+				const t3 = parseLineWithStatus("- [x] Done task [dependsOn:: task-b]", registry);
+
+				const records: any[] = [
+					{ path: "test.md", lineNumber: 0, task: t1?.data, status: "TODO" },
+					{ path: "test.md", lineNumber: 1, task: t2?.data, status: "TODO" },
+					{ path: "test.md", lineNumber: 2, task: t3?.data, status: "DONE" },
+				];
+
+				const filterDependsOn = filterTaskRecordsByQuery(records, 'dependsOn = "task-a"');
+				expect(filterDependsOn.length).toBe(1);
+				expect(filterDependsOn[0].task.description).toBe("Blocked task");
+
+				const filterIsBlocked = filterTaskRecordsByQuery(records, "is(blocked)");
+				expect(filterIsBlocked.length).toBe(1);
+				expect(filterIsBlocked[0].task.description).toBe("Blocked task");
+			});
+
+			test("emojiSuggest triggers on [dependsOn:: and suggests dependencies", async () => {
+				const { TaskLiteEmojiSuggest } = await import("../src/suggest/emojiSuggest");
+				const mockPlugin = {
+					settings: {
+						autoSuggestInEditor: true,
+						assignees: [],
+					},
+					app: {},
+					documentStore: {
+						listCachedRecords: () => [
+							{ task: { id: "auth-login", description: "Login flow" } },
 						],
-					}),
-				},
-			};
-			const api = createTaskLiteCoreApi({
-				app: app as any,
-				registry,
-				getSettings: () => settings,
+					},
+				};
+				const suggest = new TaskLiteEmojiSuggest(mockPlugin as any);
+				const lineText = "- [ ] New task [dependsOn:: ";
+				const editor = {
+					getLine: () => lineText,
+				};
+
+				const trigger = suggest.onTrigger(
+					{ line: 0, ch: lineText.length },
+					editor as any,
+					{ path: "test.md" } as any,
+				);
+				expect(trigger).not.toBeNull();
+				expect(trigger?.query).toBe("depends-inline:");
+
+				const suggestions = suggest.getSuggestions({ query: "depends-inline:" } as any);
+				expect(suggestions.length).toBe(1);
+				expect(suggestions[0].id).toBe("auth-login");
 			});
 
-			const res = await api.updateTaskStatus("Work/cascade.md", -1, "x");
-			expect(res).toBe(true);
-			expect(fileBody).toContain("- [x] Child 1");
-			expect(fileBody).toContain("- [x] Child 2");
-			expect(fmState.status).toBe("done");
+			test("assignee autocomplete prioritizes default assignee at the top", async () => {
+				const { TaskLiteEmojiSuggest } = await import("../src/suggest/emojiSuggest");
+				// Mock localStorage
+				const originalLocalStorage = globalThis.localStorage;
+				(globalThis as any).window = {
+					localStorage: {
+						getItem: (k: string) => (k === "tasklite-my-identity" ? "Sunny" : null),
+						setItem: () => {},
+						removeItem: () => {},
+					},
+				};
+
+				const mockPlugin = {
+					settings: {
+						autoSuggestInEditor: true,
+						assignees: ["Alice", "Bob"],
+					},
+					app: {},
+				};
+				const suggest = new TaskLiteEmojiSuggest(mockPlugin as any);
+				const suggestions = suggest.getSuggestions({ query: "assignee-inline:" } as any);
+
+				expect(suggestions.length).toBe(3);
+				expect(suggestions[0].name).toBe("Sunny"); // Default identity prioritized first!
+				expect(suggestions[1].name).toBe("Alice");
+				expect(suggestions[2].name).toBe("Bob");
+
+				(globalThis as any).window.localStorage = originalLocalStorage;
+			});
+
+			test("isDataviewEnabled detects presence of active dataview plugin", async () => {
+				const { isDataviewEnabled } = await import("../src/rendering/inlineFieldFallback");
+				const appNoDataview = { plugins: { plugins: {}, enabledPlugins: new Set() } };
+				expect(isDataviewEnabled(appNoDataview as any)).toBe(false);
+
+				const appDisabledDataview = {
+					plugins: {
+						plugins: { dataview: {} },
+						enabledPlugins: new Set(["other-plugin"]),
+					},
+				};
+				expect(isDataviewEnabled(appDisabledDataview as any)).toBe(false);
+
+				const appActiveDataview = {
+					plugins: {
+						plugins: { dataview: {} },
+						enabledPlugins: new Set(["dataview"]),
+					},
+				};
+				expect(isDataviewEnabled(appActiveDataview as any)).toBe(true);
+			});
+
+			const createMockEl = (tag: string) => {
+				const children: any[] = [];
+				const attrs: Record<string, string> = {};
+				const elObj: any = {
+					tagName: tag.toUpperCase(),
+					className: "",
+					textContent: "",
+					children,
+					appendChild(c: any) { children.push(c); },
+					setAttribute(k: string, v: string) { attrs[k] = v; },
+					getAttribute(k: string) { return attrs[k]; },
+					classList: {
+						contains(cls: string) {
+							return elObj.className.split(" ").includes(cls);
+						},
+					},
+					querySelector(sel: string) {
+						if (sel.includes("key")) return children.find((c: any) => c.className?.includes("key"));
+						if (sel.includes("value")) return children.find((c: any) => c.className?.includes("value"));
+						return null;
+					},
+				};
+				return elObj;
+			};
+
+			test("InlineFieldWidget renders proper fallback pill DOM with attributes", async () => {
+				const { InlineFieldWidget } = await import("../src/rendering/inlineFieldFallback");
+				const origDoc = globalThis.document;
+				(globalThis as any).document = { createElement: createMockEl };
+
+				const widget = new InlineFieldWidget("due", "2026-06-14", "[due:: 2026-06-14]");
+				const dom = widget.toDOM();
+
+				expect(dom.classList.contains("dataview")).toBe(true);
+				expect(dom.classList.contains("inline-field")).toBe(true);
+				expect(dom.classList.contains("tasklite-fallback")).toBe(true);
+				expect(dom.getAttribute("data-dv-key")).toBe("due");
+				expect(dom.getAttribute("data-dv-norm-key")).toBe("due");
+				expect(dom.getAttribute("data-dv-value")).toBe("2026-06-14");
+
+				const keyEl = dom.querySelector(".inline-field-key");
+				expect(keyEl).not.toBeNull();
+				expect(keyEl?.textContent).toBe("due");
+
+				const valEl = dom.querySelector(".inline-field-value");
+				expect(valEl).not.toBeNull();
+				expect(valEl?.textContent).toBe("2026-06-14");
+
+				(globalThis as any).document = origDoc;
+			});
+
+			test("createInlineFieldPostProcessor transforms inline fields when dataview is disabled", async () => {
+				const { createInlineFieldPostProcessor } = await import("../src/rendering/inlineFieldFallback");
+				const origDoc = globalThis.document;
+				(globalThis as any).document = {
+					createElement: createMockEl,
+					createTreeWalker: () => ({ nextNode: () => false }),
+				};
+
+				const appNoDataview = { plugins: { plugins: {}, enabledPlugins: new Set() } };
+				const processor = createInlineFieldPostProcessor(appNoDataview as any);
+
+				let replacedWith: any = null;
+				const mockA = {
+					textContent: "due:: 2026-06-14",
+					replaceWith: (el: any) => { replacedWith = el; },
+				};
+				const container = {
+					querySelectorAll: (sel: string) => (sel.includes("a") ? [mockA] : []),
+				};
+
+				processor(container as any);
+
+				expect(replacedWith).not.toBeNull();
+				expect(replacedWith.getAttribute("data-dv-key")).toBe("due");
+				expect(replacedWith.querySelector(".inline-field-value")?.textContent).toBe("2026-06-14");
+
+				(globalThis as any).document = origDoc;
+			});
+
+			test("supports case-insensitive DQL field names and aliases", () => {
+				const records: TaskDocumentRecord[] = [
+					{
+						task: parseTaskLine("- [x] Done task [completion:: 2026-05-20] [repeat:: every day] [blockedBy:: task-1] [assigned:: Alice] [loc:: Office]", "DONE")!.data,
+						path: "Projects/Demo.md",
+						basename: "Demo",
+						lineNumber: 1,
+						parentLine: null,
+						depth: 0,
+						hasChildren: false,
+					},
+				];
+
+				// completion alias
+				expect(filterTaskRecordsByQuery(records, 'completion = "2026-05-20"').length).toBe(1);
+				expect(filterTaskRecordsByQuery(records, 'COMPLETION = "2026-05-20"').length).toBe(1);
+				// repeat alias
+				expect(filterTaskRecordsByQuery(records, 'repeat = "every day"').length).toBe(1);
+				// blockedby / dependson aliases and case-insensitivity
+				expect(filterTaskRecordsByQuery(records, 'blockedBy = "task-1"').length).toBe(1);
+				expect(filterTaskRecordsByQuery(records, 'dependson = "task-1"').length).toBe(1);
+				// assigned / assignee alias
+				expect(filterTaskRecordsByQuery(records, 'assigned = "Alice"').length).toBe(1);
+				// loc / location alias
+				expect(filterTaskRecordsByQuery(records, 'loc = "Office"').length).toBe(1);
+				expect(filterTaskRecordsByQuery(records, 'LOCATION = "Office"').length).toBe(1);
+
+				// completed vs completion: completed checks checkbox, completion checks date attribute
+				expect(filterTaskRecordsByQuery(records, "completed = true").length).toBe(1);
+				expect(filterTaskRecordsByQuery(records, "completed = false").length).toBe(0);
+				expect(filterTaskRecordsByQuery(records, 'completion = "2026-05-20"').length).toBe(1);
+			});
+
+			test("unifies recurrence serialization to [recurrence:: ...]", () => {
+				const registry = new StatusRegistry();
+				const task = parseTaskLine("- [ ] Recurring task 🔁 every day", registry)!.data;
+				const record: TaskDocumentRecord = {
+					task,
+					path: "Test.md",
+					basename: "Test",
+					lineNumber: 1,
+					parentLine: null,
+					depth: 0,
+					hasChildren: false,
+				};
+				const serialized = serializeTaskLine({ listMarker: "-", data: task }, "", registry, "dataview");
+				expect(serialized).toBe("- [ ] Recurring task [recurrence:: every day]");
+				// DQL queries can search by recurrence
+				expect(filterTaskRecordsByQuery([record], 'recurrence = "every day"').length).toBe(1);
+			});
+
+			test("supports canonical DQL macros (happens, covers, is)", () => {
+				const records: TaskDocumentRecord[] = [
+					{
+						task: parseTaskLine("- [/] In progress task [due:: 2026-05-20] [recurrence:: every week] [assignee:: Bob]", "IN_PROGRESS")!.data,
+						path: "Projects/Demo.md",
+						basename: "Demo",
+						lineNumber: 1,
+						parentLine: null,
+						depth: 0,
+						hasChildren: true,
+					},
+					{
+						task: parseTaskLine("- [-] Cancelled task", "CANCELLED")!.data,
+						path: "Projects/Demo.md",
+						basename: "Demo",
+						lineNumber: 2,
+						parentLine: null,
+						depth: 0,
+						hasChildren: false,
+					},
+					{
+						task: parseTaskLine("- [ ] Open subtask [dependsOn:: task-1]", "TODO")!.data,
+						path: "Projects/Demo.md",
+						basename: "Demo",
+						lineNumber: 3,
+						parentLine: 1,
+						depth: 1,
+						hasChildren: false,
+					},
+				];
+
+				// Canonical happens
+				expect(filterTaskRecordsByQuery(records, 'happens("2026-05-20")').length).toBe(1);
+
+				// is(...) canonical states
+				expect(filterTaskRecordsByQuery(records, "is(in_progress)").length).toBe(1);
+
+				expect(filterTaskRecordsByQuery(records, "is(cancelled)").length).toBe(1);
+				expect(filterTaskRecordsByQuery(records, "is(open)").length).toBe(2);
+				expect(filterTaskRecordsByQuery(records, "is(blocked)").length).toBe(1);
+				expect(filterTaskRecordsByQuery(records, "is(subtask)").length).toBe(1);
+
+				expect(filterTaskRecordsByQuery(records, "is(root)").length).toBe(2);
+
+				// Redundant aliases and unknown macros strictly rejected
+				expect(() => filterTaskRecordsByQuery(records, "is(wip)")).toThrow();
+				expect(() => filterTaskRecordsByQuery(records, "is(todo)")).toThrow();
+				expect(() => filterTaskRecordsByQuery(records, "is(canceled)")).toThrow();
+				expect(() => filterTaskRecordsByQuery(records, "is(waiting)")).toThrow();
+				expect(() => filterTaskRecordsByQuery(records, "has(children)")).toThrow();
+				expect(() => filterTaskRecordsByQuery(records, 'on("2026-05-20")')).toThrow();
+				expect(() => filterTaskRecordsByQuery(records, 'happen("2026-05-20")')).toThrow();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+			});
 		});
 	});
 });

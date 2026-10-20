@@ -25,6 +25,8 @@ interface Token {
 
 type LiteralValue = string | number | boolean | null;
 
+export type MacroName = "happens" | "is" | "covers";
+
 type Expression =
 	| {
 			type: "binary";
@@ -38,6 +40,11 @@ type Expression =
 			field: string;
 			operator: ComparisonOperator;
 			value: LiteralValue;
+	  }
+	| {
+			type: "macro";
+			name: MacroName;
+			args: string[];
 	  };
 
 type ComparisonOperator =
@@ -79,7 +86,7 @@ export function compileTaskQuery(query: string): CompiledTaskQuery {
 	};
 	// Evict the oldest entry when the cache reaches its limit
 	if (compiledQueryCache.size >= COMPILED_QUERY_CACHE_MAX) {
-		// eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unnecessary-type-assertion -- Evict oldest Map entry; Map.keys().next().value is always defined when size > 0
+		// eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unnecessary-type-assertion
 		compiledQueryCache.delete(compiledQueryCache.keys().next().value!);
 	}
 	compiledQueryCache.set(normalizedQuery, compiled);
@@ -144,7 +151,68 @@ class Parser {
 			this.expectParen(")");
 			return expression;
 		}
+		if (this.isMacroAhead()) {
+			return this.parseMacro();
+		}
 		return this.parseComparison();
+	}
+
+	private isMacroAhead(): boolean {
+		const token = this.current();
+		if (token.type !== "identifier") return false;
+		const name = token.value.toLowerCase();
+		if (name !== "happens" && name !== "is" && name !== "covers") {
+			return false;
+		}
+		const next = this.tokens[this.index + 1];
+		return next?.type === "paren" && next.value === "(";
+	}
+
+	private parseMacro(): Expression {
+		const nameToken = this.expect("identifier");
+		const rawName = nameToken.value.toLowerCase();
+		if (rawName !== "happens" && rawName !== "is" && rawName !== "covers") {
+			throw this.error(nameToken, `Unknown macro '${rawName}'.`);
+		}
+		const name = rawName as MacroName;
+
+		this.expectParen("(");
+		const args: string[] = [];
+
+		if (name === "happens" || name === "covers") {
+			if (this.current().type === "paren" && this.current().value === ")") {
+				args.push(todayString());
+			} else if (
+				this.current().type === "identifier" &&
+				this.current().value.toLowerCase() === "date"
+			) {
+				args.push(this.parseDateFunction());
+			} else if (this.current().type === "string") {
+				const strVal = this.current().value;
+				this.index++;
+				args.push(resolveBaseDate(strVal));
+			} else if (this.current().type === "identifier") {
+				const idVal = this.current().value;
+				this.index++;
+				args.push(resolveBaseDate(idVal));
+			} else {
+				throw this.error(
+					this.current(),
+					`Expected date argument in ${rawName}(...).`,
+				);
+			}
+		} else if (name === "is") {
+			const argToken = this.current();
+			if (argToken.type === "identifier" || argToken.type === "string") {
+				this.index++;
+				args.push(argToken.value.toLowerCase());
+			} else {
+				throw this.error(argToken, `Expected keyword in ${rawName}(...).`);
+			}
+		}
+
+		this.expectParen(")");
+		return { type: "macro", name, args };
 	}
 
 	private parseComparison(): Expression {
@@ -200,25 +268,50 @@ class Parser {
 	private parseDateFunction(): string {
 		this.expect("identifier");
 		this.expectParen("(");
-		const valueToken = this.current();
-		let value: string;
-		if (
-			valueToken.type === "identifier" &&
-			valueToken.value.toLowerCase() === "today"
-		) {
+		const firstToken = this.current();
+		let baseDate = todayString();
+		let offsetStr: string | null = null;
+
+		if (firstToken.type === "string") {
 			this.index++;
-			value = todayString();
-		} else if (valueToken.type === "string") {
+			baseDate = resolveBaseDate(firstToken.value);
+		} else if (firstToken.type === "identifier") {
 			this.index++;
-			value = valueToken.value;
+			baseDate = resolveBaseDate(firstToken.value);
 		} else {
 			throw this.error(
-				valueToken,
-				"Expected today or a date string in date(...).",
+				firstToken,
+				"Expected today, relative date, or date string in date(...).",
 			);
 		}
+
+		if (this.current().type === "comma") {
+			this.index++;
+			const secondToken = this.current();
+			if (secondToken.type === "string" || secondToken.type === "identifier") {
+				this.index++;
+				offsetStr = secondToken.value;
+			} else {
+				throw this.error(secondToken, "Expected offset in date(base, offset).");
+			}
+		} else if (this.current().value === "+" || this.current().value === "-") {
+			const sign = this.current().value;
+			this.index++;
+			const offsetToken = this.current();
+			if (offsetToken.type === "identifier" || offsetToken.type === "string") {
+				this.index++;
+				offsetStr = `${sign}${offsetToken.value}`;
+			} else {
+				throw this.error(offsetToken, "Expected offset after +/- in date(...).");
+			}
+		}
+
+		if (offsetStr) {
+			baseDate = applyDateOffset(baseDate, offsetStr);
+		}
+
 		this.expectParen(")");
-		return value;
+		return baseDate;
 	}
 
 	private matchKeyword(keyword: "AND" | "OR" | "NOT"): boolean {
@@ -285,7 +378,88 @@ function evaluateExpression(
 				expression.operator,
 				expression.value,
 			);
+		case "macro":
+			return evaluateMacro(expression.name, expression.args, record);
 	}
+}
+
+function evaluateMacro(
+	name: MacroName,
+	args: string[],
+	record: TaskDocumentRecord,
+): boolean {
+	if (name === "happens") {
+		const targetDate = args[0] || todayString();
+		const dates = record.task.dates;
+		return (
+			dates.start === targetDate ||
+			dates.scheduled === targetDate ||
+			dates.due === targetDate
+		);
+	}
+	if (name === "covers") {
+		const targetDate = args[0] || todayString();
+		const dates = record.task.dates;
+		const start = dates.start;
+		const due = dates.due;
+		if (!start) return false;
+		if (start > targetDate) return false;
+		if (due) {
+			return due >= targetDate;
+		}
+		return record.task.status !== "DONE" && record.task.status !== "CANCELLED";
+	}
+	if (name === "is") {
+		const state = (args[0] || "").toLowerCase();
+		const status = record.task.status;
+		const today = todayString();
+		const isOpen = status !== "DONE" && status !== "CANCELLED";
+
+		switch (state) {
+			case "open":
+				return isOpen;
+			case "done":
+				return status === "DONE";
+			case "cancelled":
+				return status === "CANCELLED";
+			case "in_progress":
+				return status === "IN_PROGRESS";
+			case "overdue": {
+				if (!isOpen) return false;
+				const due = record.task.dates.due;
+				return Boolean(due && due < today);
+			}
+			case "overdate": {
+				if (!isOpen) return false;
+				const scheduled = record.task.dates.scheduled;
+				return Boolean(scheduled && scheduled < today);
+			}
+			case "blocked": {
+				if (!isOpen) return false;
+				return Boolean(
+					record.task.dependsOn &&
+						record.task.dependsOn.trim().length > 0,
+				);
+			}
+			case "root":
+				return (
+					record.parentLine === null ||
+					record.parentLine === undefined ||
+					record.depth === 0
+				);
+			case "subtask":
+				return (
+					record.parentLine !== null &&
+					record.parentLine !== undefined &&
+					record.depth > 0
+				);
+			default:
+				throw new TaskQueryError(
+					`Unknown macro state '${state}' in is(...).`,
+				);
+		}
+	}
+	return false;
 }
 
 function evaluateComparison(
@@ -364,9 +538,12 @@ function getFieldValue(
 	record: TaskDocumentRecord,
 	field: string,
 ): LiteralValue | string[] {
-	switch (field) {
+	const norm = field.toLowerCase().trim();
+	switch (norm) {
 		case "status":
 			return record.task.status;
+		case "completed":
+			return record.task.status === "DONE";
 		case "description":
 			return record.task.description;
 		case "priority":
@@ -378,15 +555,18 @@ function getFieldValue(
 		case "tags":
 			return record.task.tags.join(" ");
 		case "assignee":
+		case "assigned":
 		case "person":
 			return record.task.assignee;
 		case "location":
+		case "place":
+		case "loc":
 			return record.task.location ?? "";
-		case "hasChildren":
+		case "haschildren":
 			return record.hasChildren;
-		case "parentLine":
+		case "parentline":
 			return record.parentLine;
-		case "lineNumber":
+		case "linenumber":
 			return record.lineNumber;
 		case "depth":
 			return record.depth;
@@ -398,17 +578,20 @@ function getFieldValue(
 			return record.task.dates.start;
 		case "created":
 			return record.task.dates.created;
+		case "completion":
 		case "done":
 			return record.task.dates.done;
 		case "cancelled":
 			return record.task.dates.cancelled;
 		case "remind":
 			return record.task.dates.remind;
+		case "repeat":
 		case "recurrence":
 			return record.task.recurrence ?? "";
-		case "onCompletion":
+		case "oncompletion":
 			return record.task.onCompletion ?? "";
-		case "dependsOn":
+		case "dependson":
+		case "blockedby":
 			return record.task.dependsOn ?? "";
 		case "id":
 			return record.task.id ?? "";
@@ -436,8 +619,8 @@ function tokenize(input: string): Token[] {
 			index++;
 			continue;
 		}
-		if (char === '"') {
-			const parsed = readString(input, index);
+		if (char === '"' || char === "'") {
+			const parsed = readString(input, index, char);
 			tokens.push({
 				type: "string",
 				value: parsed.value,
@@ -459,6 +642,23 @@ function tokenize(input: string): Token[] {
 		}
 		if (char === "=" || char === "<" || char === ">") {
 			tokens.push({ type: "operator", value: char, position: index });
+			index++;
+			continue;
+		}
+		if (char === "+") {
+			if (index + 1 < input.length && /[0-9]/u.test(input[index + 1]!)) {
+				const start = index;
+				index++;
+				while (
+					index < input.length &&
+					/[A-Za-z0-9_.#/-]/u.test(input[index]!)
+				)
+					index++;
+				const value = input.slice(start, index);
+				tokens.push({ type: "identifier", value, position: start });
+				continue;
+			}
+			tokens.push({ type: "operator", value: "+", position: index });
 			index++;
 			continue;
 		}
@@ -491,12 +691,13 @@ function tokenize(input: string): Token[] {
 function readString(
 	input: string,
 	start: number,
+	quoteChar: string,
 ): { value: string; nextIndex: number } {
 	let index = start + 1;
 	let value = "";
 	while (index < input.length) {
 		const char = input[index]!;
-		if (char === '"') return { value, nextIndex: index + 1 };
+		if (char === quoteChar) return { value, nextIndex: index + 1 };
 		if (char === "\\") {
 			const next = input[index + 1];
 			if (next === undefined)
@@ -513,9 +714,148 @@ function readString(
 	throw new TaskQueryError(`Unterminated string. Position ${start}.`);
 }
 
+export function computeRelativeDate(
+	base: string,
+	amount: number,
+	unit: "d" | "w" | "m" | "y",
+): string {
+	const parts = base.split("-").map(Number);
+	if (
+		parts.length < 3 ||
+		isNaN(parts[0]!) ||
+		isNaN(parts[1]!) ||
+		isNaN(parts[2]!)
+	) {
+		return base;
+	}
+	const y = parts[0]!;
+	const m = parts[1]! - 1;
+	const d = parts[2]!;
+	const dt = new Date(Date.UTC(y, m, d));
+	if (unit === "d") dt.setUTCDate(dt.getUTCDate() + amount);
+	else if (unit === "w") dt.setUTCDate(dt.getUTCDate() + amount * 7);
+	else if (unit === "m") dt.setUTCMonth(dt.getUTCMonth() + amount);
+	else if (unit === "y") dt.setUTCFullYear(dt.getUTCFullYear() + amount);
+	return dt.toISOString().slice(0, 10);
+}
+
+function parseOffset(
+	str: string,
+): { amount: number; unit: "d" | "w" | "m" | "y" } | null {
+	const match = /^([+-]?\d+)\s*([dwmy])$/i.exec(str.trim());
+	if (!match) return null;
+	const amount = parseInt(match[1]!, 10);
+	const unit = match[2]!.toLowerCase() as "d" | "w" | "m" | "y";
+	return { amount, unit };
+}
+
+function resolveBaseDate(val: string): string {
+	const trimmed = val.trim();
+	const lower = trimmed.toLowerCase();
+	const today = todayString();
+	if (lower === "today") return today;
+	if (lower === "tomorrow") return computeRelativeDate(today, 1, "d");
+	if (lower === "yesterday") return computeRelativeDate(today, -1, "d");
+	if (lower === "next-week" || lower === "next_week")
+		return computeRelativeDate(today, 7, "d");
+	const offset = parseOffset(trimmed);
+	if (offset) {
+		return computeRelativeDate(today, offset.amount, offset.unit);
+	}
+	return trimmed;
+}
+
+function applyDateOffset(base: string, offsetStr: string): string {
+	const offset = parseOffset(offsetStr);
+	if (!offset) return base;
+	return computeRelativeDate(base, offset.amount, offset.unit);
+}
+
 function todayString(): string {
 	const momentFactory =
 		typeof window !== "undefined" ? window.moment : undefined;
 	if (momentFactory) return momentFactory().format("YYYY-MM-DD");
 	return new Date().toISOString().slice(0, 10);
+}
+export function doesQueryExcludeCompleted(query?: string): boolean {
+	if (!query || !query.trim()) return false;
+	try {
+		const parser = new Parser(tokenize(query.trim()));
+		const expr = parser.parse();
+		return exprExcludesCompleted(expr);
+	} catch {
+		const upper = query.toUpperCase();
+		return (
+			upper.includes('STATUS != "DONE"') ||
+			upper.includes("STATUS != 'DONE'") ||
+			upper.includes('STATUS = "TODO"') ||
+			upper.includes('STATUS = "IN_PROGRESS"') ||
+			upper.includes("IS(TODO)") ||
+			upper.includes("NOT IS(DONE)")
+		);
+	}
+}
+
+function exprExcludesCompleted(expr: Expression): boolean {
+	switch (expr.type) {
+		case "binary":
+			if (expr.operator === "AND") {
+				return exprExcludesCompleted(expr.left) || exprExcludesCompleted(expr.right);
+			} else if (expr.operator === "OR") {
+				return exprExcludesCompleted(expr.left) && exprExcludesCompleted(expr.right);
+			}
+			return false;
+
+		case "not":
+			return exprRequiresCompleted(expr.expression);
+
+		case "comparison": {
+			const field = expr.field.toLowerCase();
+			if (field === "status") {
+				const val = typeof expr.value === "string" ? expr.value.toUpperCase() : expr.value;
+				if (expr.operator === "!=" && val === "DONE") {
+					return true;
+				}
+				if (expr.operator === "=" && val !== "DONE" && typeof val === "string") {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		case "macro":
+			if (expr.name === "is") {
+				const arg = expr.args[0]?.toLowerCase();
+				if (arg === "todo") return true;
+			}
+			return false;
+
+		default:
+			return false;
+	}
+}
+
+function exprRequiresCompleted(expr: Expression): boolean {
+	switch (expr.type) {
+		case "comparison": {
+			const field = expr.field.toLowerCase();
+			if (field === "status") {
+				const val = typeof expr.value === "string" ? expr.value.toUpperCase() : expr.value;
+				if (expr.operator === "=" && val === "DONE") {
+					return true;
+				}
+			}
+			return false;
+		}
+		case "macro":
+			if (expr.name === "is") {
+				const arg = expr.args[0]?.toLowerCase();
+				if (arg === "done") return true;
+			}
+			return false;
+		case "not":
+			return exprExcludesCompleted(expr.expression);
+		default:
+			return false;
+	}
 }

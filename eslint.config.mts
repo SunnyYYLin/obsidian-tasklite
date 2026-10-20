@@ -5,9 +5,6 @@ import { globalIgnores } from "eslint/config";
 
 export default tseslint.config(
 	{
-		linterOptions: {
-			reportUnusedDisableDirectives: 'off',
-		},
 		languageOptions: {
 			globals: {
 				...globals.browser,
@@ -39,6 +36,7 @@ export default tseslint.config(
 			'@typescript-eslint/no-floating-promises': 'off',
 			'no-console': 'off',
 			'@typescript-eslint/no-unused-vars': 'warn',
+			'obsidianmd/hardcoded-config-path': 'off',
 		},
 	},
 	globalIgnores([

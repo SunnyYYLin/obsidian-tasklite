@@ -184,7 +184,8 @@ export function replaceTaskStatus(
 	changedTasks.set(node.lineNumber, updatedTask);
 	const depth = taskDepth(node);
 	const indent = getIndentPrefix(depth, ctx.app, ctx.lines);
-	replacementByLine.set(node.lineNumber, serializeTaskLine({...node.task, data: updatedTask}, indent, ctx.registry));
+	const format = ctx.settings?.preferredTaskFormat ?? "dataview";
+	replacementByLine.set(node.lineNumber, serializeTaskLine({...node.task, data: updatedTask}, indent, ctx.registry, format));
 }
 
 export function needsMissingStatusDate(task: TaskData, status: {type: StatusType}): boolean {

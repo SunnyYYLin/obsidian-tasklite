@@ -1,6 +1,6 @@
 # TaskLite Plugin API
 
-> **Version**: 0.4.11
+> **Version**: 0.5.0  
 > **Plugin ID**: `taskslite`
 
 本文档面向希望基于 TaskLite 插件开发新插件的开发者。
@@ -20,8 +20,7 @@
    - [updateTaskStatus](#26-updatetaskstatus)
    - [executeTasksToggleCommand](#27-executetaskstogglecommand)
    - [listAssignees](#28-listassignees)
-   - [getDefaultAssignee / setDefaultAssignee](#29-getdefaultassignee--setdefaultassignee)
-   - [generateTaskId](#210-generatetaskid)
+   - [generateTaskId](#29-generatetaskid)
 3. [数据结构参考](#3-数据结构参考)
    - [TaskLiteTaskRecord](#tasklitetaskrecord)
    - [TaskData](#taskdata)
@@ -60,7 +59,7 @@ function getTaskLiteApi(app: App) {
   "version": "1.0.0",
   "minAppVersion": "1.8.0",
   "dependencies": {
-    "taskslite": "0.4.0-alpha.0"
+    "taskslite": "0.5.0"
   }
 }
 ```
@@ -97,19 +96,13 @@ interface TaskLiteCoreApi {
   listTasks(options?: ListTasksOptions): Promise<TaskLiteTaskRecord[]>;
   filterTasks(records: TaskLiteTaskRecord[], query: string): TaskLiteTaskRecord[];
   listFrontmatterTasks(): Promise<TaskLiteTaskRecord[]>;
-  getTask(path: string, lineNumber: number): Promise<TaskLiteTaskRecord | null>;
-  findTaskById(id: string, options?: FindTaskOptions): Promise<TaskLiteTaskRecord | null>;
   createTask(input: CreateTaskInput): Promise<void>;
   deleteTask(path: string, lineNumber: number): Promise<boolean>;
   editTask(path: string, lineNumber: number, patch: EditTaskPatch): Promise<boolean>;
   updateTaskStatus(path: string, lineNumber: number, statusSymbol: string): Promise<boolean>;
-  cycleTaskStatus(path: string, lineNumber: number, direction?: "next" | "previous"): Promise<boolean>;
   executeTasksToggleCommand(line: string, path: string): string;
   listAssignees(): Promise<string[]>;
   getDefaultAssignee(): string;
-  setDefaultAssignee(assignee: string): Promise<void>;
-  listStatuses(): StatusConfiguration[];
-  getStatusCycle(): string[];
   generateTaskId(description: string, options?: { isRecurring?: boolean; dueDate?: string | null }): string;
 }
 ```
@@ -169,9 +162,24 @@ filterTasks(records: TaskLiteTaskRecord[], query: string): TaskLiteTaskRecord[]
 
 ```typescript
 status = "TODO"
+completed = true
+completion <= date(today)
 due <= date(today)
-scheduled <= date(today)
-priority = ""
+scheduled <= date(tomorrow)
+due = date(next-week)
+due = date(+3d)
+due = date(today, +4d)
+happens(today)
+is(open)
+is(overdue)
+is(overdate)
+covers(today)
+is(root)
+is(done)
+is(open) AND (happens(today) OR covers(today) OR is(overdue) OR is(overdate))
+priority = "high"
+recurrence = "every week"
+location = "Meeting Room"
 path =~ "Work/"
 tags contains "#work"
 assignee = "Alice"
@@ -182,11 +190,60 @@ AND / OR / NOT / 括号
 ```
 
 **说明**：
-- `date(today)` 按当前日期求值，返回 `YYYY-MM-DD`。
+- **完成状态 vs 完成日期**：
+  - **是否做完**：直接看任务的复选框状态。可通过 `completed = true` / `completed = false`、`status = "DONE"` 或宏 `is(done)` / `is(open)` 进行筛选判断。
+  - **完成日期**：统一使用属性 `completion`（如 `completion = "2026-05-20"` 或 `completion != null`），表示完成的具体日期（Markdown 内联字段为 `[completion:: 2026-05-20]`）。
+- **统一字段**：
+  - **循环**：统一为 `recurrence`（Markdown 序列化及补全均使用 `[recurrence:: ...]`）。
+  - **责任人**：统一为 `assignee`（Markdown 序列化及补全均使用 `[assignee:: ...]`，支持多负责人 `&` 拆分匹配）。
+  - **地点**：统一为 `location`（Markdown 序列化及补全均使用 `[location:: ...]`）。
+  - **优先级**：统一标准为 `"highest" | "high" | "medium" | "low" | "lowest"`（Emoji 对应 🔺、⏫、🔼、🔽、⏬；Dataview 序列化与 DQL 查询均使用标准小写字符串 `[priority:: high]` / `priority = "high"`）。
+  - **前置依赖**：统一为 `dependsOn`（Markdown 序列化及补全均使用 `[dependsOn:: ...]`，DQL 查询支持 `dependsOn = "task-a"`）。
+- `date(...)` 支持相对日期与偏移计算：
+  - `date(today)`、`date(tomorrow)`、`date(yesterday)`、`date(next-week)`
+  - 相对偏移量：`date(+3d)`、`date(-1w)`、`date(+2m)`、`date(+1y)`
+  - 基准偏移：`date(today, +3d)`、`date(today + 3d)`、`date("2026-05-20", +3d)`
+- **任务领域专用宏（统一无别名规范）**：
+  TaskLite 坚持简洁与单一表达原则，宏名称与状态表达严格规范统一，杜绝冗余别名混淆：
+  - `happens(date)`：匹配 `due = date OR scheduled = date OR start = date`。参数可省略（默认 `today`），支持 `happens(today)`、`happens("2026-05-20")`。
+  - `covers(date)`：匹配任务时间跨度覆盖指定日期的任务。必须设置 `start`，判定逻辑为：`start <= date AND (due >= date OR (due IS NULL AND is(open)))`。不包含 `scheduled`。参数可省略（默认 `today`），支持 `covers(today)`、`covers("2026-05-20")`。
+  - `is(state)`：统一状态判定宏，仅支持以下标准状态，无歧义：
+    - `is(open)`：匹配未完成且未取消的开放任务（`status != "DONE" AND status != "CANCELLED"`）。
+    - `is(done)`：匹配已完成任务（直接读取复选框 `status = "DONE"`）。
+    - `is(cancelled)`：匹配已取消任务（`status = "CANCELLED"`）。
+    - `is(in_progress)`：匹配进行中任务（`status = "IN_PROGRESS"`）。
+    - `is(overdue)`：匹配已逾期的开放任务（未完成/未取消且截止日期 `due < date(today)`）。
+    - `is(overdate)`：匹配已过计划日期的开放任务（未完成/未取消且计划日期 `scheduled < date(today)`）。
+    - `is(blocked)`：匹配处于依赖未完成/被阻塞状态的开放任务（开放任务且设置了 `dependsOn`）。
+    - `is(root)`：匹配顶层主任务（`parentLine = null` 或 `depth = 0`）。
+    - `is(subtask)`：匹配子任务（`parentLine != null` 或 `depth > 0`）。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - `=~` 执行字符串包含匹配。
 - `contains` 执行字符串包含匹配，适合 `tags`、`description` 等字段。
 - 缺失日期字段按 `null` 处理，因此 `due <= date(today)` 不会匹配没有截止日期的任务。
 - `assignee` 字段支持使用 `&` 作为分隔符标记多位负责人（如 `👤 Alice & Bob`）。在过滤时，`assignee = "Alice"` 或 `assignee = "Bob"` 都能精准匹配到该任务，而 `assignee != "Alice"` 则会在包含 "Alice" 时返回不匹配。为了保持向前兼容，DQL 查询仍支持 `person` 作为 `assignee` 的别名（如 `person = "Alice"`）。
+
 
 ---
 
@@ -204,14 +261,13 @@ interface CreateTaskInput {
   dates?: {
     start?: string | null;     // 开始日期 "YYYY-MM-DD"
     scheduled?: string | null; // 计划日期
-    due?: string | null;       // 截止日期，如 "2026-04-01" 或 "17:30"（若仅传时间且 start 提供日期，自动补齐为 start 当日）
+    due?: string | null;       // 截止日期
   };
   recurrence?: string | null;    // 重复规则，如 "every week"
   onCompletion?: string | null;  // 完成行为
   id?: string | null;            // 任务 ID
   dependsOn?: string | null;     // 依赖的任务 ID
   assignee?: string[];           // 负责人数组，如 ["Alice", "Bob"]
-  location?: string | null;      // 📍 地点，如 "会议室 A"
   path?: string;                 // 目标文件路径，默认 "Tasks/New_Tasks.md"
   parentLineNumber?: number;     // 父任务行号（0-indexed），新任务插入到该行正下方并自动缩进
   isFileTask?: boolean;          // 是否创建为文件级任务（编码在 YAML frontmatter 中）
@@ -222,7 +278,6 @@ interface CreateTaskInput {
 - 若目标文件不存在，自动创建。
 - 若提供了 `parentLineNumber`，新任务将插入父任务的正下方，并自动继承父任务的缩进加一个 Tab。
 - 若未提供 `parentLineNumber`，任务追加到文件末尾。
-- 若未传 `assignee` 且在设置中启用了自动分配默认身份（`autoAssignDefault`），会自动赋予当前设备的 `defaultAssignee`。
 - 未传的可选字段使用默认值（`null` 或空），不会从文件中推断。
 - **文件级任务**（`isFileTask: true`）：`description` 会成为文件的标题（frontmatter 中的 description 字段）。
 
@@ -459,20 +514,21 @@ console.log("库中所有负责人：", assignees); // ['Alice', 'Bob', 'Sunny']
 
 ---
 
-### 2.9 `getDefaultAssignee` / `setDefaultAssignee`
+### 2.9 `getDefaultAssignee`
 
-获取或设置当前设备上的默认负责人身份。为适配多用户多端同步仓库（如 Git、Obsidian Sync），默认身份默认保存在各设备的 `localStorage` 中，避免覆盖同仓库其他协作者的设置。
+获取当前设备本地配置的默认负责人（我的身份）。仅保存在本机设备上（localStorage），不会随 git 仓库覆盖其他协作者。若未配置则返回空字符串。
 
 ```typescript
 getDefaultAssignee(): string
-setDefaultAssignee(assignee: string): Promise<void>
 ```
+
+**返回**：`string` 默认负责人名称。
 
 **示例：**
 
 ```typescript
-const current = api.getDefaultAssignee();
-await api.setDefaultAssignee("Sunny");
+const me = api.getDefaultAssignee();
+console.log("当前身份：", me); // 'Sunny'
 ```
 
 ---
@@ -572,7 +628,7 @@ interface TaskData {
     start: string | null;        // 🛫 开始日期
     created: string | null;      // ➕ 创建日期
     scheduled: string | null;    // ⏳ 计划日期
-    due: string | null;          // 📅 截止日期（若格式为仅时间如 "17:30" 且存在 🛫 start 日期，解析时将自动继承 start 当天日期）
+    due: string | null;          // 📅 截止日期
     done: string | null;         // ✅ 完成日期
     cancelled: string | null;    // ❌ 取消日期
   };
@@ -581,7 +637,6 @@ interface TaskData {
   id: string | null;             // 🆔 任务 ID
   dependsOn: string | null;      // ⛔ 依赖 ID
   assignee: string[];            // 👤 负责人
-  location: string | null;       // 📍 地点
   blockLink: string | null;      // Obsidian 块引用，如 "^abc123"（仅行任务，文件任务为 null）
   tags: string[];                // 提取的标签列表，如 ["#work", "#urgent"]
 }
@@ -615,7 +670,6 @@ type EditTaskPatch = {
   id?: string | null;
   dependsOn?: string | null;
   assignee?: string[];
-  location?: string | null;
 }
 ```
 
@@ -875,14 +929,6 @@ async function archiveCompletedTasks(app: App, api: TaskLiteCoreApi) {
 
 | 版本 | 新增 API |
 |------|---------|
-| 0.4.11 | 规范化缩进基于栈解析保证 m 与 n 间可逆转换；新增地点字段 `📍`（支持任务元数据解析与序列化、DQL 查询过滤）；新增默认身份（`getDefaultAssignee` / `setDefaultAssignee`，支持独立设备本地存储防同步覆盖，新建任务自动分配）；支持 due 仅指定时间时自动识别为 start 当日日期（如 `🛫 2026-09-07 15:30 📅 17:30` => `2026-09-07 17:30`） |
-| 0.4.7 | 新增任务定位与状态循环 API，并修复 file task frontmatter assignee 历史坏结构导致的负责人缓存污染 |
-| 0.4.7-beta.6 | 继续清理旧 assignee 缓存中的 `Name-Name` 重复派生值，同时保留 `Sunny-Mary` 这类非重复 hyphen 名字 |
-| 0.4.7-beta.5 | 清理旧 assignee 缓存中的 `Name - Name` 派生值，避免 stale settings 再次进入负责人提示 |
-| 0.4.7-beta.4 | 启动时先完成 assignee 扫描再注册编辑器建议，避免旧缓存短暂出现在提示中 |
-| 0.4.7-beta.3 | 修正 assignee 缓存刷新：启动和文件变化后从当前 vault 任务重新计算负责人集合 |
-| 0.4.7-beta.2 | 修正 assignee 建议与解析：多人负责人只使用 `&` 分隔，避免误产生 `Sunny-Mary` 形式 |
-| 0.4.7-beta.1 | 新增 `getTask`、`findTaskById`、`cycleTaskStatus`、`listStatuses`、`getStatusCycle`，用于更丰富的任务定位和状态循环控制 |
 | 0.4.6 | 新增 `generateTaskId` API，根据任务描述生成语义化 ID |
 | 0.4.5 | 新增 `listAssignees` API，返回库中所有负责人的去重集合 |
 | 0.4.3-alpha.0 | `listTasks` 现在返回所有任务（包括 Frontmatter 定义的文件级任务和普通行级任务） |

@@ -25,8 +25,8 @@ export const TASK_SYMBOLS = {
 	dependsOn: "⛔",
 	id: "🆔",
 	assignee: "👤",
-	location: "📍",
 	remind: "⏰",
+	location: "📍",
 };
 
 export interface TaskDates {
@@ -49,7 +49,7 @@ export interface TaskData {
 	dependsOn: string | null;
 	id: string | null;
 	assignee: string[];
-	location?: string | null;
+	location: string | null;
 	blockLink: string | null;
 	tags: string[];
 	/** Raw remaining text not matched by any extractor. */
@@ -65,15 +65,10 @@ export interface TaskLine {
 export const taskLineRegex = /^([\s\t>]*)([-*+]|[0-9]+[.)]) +\[(.)\] *(.*)$/u;
 export const listItemRegex =
 	/^([\s\t>]*)([-*+]|[0-9]+[.)]) *(?:\[(.)\] *)?(.*)$/u;
-export const dateRegex =
+const dateRegex =
 	"\\d{4}-\\d{2}-\\d{2}(?: \\d{1,2}:\\d{2}(?:\\s?[AaPp][Mm])?)?";
-export const timeOnlyPattern = "\\d{1,2}:\\d{2}(?:\\s?[AaPp][Mm])?";
 export const timeOnlyRegex = /^\d{1,2}:\d{2}(?:\s?[AaPp][Mm])?$/u;
 
-/**
- * If `due` specifies only a time (e.g. "17:30") and `start` contains a date (e.g. "2026-09-07" or "2026-09-07 15:30"),
- * automatically infer due's date as start's date (e.g. "2026-09-07 17:30").
- */
 export function resolveDueDateFromStart(
 	due?: string | null,
 	start?: string | null,
@@ -118,13 +113,12 @@ export interface FieldExtractor {
 export function createDateExtractor(
 	key: keyof TaskDates,
 	symbol: string,
-	valuePattern: string = dateRegex,
 ): FieldExtractor {
 	return {
 		label: symbol,
 		extract(description, data) {
 			const regex = new RegExp(
-				`${escapeRegExp(symbol)}\\ufe0f? *(${valuePattern})`,
+				`${escapeRegExp(symbol)}\\ufe0f? *(${dateRegex})`,
 				"u",
 			);
 			const match = description.match(regex);
@@ -167,7 +161,6 @@ export function createStringExtractor<
 const priorityExtractor: FieldExtractor = {
 	label: "priority",
 	extract(description, data) {
-		// eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- Building regex pattern from well-typed priority symbols
 		const priorities = Object.values(TASK_SYMBOLS.priority).join("|");
 		const regex = new RegExp(` ?(${priorities})$`, "u");
 		const match = description.match(regex);
@@ -187,7 +180,10 @@ const assigneeExtractor: FieldExtractor = {
 	label: TASK_SYMBOLS.assignee,
 	extract(description, data) {
 		const symbol = TASK_SYMBOLS.assignee;
-		const regex = new RegExp(`${escapeRegExp(symbol)}\\ufe0f?\\s*([^📍👤📅⏳🛫➕✅❌⏰🔁🏁⛔🆔🔺⏫🔼🔽⏬^#]+)`, "u");
+		const regex = new RegExp(
+			`${escapeRegExp(symbol)}\\ufe0f? *([^📍📅⏳🛫➕✅❌⏰🔺⏫🔼🔽⏬🔁🏁⛔🆔\\^\\n]+)`,
+			"u",
+		);
 		const match = description.match(regex);
 		if (!match) return [description, false];
 		const raw = (match[1] ?? "").trim();
@@ -205,15 +201,17 @@ const assigneeExtractor: FieldExtractor = {
 };
 
 /** Extractor for location field (📍). */
-const locationExtractor: FieldExtractor = {
+export const locationExtractor: FieldExtractor = {
 	label: TASK_SYMBOLS.location,
 	extract(description, data) {
 		const symbol = TASK_SYMBOLS.location;
-		const regex = new RegExp(`${escapeRegExp(symbol)}\\ufe0f?\\s*([^📍👤📅⏳🛫➕✅❌⏰🔁🏁⛔🆔🔺⏫🔼🔽⏬^#]+)`, "u");
+		const regex = new RegExp(
+			`${escapeRegExp(symbol)}\\ufe0f? *([^📍📅⏳🛫➕✅❌⏰🔺⏫🔼🔽⏬🔁🏁⛔🆔👤\\^\\n]+)`,
+			"u",
+		);
 		const match = description.match(regex);
 		if (!match) return [description, false];
-		const raw = (match[1] ?? "").trim();
-		data.location = raw || null;
+		data.location = (match[1] ?? "").trim();
 		return [
 			description.replace(regex, "").replace(/ {2,}/gu, " ").trim(),
 			true,
@@ -221,12 +219,123 @@ const locationExtractor: FieldExtractor = {
 	},
 };
 
+const INLINE_FIELD_REGEX =
+	/(?:\[|\()([a-zA-Z0-9_\u4e00-\u9fa5📅⏳🛫➕✅❌⏰🔺⏫🔼🔽⏬🔁🏁⛔🆔👤📍]+)::\s*([^\])]+?)(?:\]|\))/gu;
+
+function parseInlinePriority(val: string): TaskPriority | null {
+	const lower = val.toLowerCase().trim();
+	if (lower === "highest" || lower === "🔺") return "highest";
+	if (lower === "high" || lower === "⏫") return "high";
+	if (lower === "medium" || lower === "🔼") return "medium";
+	if (lower === "lowest" || lower === "⏬") return "lowest";
+	if (lower === "low" || lower === "🔽") return "low";
+	return null;
+}
+
+export const inlineFieldExtractor: FieldExtractor = {
+	label: "inlineField",
+	extract(description, data) {
+		const matches = [...description.matchAll(INLINE_FIELD_REGEX)];
+		for (const match of matches) {
+			const fullMatch = match[0];
+			const rawKey = match[1]?.trim() ?? "";
+			const key = rawKey.toLowerCase();
+			const val = match[2]?.trim() ?? "";
+			let matchedField = true;
+
+			if (key === "due" || rawKey === TASK_SYMBOLS.due) {
+				data.dates.due = val;
+			} else if (key === "scheduled" || rawKey === TASK_SYMBOLS.scheduled) {
+				data.dates.scheduled = val;
+			} else if (key === "start" || rawKey === TASK_SYMBOLS.start) {
+				data.dates.start = val;
+			} else if (key === "created" || rawKey === TASK_SYMBOLS.created) {
+				data.dates.created = val;
+			} else if (
+				key === "completion" ||
+				key === "done" ||
+				rawKey === TASK_SYMBOLS.done
+			) {
+				data.dates.done = val;
+			} else if (key === "cancelled" || rawKey === TASK_SYMBOLS.cancelled) {
+				data.dates.cancelled = val;
+			} else if (key === "remind" || rawKey === TASK_SYMBOLS.remind) {
+				data.dates.remind = val;
+			} else if (key === "priority") {
+				const prio = parseInlinePriority(val);
+				if (prio) data.priority = prio;
+			} else if (rawKey === "🔺") {
+				data.priority = "highest";
+			} else if (rawKey === "⏫") {
+				data.priority = "high";
+			} else if (rawKey === "🔼") {
+				data.priority = "medium";
+			} else if (rawKey === "🔽") {
+				data.priority = "low";
+			} else if (rawKey === "⏬") {
+				data.priority = "lowest";
+			} else if (
+				key === "repeat" ||
+				key === "recurrence" ||
+				rawKey === TASK_SYMBOLS.recurrence
+			) {
+				data.recurrence = val;
+			} else if (
+				key === "oncompletion" ||
+				rawKey === TASK_SYMBOLS.onCompletion
+			) {
+				if (val === "delete" || val === "keep") {
+					data.onCompletion = val;
+				}
+			} else if (
+				key === "dependson" ||
+				key === "blockedby" ||
+				rawKey === TASK_SYMBOLS.dependsOn
+			) {
+				data.dependsOn = val;
+			} else if (key === "id" || rawKey === TASK_SYMBOLS.id) {
+				data.id = val;
+			} else if (
+				key === "assignee" ||
+				key === "assigned" ||
+				key === "person" ||
+				rawKey === TASK_SYMBOLS.assignee
+			) {
+				data.assignee = val
+					? val
+							.split("&")
+							.map((p) => p.trim())
+							.filter(Boolean)
+					: [];
+			} else if (
+				key === "location" ||
+				key === "place" ||
+				key === "loc" ||
+				rawKey === TASK_SYMBOLS.location
+			) {
+				data.location = val;
+			} else {
+				matchedField = false;
+			}
+
+			if (matchedField) {
+				const cleaned = description
+					.replace(fullMatch, "")
+					.replace(/ {2,}/gu, " ")
+					.trim();
+				return [cleaned, true];
+			}
+		}
+		return [description, false];
+	},
+};
+
 /**
  * Default extractor pipeline for parsing task body emoji fields.
  *
- * The order matters: done/cancelled dates are extracted before due/scheduled/
- * start/created to avoid partial matches. Priority is first because it anchors
- * at end-of-string.
+ * The order matters: inline fields first, then done/cancelled dates are extracted
+ * before due/scheduled/start/created to avoid partial matches. Priority is first
+ * because it anchors at end-of-string.
  *
  * To extend with custom fields, spread and append your own extractors:
  * ```ts
@@ -238,14 +347,11 @@ const locationExtractor: FieldExtractor = {
  * as part of the task description.
  */
 export const DEFAULT_EXTRACTORS: FieldExtractor[] = [
+	inlineFieldExtractor,
 	priorityExtractor,
 	createDateExtractor("done", TASK_SYMBOLS.done),
 	createDateExtractor("cancelled", TASK_SYMBOLS.cancelled),
-	createDateExtractor(
-		"due",
-		TASK_SYMBOLS.due,
-		`(?:${dateRegex}|${timeOnlyPattern})`,
-	),
+	createDateExtractor("due", TASK_SYMBOLS.due),
 	createDateExtractor("scheduled", TASK_SYMBOLS.scheduled),
 	createDateExtractor("start", TASK_SYMBOLS.start),
 	createDateExtractor("created", TASK_SYMBOLS.created),
@@ -357,14 +463,12 @@ export function parseTaskBody(
 	data.description = remaining.replace(/ {2,}/gu, " ").trim();
 	data.unmatched = remaining.trim() || null;
 	data.tags = extractTags(data.description);
-
-	if (data.dates.due) {
+	if (data.dates.due && data.dates.start) {
 		const resolved = resolveDueDateFromStart(data.dates.due, data.dates.start);
 		if (resolved) {
 			data.dates.due = resolved;
 		}
 	}
-
 	return data;
 }
 
@@ -376,13 +480,25 @@ export function serializeTaskLine(
 	task: TaskLine,
 	indentPrefix: string,
 	registry: StatusRegistry,
+	format: "dataview" | "emoji" = "dataview",
+	explicitStatusSymbol?: string,
 ): string {
-	const symbol = registry.getByType(task.data.status).symbol;
-	// eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return -- TaskLine data is well-typed at source; reviewer lints compiled JS
-	return `${indentPrefix}${task.listMarker} [${symbol}] ${serializeTaskBody(task.data)}`.trimEnd();
+	const symbol =
+		explicitStatusSymbol ?? registry.getByType(task.data.status).symbol;
+	return `${indentPrefix}${task.listMarker} [${symbol}] ${serializeTaskBody(task.data, format)}`.trimEnd();
 }
 
-export function serializeTaskBody(data: TaskData): string {
+export function serializeTaskBody(
+	data: TaskData,
+	format: "dataview" | "emoji" = "dataview",
+): string {
+	if (format === "emoji") {
+		return serializeTaskBodyEmoji(data);
+	}
+	return serializeTaskBodyDataview(data);
+}
+
+function serializeTaskBodyEmoji(data: TaskData): string {
 	const parts = [data.description.trim()];
 	if (data.priority) {
 		let emoji = "";
@@ -412,6 +528,56 @@ export function serializeTaskBody(data: TaskData): string {
 	if (data.location)
 		parts.push(`${TASK_SYMBOLS.location} ${data.location}`);
 	if (data.blockLink) parts.push(data.blockLink);
+	return parts.filter(Boolean).join(" ");
+}
+
+function serializeTaskBodyDataview(data: TaskData): string {
+	const parts = [data.description.trim()];
+	if (data.priority) {
+		parts.push(`[priority:: ${data.priority}]`);
+	}
+	if (data.dates.start) {
+		parts.push(`[start:: ${data.dates.start}]`);
+	}
+	if (data.dates.created) {
+		parts.push(`[created:: ${data.dates.created}]`);
+	}
+	if (data.dates.scheduled) {
+		parts.push(`[scheduled:: ${data.dates.scheduled}]`);
+	}
+	if (data.dates.due) {
+		parts.push(`[due:: ${data.dates.due}]`);
+	}
+	if (data.dates.done) {
+		parts.push(`[completion:: ${data.dates.done}]`);
+	}
+	if (data.dates.cancelled) {
+		parts.push(`[cancelled:: ${data.dates.cancelled}]`);
+	}
+	if (data.dates.remind) {
+		parts.push(`[remind:: ${data.dates.remind}]`);
+	}
+	if (data.recurrence) {
+		parts.push(`[recurrence:: ${data.recurrence}]`);
+	}
+	if (data.onCompletion) {
+		parts.push(`[onCompletion:: ${data.onCompletion}]`);
+	}
+	if (data.dependsOn) {
+		parts.push(`[dependsOn:: ${data.dependsOn}]`);
+	}
+	if (data.id) {
+		parts.push(`[id:: ${data.id}]`);
+	}
+	if (data.assignee && data.assignee.length > 0) {
+		parts.push(`[assignee:: ${data.assignee.join(" & ")}]`);
+	}
+	if (data.location) {
+		parts.push(`[location:: ${data.location}]`);
+	}
+	if (data.blockLink) {
+		parts.push(data.blockLink);
+	}
 	return parts.filter(Boolean).join(" ");
 }
 
@@ -452,7 +618,6 @@ function addDate(parts: string[], symbol: string, value: string | null): void {
 }
 
 function extractTags(description: string): string[] {
-	// eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return -- Spreading RegExp match iterator; reviewer lints compiled JS
 	return [...description.matchAll(tagRegex)].map((match) => match[0].trim());
 }
 
@@ -468,116 +633,6 @@ export function parseLineWithStatus(
 	return parseTaskLine(line, registry.get(statusSymbol).type);
 }
 
-export function splitQuoteAndIndent(rawIndent: string): {
-	quotePart: string;
-	indentPart: string;
-} {
-	const lastQuoteIdx = rawIndent.lastIndexOf(">");
-	if (lastQuoteIdx >= 0) {
-		if (
-			rawIndent[lastQuoteIdx + 1] === " " ||
-			rawIndent[lastQuoteIdx + 1] === "\t"
-		) {
-			return {
-				quotePart: rawIndent.slice(0, lastQuoteIdx + 2),
-				indentPart: rawIndent.slice(lastQuoteIdx + 2),
-			};
-		}
-		return {
-			quotePart: rawIndent.slice(0, lastQuoteIdx + 1),
-			indentPart: rawIndent.slice(lastQuoteIdx + 1),
-		};
-	}
-	return { quotePart: "", indentPart: rawIndent };
-}
-
-/**
- * Normalize the indentation of a full document's lines using a stack-based
- * tree parser to reliably infer nesting levels, ensuring reversibility
- * when switching between different tabSize or tab/space configurations.
- */
-export function normalizeDocumentLines(
-	lines: string[],
-	useTab: boolean,
-	tabSize: number,
-): string[] {
-	let currentQuotePart = "";
-	let stack: Array<{ visualWidth: number; level: number }> = [
-		{ visualWidth: 0, level: 0 },
-	];
-	let inCodeBlock = false;
-
-	return lines.map((line) => {
-		const trimmed = line.trim();
-		if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
-			inCodeBlock = !inCodeBlock;
-			stack = [{ visualWidth: 0, level: 0 }];
-			return line;
-		}
-		if (inCodeBlock) {
-			return line;
-		}
-
-		const match = line.match(listItemRegex);
-		const rawPrefix = line.match(/^([\s\t>]*)/u)?.[0] ?? "";
-		const { quotePart, indentPart } = splitQuoteAndIndent(rawPrefix);
-
-		if (quotePart !== currentQuotePart) {
-			currentQuotePart = quotePart;
-			stack = [{ visualWidth: 0, level: 0 }];
-		}
-
-		if (!match) {
-			const isBlank = trimmed.length === 0;
-			const isIndented = indentPart.length > 0;
-			if (!isBlank && !isIndented) {
-				stack = [{ visualWidth: 0, level: 0 }];
-			}
-			return line;
-		}
-
-		const itemRawIndent = match[1] ?? "";
-		const itemParts = splitQuoteAndIndent(itemRawIndent);
-		const itemIndentPart = itemParts.indentPart;
-
-		// Calculate visual indentation width. Using 4 spaces for a tab visual measurement.
-		const visualWidth = itemIndentPart.replace(/\t/gu, "    ").length;
-
-		let level = 0;
-		const top = stack[stack.length - 1]!;
-		if (visualWidth > top.visualWidth) {
-			level = top.level + 1;
-			stack.push({ visualWidth, level });
-		} else if (visualWidth === top.visualWidth) {
-			level = top.level;
-		} else {
-			while (
-				stack.length > 1 &&
-				stack[stack.length - 1]!.visualWidth > visualWidth
-			) {
-				stack.pop();
-			}
-			const matchedItem = stack[stack.length - 1]!;
-			if (matchedItem.visualWidth === visualWidth) {
-				level = matchedItem.level;
-			} else {
-				level = matchedItem.level + 1;
-				stack.push({ visualWidth, level });
-			}
-		}
-
-		const targetIndentPart = useTab
-			? "\t".repeat(level)
-			: " ".repeat(level * tabSize);
-
-		const newIndent = itemParts.quotePart + targetIndentPart;
-		if (itemRawIndent !== newIndent) {
-			return newIndent + line.slice(itemRawIndent.length);
-		}
-		return line;
-	});
-}
-
 /**
  * Normalize the indentation of a single line of text according to the vault's tab settings.
  */
@@ -590,7 +645,21 @@ export function normalizeLineIndentation(
 	if (!match) return line;
 
 	const rawIndent = match[1] ?? "";
-	const { quotePart, indentPart } = splitQuoteAndIndent(rawIndent);
+	const lastQuoteIdx = rawIndent.lastIndexOf(">");
+	let quotePart = "";
+	let indentPart = rawIndent;
+	if (lastQuoteIdx >= 0) {
+		if (
+			rawIndent[lastQuoteIdx + 1] === " " ||
+			rawIndent[lastQuoteIdx + 1] === "\t"
+		) {
+			quotePart = rawIndent.slice(0, lastQuoteIdx + 2);
+			indentPart = rawIndent.slice(lastQuoteIdx + 2);
+		} else {
+			quotePart = rawIndent.slice(0, lastQuoteIdx + 1);
+			indentPart = rawIndent.slice(lastQuoteIdx + 1);
+		}
+	}
 
 	const spacesCount = indentPart.replace(/\t/gu, " ".repeat(tabSize)).length;
 

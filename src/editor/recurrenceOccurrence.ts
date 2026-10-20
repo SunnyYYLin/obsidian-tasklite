@@ -38,9 +38,10 @@ export function buildRecurringTaskOccurrence({
 
 	const recurringSubtree = getSubtreeNodes(recurringNode);
 	const nextTask = makeNextOccurrence(recurringNode.task, terminatedTask, registry, settings, shift);
+	const format = settings.preferredTaskFormat ?? "dataview";
 	const nextLines = settings.copySubtasksOnRecurrence
-		? copySubtreeForNextOccurrence(recurringSubtree, recurringNode, nextTask, registry, app, lines)
-		: [serializeTaskLine(nextTask, getIndentPrefix(taskDepth(recurringNode), app, lines), registry)];
+		? copySubtreeForNextOccurrence(recurringSubtree, recurringNode, nextTask, registry, app, lines, format)
+		: [serializeTaskLine(nextTask, getIndentPrefix(taskDepth(recurringNode), app, lines), registry, format)];
 
 	const insertionLine = getSubtreeLineRange(recurringNode).from;
 	return {
@@ -89,12 +90,13 @@ function copySubtreeForNextOccurrence(
 	registry: StatusRegistry,
 	app: App | undefined,
 	lines: string[],
+	format: "dataview" | "emoji" = "dataview",
 ): string[] {
 	return subtree.map((node) => {
 		const depth = taskDepth(node);
 		const indent = getIndentPrefix(depth, app, lines);
 		if (node.lineNumber === root.lineNumber) {
-			return serializeTaskLine(nextTask, indent, registry);
+			return serializeTaskLine(nextTask, indent, registry, format);
 		}
 		if (!node.task) {
 			return node.original;
@@ -110,6 +112,6 @@ function copySubtreeForNextOccurrence(
 		return serializeTaskLine({
 			...node.task,
 			data,
-		}, indent, registry);
+		}, indent, registry, format);
 	});
 }
