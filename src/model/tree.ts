@@ -152,7 +152,7 @@ function inferListItems(lines: string[]): ListItemCache[] {
 				start: {line: index, col: 0, offset: 0},
 				end: {line: index, col: line.length, offset: 0},
 			},
-		} as unknown as ListItemCache);
+		});
 		stack.push({indent, line: index});
 	});
 	return result;

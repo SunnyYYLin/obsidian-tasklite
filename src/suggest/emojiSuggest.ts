@@ -59,11 +59,8 @@ type Suggestion =
 	| AssigneeSuggestion
 	| LocationSuggestion;
 
-export function getDefaultAssignee(): string {
-	if (typeof window !== "undefined" && window.localStorage) {
-		return window.localStorage.getItem("tasklite-my-identity")?.trim() || "";
-	}
-	return "";
+export function getDefaultAssignee(defaultAssignee?: string): string {
+	return defaultAssignee?.trim() || "";
 }
 
 export function getFieldSuggestions(
@@ -305,7 +302,7 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 		} else if (maxIndex === inlineAssigneeIdx && inlineAssigneeMatch) {
 			const queryText = inlineAssigneeMatch[2] ?? "";
 			const trimmed = queryText.trim();
-			const defaultIdentity = getDefaultAssignee();
+			const defaultIdentity = getDefaultAssignee(this.plugin.settings.defaultAssignee);
 			const assignees = new Set(this.plugin.settings.assignees || []);
 			if (defaultIdentity) assignees.add(defaultIdentity);
 			if (assignees.has(trimmed)) {
@@ -426,7 +423,7 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 				if (cursor.ch >= queryStart) {
 					const queryText = beforeCursor.slice(queryStart);
 					const trimmed = queryText.trim();
-					const defaultIdentity = getDefaultAssignee();
+					const defaultIdentity = getDefaultAssignee(this.plugin.settings.defaultAssignee);
 					const assignees = new Set(this.plugin.settings.assignees || []);
 					if (defaultIdentity) assignees.add(defaultIdentity);
 					if (assignees.has(trimmed)) {
@@ -481,7 +478,10 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 			const q = query.slice(2).trim();
 			const format =
 				this.plugin.settings.preferredTaskFormat ?? "dataview";
-			const list = getFieldSuggestions(format);
+			const list = getFieldSuggestions(
+				format,
+				this.plugin.settings.defaultAssignee,
+			);
 			if (!q) return list.slice(0, 8);
 			return list
 				.filter((s) => s.label.toLowerCase().includes(q))
@@ -547,7 +547,7 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 		) {
 			const q = query.slice(query.indexOf(":") + 1).trim();
 			const configured = this.plugin.settings.assignees || [];
-			const defaultIdentity = getDefaultAssignee();
+			const defaultIdentity = getDefaultAssignee(this.plugin.settings.defaultAssignee);
 			const allAssigneesSet = new Set(configured);
 			if (defaultIdentity) {
 				allAssigneesSet.add(defaultIdentity);
@@ -624,7 +624,7 @@ export class TaskLiteEmojiSuggest extends EditorSuggest<Suggestion> {
 			});
 			el.createSpan({ text: value.description });
 		} else if (value.kind === "assignee") {
-			const defaultIdentity = getDefaultAssignee();
+			const defaultIdentity = getDefaultAssignee(this.plugin.settings.defaultAssignee);
 			el.createSpan({
 				text:
 					value.name === defaultIdentity

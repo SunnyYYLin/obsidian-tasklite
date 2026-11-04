@@ -88,7 +88,7 @@ export function createLivePreviewExtension(
 					const symbol = match?.[1] ?? " ";
 					const statusConfig = registry.get(symbol);
 					const isChecked = statusConfig.type === "DONE";
-					setTimeout(() => {
+					window.setTimeout(() => {
 						target.checked = isChecked;
 					}, 0);
 				}

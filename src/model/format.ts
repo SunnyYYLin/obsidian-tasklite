@@ -66,8 +66,72 @@ export const taskLineRegex = /^([\s\t>]*)([-*+]|[0-9]+[.)]) +\[(.)\] *(.*)$/u;
 export const listItemRegex =
 	/^([\s\t>]*)([-*+]|[0-9]+[.)]) *(?:\[(.)\] *)?(.*)$/u;
 const dateRegex =
-	"\\d{4}-\\d{2}-\\d{2}(?: \\d{1,2}:\\d{2}(?:\\s?[AaPp][Mm])?)?";
-export const timeOnlyRegex = /^\d{1,2}:\d{2}(?:\s?[AaPp][Mm])?$/u;
+	"\\d{4}-\\d{1,2}-\\d{1,2}(?:[ T]\\d{1,2}:\\d{2}(?::\\d{2})?(?:\\s?[AaPp][Mm])?)?";
+export const timeOnlyRegex = /^\d{1,2}:\d{2}(?::\d{2})?(?:\s?[AaPp][Mm])?$/u;
+
+/**
+ * Normalize a task date or date-time string so that single-digit months, days,
+ * and 24-hour hours are zero-padded (`YYYY-MM-DD` or `YYYY-MM-DD HH:mm`), while
+ * preserving 12-hour `AM`/`PM` formatting when explicitly present.
+ */
+export function normalizeTaskDateValue(raw: string): string {
+	const trimmed = raw.trim();
+	const match = trimmed.match(
+		/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?(\s*[AaPp][Mm])?)?$/u,
+	);
+	if (!match) return trimmed;
+	const year = match[1]!;
+	const month = match[2]!.padStart(2, "0");
+	const day = match[3]!.padStart(2, "0");
+	const datePart = `${year}-${month}-${day}`;
+	if (match[4] === undefined || match[5] === undefined) {
+		return datePart;
+	}
+	const rawHour = match[4];
+	const minute = match[5];
+	const second = match[6];
+	const meridiem = match[7];
+	const secSuffix = second !== undefined ? `:${second}` : "";
+	if (meridiem) {
+		return `${datePart} ${rawHour}:${minute}${secSuffix}${meridiem}`;
+	}
+	const hour = rawHour.padStart(2, "0");
+	return `${datePart} ${hour}:${minute}${secSuffix}`;
+}
+
+/**
+ * Parse a date or date-time string into canonical 24-hour components for
+ * comparison and sorting (`date`: `YYYY-MM-DD`, `time`: `HH:mm:ss` or `null`,
+ * `full`: `YYYY-MM-DD` or `YYYY-MM-DD HH:mm:ss`).
+ */
+export function parseCanonicalDateTime(
+	raw: string | null | undefined,
+): { date: string; time: string | null; full: string; hasTime: boolean } | null {
+	if (!raw) return null;
+	const trimmed = raw.trim();
+	const match = trimmed.match(
+		/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([AaPp][Mm]))?)?$/u,
+	);
+	if (!match) return null;
+	const year = match[1]!;
+	const month = match[2]!.padStart(2, "0");
+	const day = match[3]!.padStart(2, "0");
+	const date = `${year}-${month}-${day}`;
+	if (match[4] === undefined || match[5] === undefined) {
+		return { date, time: null, full: date, hasTime: false };
+	}
+	let hour = Number.parseInt(match[4], 10);
+	const minute = match[5];
+	const second = match[6] ?? "00";
+	const meridiem = match[7]?.toLowerCase();
+	if (meridiem === "pm" && hour < 12) {
+		hour += 12;
+	} else if (meridiem === "am" && hour === 12) {
+		hour = 0;
+	}
+	const time = `${hour.toString().padStart(2, "0")}:${minute}:${second}`;
+	return { date, time, full: `${date} ${time}`, hasTime: true };
+}
 
 export function resolveDueDateFromStart(
 	due?: string | null,
@@ -76,12 +140,13 @@ export function resolveDueDateFromStart(
 	if (!due) return due;
 	const trimmedDue = due.trim();
 	if (timeOnlyRegex.test(trimmedDue) && start) {
-		const startMatch = start.match(/^(\d{4}-\d{2}-\d{2})/u);
+		const normalizedStart = normalizeTaskDateValue(start);
+		const startMatch = normalizedStart.match(/^(\d{4}-\d{2}-\d{2})/u);
 		if (startMatch?.[1]) {
-			return `${startMatch[1]} ${trimmedDue}`;
+			return normalizeTaskDateValue(`${startMatch[1]} ${trimmedDue}`);
 		}
 	}
-	return due;
+	return normalizeTaskDateValue(due);
 }
 
 const blockLinkRegex = / \^[a-zA-Z0-9-]+$/u;
@@ -123,7 +188,7 @@ export function createDateExtractor(
 			);
 			const match = description.match(regex);
 			if (!match) return [description, false];
-			data.dates[key] = match[1] ?? null;
+			data.dates[key] = match[1] ? normalizeTaskDateValue(match[1]) : null;
 			return [
 				description.replace(regex, "").replace(/ {2,}/gu, " ").trim(),
 				true,
@@ -244,23 +309,23 @@ export const inlineFieldExtractor: FieldExtractor = {
 			let matchedField = true;
 
 			if (key === "due" || rawKey === TASK_SYMBOLS.due) {
-				data.dates.due = val;
+				data.dates.due = normalizeTaskDateValue(val);
 			} else if (key === "scheduled" || rawKey === TASK_SYMBOLS.scheduled) {
-				data.dates.scheduled = val;
+				data.dates.scheduled = normalizeTaskDateValue(val);
 			} else if (key === "start" || rawKey === TASK_SYMBOLS.start) {
-				data.dates.start = val;
+				data.dates.start = normalizeTaskDateValue(val);
 			} else if (key === "created" || rawKey === TASK_SYMBOLS.created) {
-				data.dates.created = val;
+				data.dates.created = normalizeTaskDateValue(val);
 			} else if (
 				key === "completion" ||
 				key === "done" ||
 				rawKey === TASK_SYMBOLS.done
 			) {
-				data.dates.done = val;
+				data.dates.done = normalizeTaskDateValue(val);
 			} else if (key === "cancelled" || rawKey === TASK_SYMBOLS.cancelled) {
-				data.dates.cancelled = val;
+				data.dates.cancelled = normalizeTaskDateValue(val);
 			} else if (key === "remind" || rawKey === TASK_SYMBOLS.remind) {
-				data.dates.remind = val;
+				data.dates.remind = normalizeTaskDateValue(val);
 			} else if (key === "priority") {
 				const prio = parseInlinePriority(val);
 				if (prio) data.priority = prio;

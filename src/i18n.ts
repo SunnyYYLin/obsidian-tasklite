@@ -195,9 +195,9 @@ function currentLocale(): keyof typeof messages {
 }
 
 function detectLocale(): string {
-	const maybeWindow = globalThis as typeof globalThis & {
-		window?: {moment?: {locale?: () => string}};
-		navigator?: {language?: string};
-	};
-	return maybeWindow.window?.moment?.locale?.() ?? maybeWindow.navigator?.language ?? "en";
+	const momentLocale =
+		typeof window !== "undefined" ? window.moment?.locale?.() : undefined;
+	const navLang =
+		typeof navigator !== "undefined" ? navigator.language : undefined;
+	return momentLocale ?? navLang ?? "en";
 }

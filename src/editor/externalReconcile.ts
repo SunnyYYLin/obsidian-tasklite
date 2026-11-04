@@ -9,14 +9,10 @@ import { parseTaskLine, serializeTaskLine } from "../model/format";
 import { getIndentPrefix } from "./toggle";
 
 function isTFile(value: unknown): value is TFile {
-	return (
-		value instanceof TFile ||
-		(Boolean(value) &&
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
-			typeof (value as any).path === "string" &&
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access
-			typeof (value as any).extension === "string")
-	);
+	if (value instanceof TFile) return true;
+	if (!value || typeof value !== "object") return false;
+	const candidate = value as Partial<TFile>;
+	return typeof candidate.path === "string" && typeof candidate.extension === "string";
 }
 
 export class ExternalTaskReconciler {

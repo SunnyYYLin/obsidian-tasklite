@@ -1,17 +1,22 @@
 import * as pinyinliteModule from "pinyinlite/index_full.js";
+import { parseCanonicalDateTime } from "./format";
 
-// Safe wrapper for pinyinlite to prevent crash on ESM/CommonJS bundler wrapper mismatch
-// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
-const pinyinliteFn = (pinyinliteModule as any).default || pinyinliteModule;
-// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-const pinyinlite = typeof pinyinliteFn === "function" ? pinyinliteFn : null;
+type PinyinLiteFunction = (input: string) => string[][];
 
+interface PinyinLiteModuleShape {
+	default?: PinyinLiteFunction;
+}
+
+const rawModule = pinyinliteModule as unknown as PinyinLiteModuleShape | PinyinLiteFunction;
+const pinyinliteFn =
+	typeof rawModule === "function" ? rawModule : rawModule.default;
+const pinyinlite: PinyinLiteFunction | null =
+	typeof pinyinliteFn === "function" ? pinyinliteFn : null;
 
 function getCurrentDateStr(): string {
-	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
-	const momentFactory = typeof window !== "undefined" ? (window as any).moment : undefined;
+	const momentFactory =
+		typeof window !== "undefined" ? window.moment : undefined;
 	if (momentFactory) {
-		// eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
 		return momentFactory().format("YYYY-MM-DD");
 	}
 	return new Date().toISOString().split("T")[0]!;
@@ -65,15 +70,11 @@ export function generateSemanticId(
 				tokens.push(currentWord[0]!.toLowerCase());
 				currentWord = "";
 			}
-			// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
 			const pinyins = pinyinlite(char);
-			// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
 			if (pinyins && pinyins[0] && pinyins[0].length > 0) {
-				// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
 				const firstPinyin = pinyins[0][0];
-				if (firstPinyin) {
-					// eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
-					tokens.push(firstPinyin[0]!.toLowerCase());
+				if (firstPinyin && firstPinyin[0]) {
+					tokens.push(firstPinyin[0].toLowerCase());
 				}
 			}
 		} else if (/[a-zA-Z0-9]/.test(char)) {
@@ -104,7 +105,10 @@ export function generateSemanticId(
 	}
 
 	if (options?.isRecurring) {
-		const dateSuffix = options.dueDate || getCurrentDateStr();
+		const rawDue = options.dueDate;
+		const dateSuffix = rawDue
+			? (parseCanonicalDateTime(rawDue)?.date ?? rawDue.trim().split(/[ T]/)[0]!)
+			: getCurrentDateStr();
 		base = `${base}-${dateSuffix}`;
 	}
 

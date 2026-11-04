@@ -1,5 +1,5 @@
 import { RRule, Frequency, type Options } from "rrule";
-import type { TaskDates } from "./format";
+import { normalizeTaskDateValue, type TaskDates } from "./format";
 
 export interface RecurrenceRule {
 	options: Partial<Options>;
@@ -31,7 +31,8 @@ export function nextRecurrenceDates(
 	rule: RecurrenceRule,
 	completedOn: string,
 ): TaskDates {
-	const referenceDate = dates.due ?? dates.scheduled ?? dates.start;
+	const referenceDate =
+		dates.due ?? dates.scheduled ?? dates.start ?? dates.remind;
 	if (!referenceDate && !rule.baseOnToday) {
 		return { ...dates, done: null, cancelled: null };
 	}
@@ -48,19 +49,49 @@ export function nextRecurrenceDates(
 		return { ...dates, done: null, cancelled: null };
 	}
 
+	let completedTime = "";
+	if (rule.baseOnToday) {
+		const explicitCompletedTime = splitDateTime(completedOn).time;
+		if (explicitCompletedTime) {
+			completedTime = explicitCompletedTime;
+		} else {
+			const currentHm = nowTimeString();
+			if (currentHm) {
+				completedTime = ` ${currentHm}`;
+			}
+		}
+	}
+
+	const nextScheduled =
+		!referenceDate && rule.baseOnToday
+			? nextReferenceDate
+			: shiftDateByDelta(
+					dates.scheduled,
+					referenceDate,
+					nextReferenceDate,
+					completedTime,
+				);
+
 	return {
 		...dates,
-		start: shiftDateByDelta(dates.start, referenceDate, nextReferenceDate),
-		scheduled: shiftDateByDelta(
-			dates.scheduled,
+		start: shiftDateByDelta(
+			dates.start,
 			referenceDate,
 			nextReferenceDate,
+			completedTime,
 		),
-		due: shiftDateByDelta(dates.due, referenceDate, nextReferenceDate),
+		scheduled: nextScheduled,
+		due: shiftDateByDelta(
+			dates.due,
+			referenceDate,
+			nextReferenceDate,
+			completedTime,
+		),
 		remind: shiftDateByDelta(
 			dates.remind,
 			referenceDate,
 			nextReferenceDate,
+			referenceDate === dates.remind ? completedTime : "",
 		),
 		done: null,
 		cancelled: null,
@@ -69,6 +100,20 @@ export function nextRecurrenceDates(
 
 export function todayString(): string {
 	return window.moment().format("YYYY-MM-DD");
+}
+
+export function nowTimeString(): string {
+	const momentFactory =
+		typeof window !== "undefined" ? window.moment : undefined;
+	if (momentFactory) {
+		const formatted = (
+			momentFactory() as unknown as { format: (fmt: string) => string }
+		).format("HH:mm");
+		if (/^\d{2}:\d{2}$/u.test(formatted)) {
+			return formatted;
+		}
+	}
+	return "";
 }
 
 function nextDateAfter(
@@ -200,17 +245,20 @@ function shiftDateByDelta(
 	value: string | null,
 	originalReference: string | null,
 	nextReference: string,
+	overrideTime = "",
 ): string | null {
 	if (!value) return null;
 	if (!originalReference) {
 		const { time } = splitDateTime(value);
-		return nextReference + time;
+		const finalTime = time && overrideTime ? overrideTime : time;
+		return nextReference + finalTime;
 	}
 	const { date: valDate, time: valTime } = splitDateTime(value);
 	const { date: refDate } = splitDateTime(originalReference);
 	const dayOffset = daysBetween(refDate, valDate);
 	const shiftedDate = addDays(nextReference, dayOffset);
-	return shiftedDate + valTime;
+	const finalTime = valTime && overrideTime ? overrideTime : valTime;
+	return shiftedDate + finalTime;
 }
 
 function daysBetween(from: string, to: string): number {
@@ -229,11 +277,12 @@ function addDays(value: string, days: number): string {
 }
 
 function splitDateTime(value: string): { date: string; time: string } {
-	const match = value.match(/^(\d{4}-\d{2}-\d{2})(.*)$/u);
+	const normalized = normalizeTaskDateValue(value);
+	const match = normalized.match(/^(\d{4}-\d{2}-\d{2})(.*)$/u);
 	if (match) {
-		return { date: match[1] ?? value, time: match[2] ?? "" };
+		return { date: match[1] ?? normalized, time: match[2] ?? "" };
 	}
-	return { date: value, time: "" };
+	return { date: normalized, time: "" };
 }
 
 function parseDate(value: string): Date | null {

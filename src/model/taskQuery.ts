@@ -1,3 +1,4 @@
+import { parseCanonicalDateTime } from "./format";
 import type { TaskDocumentRecord } from "./taskDocumentStore";
 
 export class TaskQueryError extends Error {
@@ -74,7 +75,8 @@ export function compileTaskQuery(query: string): CompiledTaskQuery {
 		};
 	}
 
-	const cached = compiledQueryCache.get(normalizedQuery);
+	const cacheKey = `${todayString()}::${normalizedQuery}`;
+	const cached = compiledQueryCache.get(cacheKey);
 	if (cached) return cached;
 
 	const parser = new Parser(tokenize(normalizedQuery));
@@ -86,10 +88,12 @@ export function compileTaskQuery(query: string): CompiledTaskQuery {
 	};
 	// Evict the oldest entry when the cache reaches its limit
 	if (compiledQueryCache.size >= COMPILED_QUERY_CACHE_MAX) {
-		// eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unnecessary-type-assertion
-		compiledQueryCache.delete(compiledQueryCache.keys().next().value!);
+		const oldestEntry = compiledQueryCache.keys().next();
+		if (!oldestEntry.done) {
+			compiledQueryCache.delete(oldestEntry.value);
+		}
 	}
-	compiledQueryCache.set(normalizedQuery, compiled);
+	compiledQueryCache.set(cacheKey, compiled);
 	return compiled;
 }
 
@@ -174,7 +178,7 @@ class Parser {
 		if (rawName !== "happens" && rawName !== "is" && rawName !== "covers") {
 			throw this.error(nameToken, `Unknown macro '${rawName}'.`);
 		}
-		const name = rawName as MacroName;
+		const name: MacroName = rawName;
 
 		this.expectParen("(");
 		const args: string[] = [];
@@ -383,25 +387,32 @@ function evaluateExpression(
 	}
 }
 
+function extractDateOnly(value: string | null | undefined): string | null {
+	if (!value) return null;
+	return parseCanonicalDateTime(value)?.date ?? value.trim().slice(0, 10);
+}
+
 function evaluateMacro(
 	name: MacroName,
 	args: string[],
 	record: TaskDocumentRecord,
 ): boolean {
 	if (name === "happens") {
-		const targetDate = args[0] || todayString();
+		const rawTarget = args[0] || todayString();
+		const targetDate = extractDateOnly(rawTarget) ?? rawTarget;
 		const dates = record.task.dates;
 		return (
-			dates.start === targetDate ||
-			dates.scheduled === targetDate ||
-			dates.due === targetDate
+			extractDateOnly(dates.start) === targetDate ||
+			extractDateOnly(dates.scheduled) === targetDate ||
+			extractDateOnly(dates.due) === targetDate
 		);
 	}
 	if (name === "covers") {
-		const targetDate = args[0] || todayString();
+		const rawTarget = args[0] || todayString();
+		const targetDate = extractDateOnly(rawTarget) ?? rawTarget;
 		const dates = record.task.dates;
-		const start = dates.start;
-		const due = dates.due;
+		const start = extractDateOnly(dates.start);
+		const due = extractDateOnly(dates.due);
 		if (!start) return false;
 		if (start > targetDate) return false;
 		if (due) {
@@ -426,12 +437,12 @@ function evaluateMacro(
 				return status === "IN_PROGRESS";
 			case "overdue": {
 				if (!isOpen) return false;
-				const due = record.task.dates.due;
+				const due = extractDateOnly(record.task.dates.due);
 				return Boolean(due && due < today);
 			}
 			case "overdate": {
 				if (!isOpen) return false;
-				const scheduled = record.task.dates.scheduled;
+				const scheduled = extractDateOnly(record.task.dates.scheduled);
 				return Boolean(scheduled && scheduled < today);
 			}
 			case "blocked": {
@@ -531,6 +542,16 @@ function compareValues(left: LiteralValue, right: LiteralValue): number {
 	if (left === null || right === null) {
 		return left === null ? -1 : 1;
 	}
+
+	const leftDt = parseCanonicalDateTime(leftStr);
+	const rightDt = parseCanonicalDateTime(rightStr);
+	if (leftDt && rightDt) {
+		if (!leftDt.hasTime || !rightDt.hasTime) {
+			return leftDt.date.localeCompare(rightDt.date);
+		}
+		return leftDt.full.localeCompare(rightDt.full);
+	}
+
 	return String(left).localeCompare(String(right));
 }
 
@@ -762,7 +783,7 @@ function resolveBaseDate(val: string): string {
 	if (offset) {
 		return computeRelativeDate(today, offset.amount, offset.unit);
 	}
-	return trimmed;
+	return parseCanonicalDateTime(trimmed)?.date ?? trimmed;
 }
 
 function applyDateOffset(base: string, offsetStr: string): string {

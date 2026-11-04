@@ -24,6 +24,7 @@ export interface TaskLiteSettings {
 	autoSuggestInEditor: boolean;
 	toggleBehavior: ToggleBehaviorSettings;
 	assignees: string[];
+	defaultAssignee: string;
 	preferredTaskFormat: "dataview" | "emoji";
 }
 
@@ -46,6 +47,7 @@ export const DEFAULT_SETTINGS: TaskLiteSettings = {
 	autoSuggestInEditor: true,
 	toggleBehavior: DEFAULT_TOGGLE_BEHAVIOR,
 	assignees: [],
+	defaultAssignee: "",
 	preferredTaskFormat: "dataview",
 };
 
@@ -241,16 +243,10 @@ export class TaskLiteSettingTab extends PluginSettingTab {
 			.setName(t("settings.assignees.myDefault.name"))
 			.setDesc(t("settings.assignees.myDefault.desc"))
 			.addText((text) => {
-				const current = (typeof window !== "undefined" && window.localStorage?.getItem("tasklite-my-identity")) || "";
-				text.setValue(current).onChange((val) => {
-					const trimmed = val.trim();
-					if (typeof window !== "undefined" && window.localStorage) {
-						if (trimmed) {
-							window.localStorage.setItem("tasklite-my-identity", trimmed);
-						} else {
-							window.localStorage.removeItem("tasklite-my-identity");
-						}
-					}
+				const current = this.plugin.settings.defaultAssignee || "";
+				text.setValue(current).onChange(async (val) => {
+					this.plugin.settings.defaultAssignee = val.trim();
+					await this.plugin.saveSettings();
 				});
 			});
 	}
@@ -305,6 +301,8 @@ function pickKnownKeys(obj: Partial<TaskLiteSettings>): Partial<TaskLiteSettings
 		autoSuggestInEditor,
 		toggleBehavior,
 		assignees,
+		defaultAssignee,
+		preferredTaskFormat,
 	} = obj;
 	return {
 		setCreatedDate,
@@ -314,5 +312,7 @@ function pickKnownKeys(obj: Partial<TaskLiteSettings>): Partial<TaskLiteSettings
 		autoSuggestInEditor,
 		toggleBehavior,
 		assignees,
+		defaultAssignee,
+		preferredTaskFormat,
 	};
 }

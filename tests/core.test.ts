@@ -67,7 +67,17 @@ const fakeMoment: FakeMomentFactory = (value?: string) => {
 	};
 };
 
-(globalThis as unknown as {window: {moment: FakeMomentFactory}}).window = {moment: fakeMoment};
+(globalThis as unknown as {
+	window: {
+		moment: FakeMomentFactory;
+		setTimeout: typeof setTimeout;
+		clearTimeout: typeof clearTimeout;
+	};
+}).window = {
+	moment: fakeMoment,
+	setTimeout: globalThis.setTimeout.bind(globalThis),
+	clearTimeout: globalThis.clearTimeout.bind(globalThis),
+};
 
 const settings: TaskLiteSettings = {
 	preferredTaskFormat: "emoji",
@@ -76,6 +86,8 @@ const settings: TaskLiteSettings = {
 	setCancelledDate: true,
 	copySubtasksOnRecurrence: true,
 	autoSuggestInEditor: true,
+	assignees: [],
+	defaultAssignee: "",
 	toggleBehavior: {
 		cascadeFinish: true,
 		cascadeCancel: true,
@@ -2786,6 +2798,7 @@ describe("TaskLite 0.4.5 Features", () => {
 
 			const app = {
 				vault: {
+					configDir: ".obsidian",
 					on: () => {},
 					getMarkdownFiles: () => [fileA, fileB],
 					cachedRead: () => {
@@ -2864,6 +2877,7 @@ describe("TaskLite 0.4.5 Features", () => {
 
 			const app = {
 				vault: {
+					configDir: ".obsidian",
 					on: () => {},
 					getMarkdownFiles: () => [fileA, fileB],
 					cachedRead: (f: any) => {
@@ -3348,20 +3362,12 @@ describe("TaskLite 0.4.5 Features", () => {
 
 			test("assignee autocomplete prioritizes default assignee at the top", async () => {
 				const { TaskLiteEmojiSuggest } = await import("../src/suggest/emojiSuggest");
-				// Mock localStorage
-				const originalLocalStorage = globalThis.localStorage;
-				(globalThis as any).window = {
-					localStorage: {
-						getItem: (k: string) => (k === "tasklite-my-identity" ? "Sunny" : null),
-						setItem: () => {},
-						removeItem: () => {},
-					},
-				};
 
 				const mockPlugin = {
 					settings: {
 						autoSuggestInEditor: true,
 						assignees: ["Alice", "Bob"],
+						defaultAssignee: "Sunny",
 					},
 					app: {},
 				};
@@ -3372,8 +3378,6 @@ describe("TaskLite 0.4.5 Features", () => {
 				expect(suggestions[0].name).toBe("Sunny"); // Default identity prioritized first!
 				expect(suggestions[1].name).toBe("Alice");
 				expect(suggestions[2].name).toBe("Bob");
-
-				(globalThis as any).window.localStorage = originalLocalStorage;
 			});
 
 			test("isDataviewEnabled detects presence of active dataview plugin", async () => {
@@ -3398,17 +3402,22 @@ describe("TaskLite 0.4.5 Features", () => {
 				expect(isDataviewEnabled(appActiveDataview as any)).toBe(true);
 			});
 
-			const createMockEl = (tag: string) => {
+			const createMockEl = (tag: string, info?: any) => {
 				const children: any[] = [];
 				const attrs: Record<string, string> = {};
 				const elObj: any = {
 					tagName: tag.toUpperCase(),
-					className: "",
-					textContent: "",
+					className: info?.cls ?? "",
+					textContent: info?.text ?? "",
 					children,
 					appendChild(c: any) { children.push(c); },
 					setAttribute(k: string, v: string) { attrs[k] = v; },
 					getAttribute(k: string) { return attrs[k]; },
+					createSpan(childInfo?: any) {
+						const child = createMockEl("span", childInfo);
+						children.push(child);
+						return child;
+					},
 					classList: {
 						contains(cls: string) {
 							return elObj.className.split(" ").includes(cls);
@@ -3420,6 +3429,11 @@ describe("TaskLite 0.4.5 Features", () => {
 						return null;
 					},
 				};
+				if (info?.attr) {
+					for (const [k, v] of Object.entries(info.attr)) {
+						attrs[k] = String(v);
+					}
+				}
 				return elObj;
 			};
 
@@ -3427,6 +3441,8 @@ describe("TaskLite 0.4.5 Features", () => {
 				const { InlineFieldWidget } = await import("../src/rendering/inlineFieldFallback");
 				const origDoc = globalThis.document;
 				(globalThis as any).document = { createElement: createMockEl };
+				(globalThis as any).createSpan = (info?: any) => createMockEl("span", info);
+				(globalThis as any).createFragment = () => ({ appendChild: () => {} });
 
 				const widget = new InlineFieldWidget("due", "2026-06-14", "[due:: 2026-06-14]");
 				const dom = widget.toDOM();
@@ -3456,6 +3472,8 @@ describe("TaskLite 0.4.5 Features", () => {
 					createElement: createMockEl,
 					createTreeWalker: () => ({ nextNode: () => false }),
 				};
+				(globalThis as any).createSpan = (info?: any) => createMockEl("span", info);
+				(globalThis as any).createFragment = () => ({ appendChild: () => {} });
 
 				const appNoDataview = { plugins: { plugins: {}, enabledPlugins: new Set() } };
 				const processor = createInlineFieldPostProcessor(appNoDataview as any);
@@ -3581,24 +3599,142 @@ describe("TaskLite 0.4.5 Features", () => {
 				expect(() => filterTaskRecordsByQuery(records, "has(children)")).toThrow();
 				expect(() => filterTaskRecordsByQuery(records, 'on("2026-05-20")')).toThrow();
 				expect(() => filterTaskRecordsByQuery(records, 'happen("2026-05-20")')).toThrow();
+			});
 
+			test("normalizes single-digit dates and HH:mm times across parsing, DQL, and when done recurrence", () => {
+				const registry = new StatusRegistry();
+				// 1. Parse single-digit day & hour in Dataview inline field and Emoji format
+				const dvTask = parseTaskLine(
+					"- [ ] Quota reset [scheduled:: 2026-5-5 3:00] [recurrence:: every week when done]",
+					"TODO",
+				);
+				expect(dvTask?.data.dates.scheduled).toBe("2026-05-05 03:00");
 
+				const emojiTask = parseTaskLine(
+					"- [ ] Quota reset ⏳ 2026-5-9 7:00 🔁 every week when done",
+					"TODO",
+				);
+				expect(emojiTask?.data.dates.scheduled).toBe("2026-05-09 07:00");
 
+				// 2. DQL macros and date(...) comparisons with HH:mm times (today is 2026-05-16)
+				const timedRecords: TaskDocumentRecord[] = [
+					createQueryRecord({
+						path: "Plan.md",
+						lineNumber: 0,
+						parentLine: null,
+						description: "Overdue timed",
+						status: "TODO",
+						scheduled: "2026-05-05 03:00",
+					}),
+					createQueryRecord({
+						path: "Plan.md",
+						lineNumber: 1,
+						parentLine: null,
+						description: "Today timed",
+						status: "TODO",
+						scheduled: "2026-05-16 17:00",
+					}),
+					createQueryRecord({
+						path: "Plan.md",
+						lineNumber: 2,
+						parentLine: null,
+						description: "Tomorrow timed",
+						status: "TODO",
+						scheduled: "2026-05-17 03:00",
+					}),
+					createQueryRecord({
+						path: "Plan.md",
+						lineNumber: 3,
+						parentLine: null,
+						description: "Next week boundary timed",
+						status: "TODO",
+						scheduled: "2026-05-23 17:00",
+					}),
+				];
 
+				expect(
+					filterTaskRecordsByQuery(timedRecords, "is(overdate)").map(
+						(r) => r.task.description,
+					),
+				).toEqual(["Overdue timed"]);
+				expect(
+					filterTaskRecordsByQuery(timedRecords, "happens(today)").map(
+						(r) => r.task.description,
+					),
+				).toEqual(["Today timed"]);
+				expect(
+					filterTaskRecordsByQuery(timedRecords, "happens(tomorrow)").map(
+						(r) => r.task.description,
+					),
+				).toEqual(["Tomorrow timed"]);
+				expect(
+					filterTaskRecordsByQuery(
+						timedRecords,
+						"scheduled > date(tomorrow) AND scheduled <= date(next-week)",
+					).map((r) => r.task.description),
+				).toEqual(["Next week boundary timed"]);
 
+				// 3. Recurrence with when done and HH:mm updates to current HH:mm when moment provides time
+				const prevMoment = (globalThis as any).window.moment;
+				(globalThis as any).window.moment = (value?: string) => {
+					const date = value ? parseDate(value) : new Date(Date.UTC(2026, 4, 16, 17, 25));
+					return {
+						format: (fmt?: string) => (fmt === "HH:mm" ? "17:25" : formatDate(date)),
+						isValid: () => !Number.isNaN(date.getTime()),
+					};
+				};
+				try {
+					const toggled = toggleTaskAtLine({
+						lines: [
+							"- [ ] Quota reset [scheduled:: 2026-5-5 3:00] [recurrence:: every week when done]",
+						],
+						lineNumber: 0,
+						metadata: null,
+						registry,
+						settings: { ...settings, preferredTaskFormat: "dataview" },
+					});
+					expect(toggled?.replacement[0]).toContain(
+						"[scheduled:: 2026-05-23 17:25]",
+					);
+				} finally {
+					(globalThis as any).window.moment = prevMoment;
+				}
+			});
 
+			test("invalidates compiled DQL query cache when today changes across days", () => {
+				const records: TaskDocumentRecord[] = [
+					createQueryRecord({
+						path: "Plan.md",
+						lineNumber: 0,
+						parentLine: null,
+						description: "Day 18 Task",
+						status: "TODO",
+						scheduled: "2026-05-18 09:00",
+					}),
+				];
 
+				// On 2026-05-16, happens(today) should not match 2026-05-18
+				expect(filterTaskRecordsByQuery(records, "happens(today)")).toHaveLength(0);
 
-
-
-
-
-
-
-
-
-
-
+				// Advance fakeMoment by 2 days to 2026-05-18
+				const prevMoment = (globalThis as any).window.moment;
+				(globalThis as any).window.moment = (value?: string) => {
+					const date = value ? parseDate(value) : new Date(Date.UTC(2026, 4, 18));
+					return {
+						format: () => formatDate(date),
+						isValid: () => !Number.isNaN(date.getTime()),
+					};
+				};
+				try {
+					// Same query string "happens(today)" must re-evaluate for 2026-05-18
+					expect(
+						filterTaskRecordsByQuery(records, "happens(today)").map(
+							(r) => r.task.description,
+						),
+					).toEqual(["Day 18 Task"]);
+				} finally {
+					(globalThis as any).window.moment = prevMoment;
+				}
 			});
 		});
 	});

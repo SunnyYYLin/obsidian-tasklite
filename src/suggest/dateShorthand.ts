@@ -494,7 +494,10 @@ function isValidDate(year: number, month: number, day: number): boolean {
 // ---------------------------------------------------------------------------
 
 function currentLocale(): "zh" | "en" {
-	const maybeWindow = globalThis as {window?: {moment?: {locale?: () => string}}; navigator?: {language?: string}};
-	const locale = (maybeWindow.window?.moment?.locale?.() ?? maybeWindow.navigator?.language ?? "en").toLowerCase();
+	const momentLocale =
+		typeof window !== "undefined" ? window.moment?.locale?.() : undefined;
+	const navLang =
+		typeof navigator !== "undefined" ? navigator.language : undefined;
+	const locale = (momentLocale ?? navLang ?? "en").toLowerCase();
 	return locale.startsWith("zh") ? "zh" : "en";
 }

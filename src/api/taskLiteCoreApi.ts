@@ -9,6 +9,7 @@ import {
 import { findOpenMarkdownEditor, getVaultIndentConfig } from "../editor/editorUtils";
 import {
 	copyTaskData,
+	normalizeTaskDateValue,
 	parseLineWithStatus,
 	resolveDueDateFromStart,
 	serializeTaskLine,
@@ -419,11 +420,9 @@ export function createTaskLiteCoreApi({
 			return result?.replacement.join("\n") ?? line;
 		},
 		listAssignees: async () => {
-			const configured = getSettings().assignees || [];
-			const defaultIdentity =
-				typeof window !== "undefined" && window.localStorage
-					? window.localStorage.getItem("tasklite-my-identity")?.trim()
-					: null;
+			const settings = getSettings();
+			const configured = settings.assignees || [];
+			const defaultIdentity = settings.defaultAssignee?.trim() || null;
 			const set = new Set(configured);
 			if (defaultIdentity) {
 				set.add(defaultIdentity);
@@ -435,12 +434,7 @@ export function createTaskLiteCoreApi({
 			return list;
 		},
 		getDefaultAssignee: () => {
-			if (typeof window !== "undefined" && window.localStorage) {
-				return (
-					window.localStorage.getItem("tasklite-my-identity")?.trim() || ""
-				);
-			}
-			return "";
+			return getSettings().defaultAssignee?.trim() || "";
 		},
 		generateTaskId: (description, options) => {
 			const existingIds = new Set<string>();
@@ -548,13 +542,13 @@ async function createTask({
 			description: input.description,
 			priority: normalizePriority(input.priority),
 			dates: {
-				start: input.dates?.start ?? null,
-				created: input.dates?.created ?? null,
-				scheduled: input.dates?.scheduled ?? null,
-				due: input.dates?.due ?? null,
-				done: input.dates?.done ?? null,
-				cancelled: input.dates?.cancelled ?? null,
-				remind: input.dates?.remind ?? null,
+				start: input.dates?.start ? normalizeTaskDateValue(input.dates.start) : null,
+				created: input.dates?.created ? normalizeTaskDateValue(input.dates.created) : null,
+				scheduled: input.dates?.scheduled ? normalizeTaskDateValue(input.dates.scheduled) : null,
+				due: input.dates?.due ? normalizeTaskDateValue(input.dates.due) : null,
+				done: input.dates?.done ? normalizeTaskDateValue(input.dates.done) : null,
+				cancelled: input.dates?.cancelled ? normalizeTaskDateValue(input.dates.cancelled) : null,
+				remind: input.dates?.remind ? normalizeTaskDateValue(input.dates.remind) : null,
 			},
 			recurrence: input.recurrence ?? null,
 			onCompletion: input.onCompletion ?? null,
@@ -819,13 +813,13 @@ async function editFileTask({
 	if (patch.location !== undefined) data.location = patch.location;
 	if (patch.dates) {
 		const d = patch.dates;
-		if (d.start !== undefined) data.dates.start = d.start;
-		if (d.scheduled !== undefined) data.dates.scheduled = d.scheduled;
-		if (d.due !== undefined) data.dates.due = d.due;
-		if (d.remind !== undefined) data.dates.remind = d.remind;
-		if (d.done !== undefined) data.dates.done = d.done;
-		if (d.cancelled !== undefined) data.dates.cancelled = d.cancelled;
-		if (d.created !== undefined) data.dates.created = d.created;
+		if (d.start !== undefined) data.dates.start = d.start ? normalizeTaskDateValue(d.start) : null;
+		if (d.scheduled !== undefined) data.dates.scheduled = d.scheduled ? normalizeTaskDateValue(d.scheduled) : null;
+		if (d.due !== undefined) data.dates.due = d.due ? normalizeTaskDateValue(d.due) : null;
+		if (d.remind !== undefined) data.dates.remind = d.remind ? normalizeTaskDateValue(d.remind) : null;
+		if (d.done !== undefined) data.dates.done = d.done ? normalizeTaskDateValue(d.done) : null;
+		if (d.cancelled !== undefined) data.dates.cancelled = d.cancelled ? normalizeTaskDateValue(d.cancelled) : null;
+		if (d.created !== undefined) data.dates.created = d.created ? normalizeTaskDateValue(d.created) : null;
 	}
 
 	const updatedTask: TaskLine = { ...node.task, data };

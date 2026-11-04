@@ -56,24 +56,29 @@ export class InlineFieldWidget extends WidgetType {
 
 	toDOM(): HTMLElement {
 		const normKey = this.key.toLowerCase().trim();
-		const span = document.createElement("span");
-		span.className = "dataview inline-field tasklite-fallback";
-		span.setAttribute("data-dv-key", normKey);
-		span.setAttribute("data-dv-norm-key", normKey);
-		span.setAttribute("data-dv-value", this.value.toLowerCase().trim());
+		const span = createSpan({
+			cls: "dataview inline-field tasklite-fallback",
+			attr: {
+				"data-dv-key": normKey,
+				"data-dv-norm-key": normKey,
+				"data-dv-value": this.value.toLowerCase().trim(),
+			},
+		});
 
-		const keySpan = document.createElement("span");
-		keySpan.className = "inline-field-key";
-		keySpan.setAttribute("data-dv-key", normKey);
-		keySpan.setAttribute("data-dv-norm-key", normKey);
-		keySpan.textContent = this.key;
+		span.createSpan({
+			cls: "inline-field-key",
+			text: this.key,
+			attr: {
+				"data-dv-key": normKey,
+				"data-dv-norm-key": normKey,
+			},
+		});
 
-		const valSpan = document.createElement("span");
-		valSpan.className = "inline-field-value";
-		valSpan.textContent = this.value;
+		span.createSpan({
+			cls: "inline-field-value",
+			text: this.value,
+		});
 
-		span.appendChild(keySpan);
-		span.appendChild(valSpan);
 		return span;
 	}
 
@@ -194,7 +199,7 @@ export function createInlineFieldPostProcessor(app: App) {
 
 		for (const { node, parent } of nodesToReplace) {
 			const text = node.nodeValue ?? "";
-			const frag = document.createDocumentFragment();
+			const frag = createFragment();
 			let lastIdx = 0;
 			for (const match of text.matchAll(INLINE_FIELD_REGEX)) {
 				const rawKey = match[1]?.trim() ?? "";

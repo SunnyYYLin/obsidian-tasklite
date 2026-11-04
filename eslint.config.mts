@@ -12,7 +12,7 @@ export default tseslint.config(
 			parserOptions: {
 				projectService: {
 					allowDefaultProject: [
-						'eslint.config.js',
+						'eslint.config.mts',
 						'manifest.json',
 						'tests/*.ts'
 					]
@@ -23,6 +23,11 @@ export default tseslint.config(
 		},
 	},
 	...obsidianmd.configs.recommended,
+	{
+		rules: {
+			'obsidianmd/settings-tab/prefer-setting-definitions': 'off',
+		},
+	},
 	{
 		files: ['tests/**/*.ts'],
 		rules: {
@@ -37,6 +42,9 @@ export default tseslint.config(
 			'no-console': 'off',
 			'@typescript-eslint/no-unused-vars': 'warn',
 			'obsidianmd/hardcoded-config-path': 'off',
+			'obsidianmd/rule-custom-message': 'off',
+			'obsidianmd/no-global-this': 'off',
+			'obsidianmd/prefer-window-timers': 'off',
 		},
 	},
 	globalIgnores([

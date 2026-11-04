@@ -477,7 +477,7 @@
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) auto;
 		align-items: start;
-		column-gap: 0.75rem;
+		gap: 0 0.75rem;
 	}
 
 	.taskslite-modal .setting-item.taskslite-modal-setting-compact .setting-item-info {
@@ -569,16 +569,14 @@
 	}
 
 	.taskslite-list-item-meta {
-		row-gap: 0.125rem;
-		column-gap: 0.25rem;
+		gap: 0.125rem 0.25rem;
 		font-size: 0.78rem;
 	}
 
 	.taskslite-list-item-context,
 	.taskslite-list-item-dates,
 	.taskslite-list-item-details {
-		row-gap: 0.125rem;
-		column-gap: 0.25rem;
+		gap: 0.125rem 0.25rem;
 	}
 
 	.taskslite-list-actions {
@@ -705,7 +703,7 @@
 .dataview.inline-field-key[data-dv-norm-key="loc" i],
 .dataview.inline-field[data-dv-key="loc" i] .inline-field-key,
 .dataview.inline-field[data-dv-norm-key="loc" i] .inline-field-key {
-	font-size: 0 !important;
+	font-size: 0;
 	padding-left: 6px;
 	padding-right: 6px;
 }

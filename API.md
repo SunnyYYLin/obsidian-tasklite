@@ -1,6 +1,6 @@
 # TaskLite Plugin API
 
-> **Version**: 0.5.0  
+> **Version**: 0.5.1  
 > **Plugin ID**: `taskslite`
 
 本文档面向希望基于 TaskLite 插件开发新插件的开发者。
@@ -929,6 +929,7 @@ async function archiveCompletedTasks(app: App, api: TaskLiteCoreApi) {
 
 | 版本 | 新增 API |
 |------|---------|
+| 0.5.1 | 增强单数字月日时分及带时分日期在 DQL 查询与任务创建/修改时的规范化解析与生命周期处理 |
 | 0.4.6 | 新增 `generateTaskId` API，根据任务描述生成语义化 ID |
 | 0.4.5 | 新增 `listAssignees` API，返回库中所有负责人的去重集合 |
 | 0.4.3-alpha.0 | `listTasks` 现在返回所有任务（包括 Frontmatter 定义的文件级任务和普通行级任务） |

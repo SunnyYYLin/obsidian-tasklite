@@ -1,7 +1,7 @@
 import type { App, CachedMetadata, Plugin, TFile } from "obsidian";
 import { buildTaskTree, taskDepth, getTaskParentLine, type TaskTree } from "./tree";
 import type { StatusRegistry } from "./status";
-import type { TaskData } from "./format";
+import { normalizeTaskDateValue, type TaskData } from "./format";
 import { parseFrontmatterTask, type FrontmatterTaskRecord } from "./frontmatterTask";
 
 export type { FrontmatterTaskRecord };
@@ -42,12 +42,12 @@ export class TaskDocumentStore {
 	private readonly recordsByPath = new Map<string, TaskDocumentRecord[]>();
 	private readonly dirtyPaths = new Set<string>();
 	private readonly cachedMtimes = new Map<string, number>();
-	private readonly rebuildTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	private readonly rebuildTimers = new Map<string, number>();
 	private indexedAllFiles = false;
 	private cacheLoaded = false;
 	private loadCachePromise: Promise<void> | null = null;
 	private indexingPromise: Promise<void> | null = null;
-	private saveTimer: ReturnType<typeof setTimeout> | null = null;
+	private saveTimer: number | null = null;
 
 	onRecordUpdated?: (path: string, records: TaskDocumentRecord[]) => void;
 	onTasksCompleted?: (completedIds: string[]) => void;
@@ -97,12 +97,12 @@ export class TaskDocumentStore {
 	}
 
 	private getCachePath(): string {
-		const configDir = this.app.vault.configDir || ".obsidian"; // eslint-disable-line obsidianmd/hardcoded-config-path
+		const configDir = this.app.vault.configDir;
 		return `${configDir}/plugins/taskslite/task-cache.json`;
 	}
 
 	private getPluginDir(): string {
-		const configDir = this.app.vault.configDir || ".obsidian"; // eslint-disable-line obsidianmd/hardcoded-config-path
+		const configDir = this.app.vault.configDir;
 		return `${configDir}/plugins/taskslite`;
 	}
 
@@ -123,6 +123,18 @@ export class TaskDocumentStore {
 					if (snapshot && snapshot.version === 1 && snapshot.files && typeof snapshot.files === "object") {
 						for (const [path, entry] of Object.entries(snapshot.files)) {
 							if (entry && typeof entry.mtime === "number" && Array.isArray(entry.records)) {
+								for (const rec of entry.records) {
+									if (rec?.task?.dates) {
+										const d = rec.task.dates;
+										if (d.start) d.start = normalizeTaskDateValue(d.start);
+										if (d.created) d.created = normalizeTaskDateValue(d.created);
+										if (d.scheduled) d.scheduled = normalizeTaskDateValue(d.scheduled);
+										if (d.due) d.due = normalizeTaskDateValue(d.due);
+										if (d.done) d.done = normalizeTaskDateValue(d.done);
+										if (d.cancelled) d.cancelled = normalizeTaskDateValue(d.cancelled);
+										if (d.remind) d.remind = normalizeTaskDateValue(d.remind);
+									}
+								}
 								this.cachedMtimes.set(path, entry.mtime);
 								this.recordsByPath.set(path, entry.records);
 							}
@@ -144,9 +156,9 @@ export class TaskDocumentStore {
 	private scheduleSaveCache(): void {
 		if (!this.app.vault?.adapter) return;
 		if (this.saveTimer !== null) {
-			clearTimeout(this.saveTimer);
+			window.clearTimeout(this.saveTimer);
 		}
-		this.saveTimer = setTimeout(() => {
+		this.saveTimer = window.setTimeout(() => {
 			this.saveTimer = null;
 			void this.saveCache();
 		}, 1500);
@@ -154,7 +166,7 @@ export class TaskDocumentStore {
 
 	async saveCache(): Promise<void> {
 		if (this.saveTimer !== null) {
-			clearTimeout(this.saveTimer);
+			window.clearTimeout(this.saveTimer);
 			this.saveTimer = null;
 		}
 		if (!this.app.vault?.adapter) return;
@@ -223,7 +235,7 @@ export class TaskDocumentStore {
 		this.dirtyPaths.delete(path);
 		this.cachedMtimes.delete(path);
 		const timer = this.rebuildTimers.get(path);
-		if (timer !== undefined) clearTimeout(timer);
+		if (timer !== undefined) window.clearTimeout(timer);
 		this.rebuildTimers.delete(path);
 		this.scheduleSaveCache();
 		triggerWorkspaceEvent(this.app, "tasklite:tasks-changed", { path: path });
@@ -290,8 +302,8 @@ export class TaskDocumentStore {
 		this.invalidate(file.path);
 		if (!this.indexedAllFiles) return;
 		const existingTimer = this.rebuildTimers.get(file.path);
-		if (existingTimer !== undefined) clearTimeout(existingTimer);
-		const timer = setTimeout(() => {
+		if (existingTimer !== undefined) window.clearTimeout(existingTimer);
+		const timer = window.setTimeout(() => {
 			this.rebuildTimers.delete(file.path);
 			void this.rebuildFile(file);
 		}, 200);
@@ -438,11 +450,11 @@ export class TaskDocumentStore {
 	/** Cancel all pending debounce timers and clear cached state. Call on plugin unload. */
 	destroy(): void {
 		for (const timer of this.rebuildTimers.values()) {
-			clearTimeout(timer);
+			window.clearTimeout(timer);
 		}
 		this.rebuildTimers.clear();
 		if (this.saveTimer !== null) {
-			clearTimeout(this.saveTimer);
+			window.clearTimeout(this.saveTimer);
 			this.saveTimer = null;
 			void this.saveCache();
 		}

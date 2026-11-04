@@ -1,7 +1,7 @@
 import type { CachedMetadata, FileManager, TFile } from "obsidian";
 import type { StatusRegistry } from "./status";
 import type { TaskPriority, OnCompletionAction, TaskData } from "./format";
-import { resolveDueDateFromStart } from "./format";
+import { normalizeTaskDateValue, resolveDueDateFromStart, timeOnlyRegex } from "./format";
 import { normalizeAssignees } from "./assignee";
 
 /**
@@ -125,28 +125,26 @@ export function parseFrontmatterTask(
 	if (!fm || !fm["task"]) return null;
 	if (fm["tasks"] === "ignore") return null;
 
-	const rawStatus = typeof fm["status"] === "string" ? fm["status"] : null;
-	const statusSymbol = resolveStatusSymbol(fm["status"], registry);
+	const fmRecord = fm as Record<string, unknown>;
+	const rawStatus = typeof fmRecord["status"] === "string" ? fmRecord["status"] : null;
+	const statusSymbol = resolveStatusSymbol(fmRecord["status"], registry);
 	const statusConfig = registry.get(statusSymbol);
 
-	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-	const rawPriority = fm["priority"];
+	const rawPriority = fmRecord["priority"];
 	const priority: TaskPriority | null =
 		typeof rawPriority === "string" && rawPriority in PRIORITY_MAP
 			? (PRIORITY_MAP[rawPriority] ?? null)
 			: null;
 
-	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-	const rawOnCompletion = fm["onCompletion"] ?? fm["on_completion"];
-	// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+	const rawOnCompletion = fmRecord["onCompletion"] ?? fmRecord["on_completion"];
 	const onCompletion: OnCompletionAction | null =
 		rawOnCompletion === "delete" || rawOnCompletion === "keep"
 			? rawOnCompletion
 			: null;
 
 	const rawAssignee: unknown = parseFrontmatterAssigneeFromContent(content) ??
-		(fm as Record<string, unknown>)["assignee"] ??
-		(fm as Record<string, unknown>)["person"];
+		fmRecord["assignee"] ??
+		fmRecord["person"];
 	let assignee: string[] = [];
 	if (Array.isArray(rawAssignee)) {
 		assignee = rawAssignee
@@ -311,13 +309,11 @@ export async function applyFrontmatterPatch(
 	file: TFile,
 	patch: Record<string, unknown>,
 ): Promise<void> {
-	await fileManager.processFrontMatter(file, (fm) => {
+	await fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
 		for (const [key, value] of Object.entries(patch)) {
 			if (value === null || value === undefined) {
-				// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
 				delete fm[key];
 			} else {
-				// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
 				fm[key] = value;
 			}
 		}
@@ -342,8 +338,15 @@ export function applyFrontmatterPatchToContent(
 
 	const updated = new Map<string, string>();
 	for (const [key, value] of Object.entries(patch)) {
-		// eslint-disable-next-line @typescript-eslint/no-base-to-string
-		updated.set(key, value === null ? "" : String(value));
+		if (value === null || value === undefined) {
+			updated.set(key, "");
+		} else if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+			updated.set(key, String(value));
+		} else if (Array.isArray(value)) {
+			updated.set(key, value.map((item) => String(item)).join(" & "));
+		} else {
+			updated.set(key, JSON.stringify(value));
+		}
 	}
 
 	const resultLines: string[] = [];
@@ -384,10 +387,24 @@ export function applyFrontmatterPatchToContent(
 }
 
 function dateField(value: unknown): string | null {
+	if (value instanceof Date && !Number.isNaN(value.getTime())) {
+		const y = value.getFullYear().toString().padStart(4, "0");
+		const m = (value.getMonth() + 1).toString().padStart(2, "0");
+		const d = value.getDate().toString().padStart(2, "0");
+		const hh = value.getHours();
+		const mm = value.getMinutes();
+		if (hh === 0 && mm === 0) return `${y}-${m}-${d}`;
+		return `${y}-${m}-${d} ${hh.toString().padStart(2, "0")}:${mm.toString().padStart(2, "0")}`;
+	}
 	if (typeof value !== "string") return null;
-	return /^\d{4}-\d{2}-\d{2}(?: \d{1,2}:\d{2}(?:\s?[AaPp][Mm])?)?$/u.test(value) || /^\d{1,2}:\d{2}(?:\s?[AaPp][Mm])?$/u.test(
-		value,
-	)
-		? value
-		: null;
+	const trimmed = value.trim();
+	if (
+		/^\d{4}-\d{1,2}-\d{1,2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?(?:\s?[AaPp][Mm])?)?$/u.test(trimmed)
+	) {
+		return normalizeTaskDateValue(trimmed);
+	}
+	if (timeOnlyRegex.test(trimmed)) {
+		return trimmed;
+	}
+	return null;
 }
